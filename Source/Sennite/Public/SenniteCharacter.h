@@ -475,8 +475,9 @@ public:
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerRifleTimeOut();
 
-	UFUNCTION(Server, Reliable, WithValidation)
-	void ServerHealingItemTimeOut(int HealingItemType);
+	/** Run by the server's own timer when a healing item finishes; not callable by a client. */
+	UFUNCTION()
+	void HealingItemTimeOut(int HealingItemType);
 
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerShotgunReloadTimeOut();
@@ -499,8 +500,20 @@ public:
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerBuildStructure(TSubclassOf<ABuildingActor> StructureClass, FVector SpawnLocationFRotator, FRotator SpawnRotation, int StructureId);
 
-	UFUNCTION(Server, Reliable, WithValidation)
-	void ServerSetMaterialCount(int Count, int MaterialType);
+	/** The material a piece of this character's own lists is built from, or INDEX_NONE for any other class. */
+	int32 BuildingMaterialOf(TSubclassOf<ABuildingActor> StructureClass) const;
+
+	/** What one piece costs of its material. */
+	UPROPERTY(EditDefaultsOnly, Category = "Building")
+	int32 BuildingPieceCost = 10;
+
+	/** How far from this character the server builds a piece. */
+	UPROPERTY(EditDefaultsOnly, Category = "Building")
+	float MaxBuildReach = 1500.0f;
+
+	/** How far from this character the server lets a shot start. */
+	UPROPERTY(EditDefaultsOnly, Category = "Weapon")
+	float MaxMuzzleDistance = 400.0f;
 
 	UFUNCTION(Client, Reliable)
 	void ClientCameraAimIn();

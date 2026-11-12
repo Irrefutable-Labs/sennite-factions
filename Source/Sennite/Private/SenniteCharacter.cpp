@@ -859,7 +859,6 @@ void ASenniteCharacter::BuildStructure(float Value) {
 					State->MaterialCounts[CurrentBuildingMaterial] -= 10;
 
 					ServerBuildStructure(WallClasses[CurrentBuildingMaterial], GridLocation, GridRotation, Wall->Id);
-					ServerSetMaterialCount(State->MaterialCounts[CurrentBuildingMaterial], CurrentBuildingMaterial);
 				}
 				else if (State->InBuildMode && State->BuildMode == FString("Ramp") && State->MaterialCounts[CurrentBuildingMaterial] >= 10) {
 					TArray<AActor*> OverlappingActors;
@@ -921,7 +920,6 @@ void ASenniteCharacter::BuildStructure(float Value) {
 					State->MaterialCounts[CurrentBuildingMaterial] -= 10;
 
 					ServerBuildStructure(RampClasses[CurrentBuildingMaterial], GridLocation, GridRotation, Ramp->Id);
-					ServerSetMaterialCount(State->MaterialCounts[CurrentBuildingMaterial], CurrentBuildingMaterial);
 				}
 				else if (State->InBuildMode && State->BuildMode == FString("Floor") && State->MaterialCounts[CurrentBuildingMaterial] >= 10) {
 					TArray<AActor*> OverlappingActors;
@@ -985,7 +983,6 @@ void ASenniteCharacter::BuildStructure(float Value) {
 					State->MaterialCounts[CurrentBuildingMaterial] -= 10;
 
 					ServerBuildStructure(FloorClasses[CurrentBuildingMaterial], GridLocation, GridRotation, Floor->Id);
-					ServerSetMaterialCount(State->MaterialCounts[CurrentBuildingMaterial], CurrentBuildingMaterial);
 				}
 			}
 		}
@@ -1291,29 +1288,37 @@ bool ASenniteCharacter::ServerResetMovingRight_Validate() {
 	return true;
 }
 
-void ASenniteCharacter::ServerSetMaterialCount_Implementation(int Count, int MaterialType) {
-	if (GetController()) {
-		ASennitePlayerState* State = Cast<ASennitePlayerState>(GetController()->PlayerState);
-		if (State) {
-			State->MaterialCounts[MaterialType] = Count;
+void ASenniteCharacter::ServerBuildStructure_Implementation(TSubclassOf<ABuildingActor> StructureClass, FVector SpawnLocation, FRotator SpawnRotation, int StructureId) {
+	// The server builds only a piece of its own lists, within reach of this
+	// character, paid for from the count the server holds. The client's own
+	// copy of the piece is removed either way.
+	const int32 MaterialType = BuildingMaterialOf(StructureClass);
+	ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
+	if (MaterialType != INDEX_NONE && State != nullptr
+		&& State->MaterialCounts.IsValidIndex(MaterialType)
+		&& State->MaterialCounts[MaterialType] >= BuildingPieceCost
+		&& FVector::Dist(SpawnLocation, GetActorLocation()) <= MaxBuildReach) {
+		State->MaterialCounts[MaterialType] -= BuildingPieceCost;
+		GetWorld()->SpawnActor<ABuildingActor>(StructureClass, SpawnLocation, SpawnRotation);
+	}
+	ClientDestroyStructure(StructureId);
+}
+
+int32 ASenniteCharacter::BuildingMaterialOf(TSubclassOf<ABuildingActor> StructureClass) const {
+	if (StructureClass == nullptr) {
+		return INDEX_NONE;
+	}
+	for (const TArray<TSubclassOf<ABuildingActor>>* Pieces : { &WallClasses, &RampClasses, &FloorClasses }) {
+		const int32 Found = Pieces->Find(StructureClass);
+		if (Found != INDEX_NONE) {
+			return Found;
 		}
 	}
-}
-
-bool ASenniteCharacter::ServerSetMaterialCount_Validate(int Count, int MaterialType) {
-	return true;
-}
-
-void ASenniteCharacter::ServerBuildStructure_Implementation(TSubclassOf<ABuildingActor> StructureClass, FVector SpawnLocation, FRotator SpawnRotation, int StructureId) {
-	if (StructureClass != nullptr) {
-		GetWorld()->SpawnActor<ABuildingActor>(StructureClass, SpawnLocation, SpawnRotation);
-
-		ClientDestroyStructure(StructureId);
-	}
+	return INDEX_NONE;
 }
 
 bool ASenniteCharacter::ServerBuildStructure_Validate(TSubclassOf<ABuildingActor> StructureClass, FVector SpawnLocation, FRotator SpawnRotation, int StructureId) {
-	return true;
+	return !SpawnLocation.ContainsNaN() && !SpawnRotation.ContainsNaN();
 }
 
 void ASenniteCharacter::ServerSetBuildModeWall_Implementation() {
@@ -1622,7 +1627,7 @@ void ASenniteCharacter::ServerUseHealingItem_Implementation(int HealingItemType)
 			State->HealingItemCounts[HealingItemType]--;
 			FTimerHandle HealingItemTimerHandle;
 			FTimerDelegate HealingItemTimerDelegate;
-			HealingItemTimerDelegate.BindUFunction(this, FName("ServerHealingItemTimeOut"), HealingItemType);
+			HealingItemTimerDelegate.BindUFunction(this, FName("HealingItemTimeOut"), HealingItemType);
 			GetWorldTimerManager().SetTimer(HealingItemTimerHandle, HealingItemTimerDelegate, 3.321f, false);
 		}
 	}
@@ -2031,7 +2036,7 @@ bool ASenniteCharacter::ServerShotgunTimeOut_Validate() {
 }
 
 
-void ASenniteCharacter::ServerHealingItemTimeOut_Implementation(int HealingItemType) {
+void ASenniteCharacter::HealingItemTimeOut(int HealingItemType) {
 	if (HealingItemType == 0) {
 		if (Health < 100) {
 			if (Health + 15 > 100) {
@@ -2058,10 +2063,6 @@ void ASenniteCharacter::ServerHealingItemTimeOut_Implementation(int HealingItemT
 			State->JustUsedHealingItem = false;
 		}
 	}
-}
-
-bool ASenniteCharacter::ServerHealingItemTimeOut_Validate(int HealingItemType) {
-	return true;
 }
 
 void ASenniteCharacter::ServerApplyStormDamage_Implementation() {
@@ -2121,7 +2122,7 @@ bool ASenniteCharacter::ServerShotgunReloadTimeOut_Validate() {
 }
 
 void ASenniteCharacter::ServerSpawnProjectile_Implementation(FTransform SpawnTransform) { // to do add current weapon null check
-	if (CurrentWeapon != nullptr) {
+	if (CurrentWeapon != nullptr && FVector::Dist(SpawnTransform.GetLocation(), GetActorLocation()) <= MaxMuzzleDistance) {
 		auto Bullet = Cast<AProjectileActor>(UGameplayStatics::BeginDeferredActorSpawnFromClass(this, CurrentWeapon->BulletClass, SpawnTransform, ESpawnActorCollisionHandlingMethod::AlwaysSpawn));
 		if (Bullet != nullptr)
 		{
@@ -2136,7 +2137,7 @@ void ASenniteCharacter::ServerSpawnProjectile_Implementation(FTransform SpawnTra
 }
 
 bool ASenniteCharacter::ServerSpawnProjectile_Validate(FTransform SpawnTransform) {
-	return true;
+	return !SpawnTransform.ContainsNaN();
 }
 
 void ASenniteCharacter::ServerSpawnAndAttachWeapon_Implementation(int WeaponType, FTransform SpawnTransform) {
