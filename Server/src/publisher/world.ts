@@ -22,10 +22,30 @@ export interface Economy {
   grant: { perRequest: string; total: string };
 }
 
+/** A skin the publisher's shop sells (spec 10.5): each one sold is an object of which one exists. */
+export interface SkinForSale {
+  id: string;
+  name: string;
+  /** Its price in D-bucks, in whole units. */
+  price: string;
+}
+
+/** The game's currency, the publisher's vault that sells it for ERA, and the shop (spec 10.5). */
+export interface ShopWorld {
+  /** D-bucks: an object the publisher's account issues with a fixed maximum supply. */
+  currency: ResourceIssue;
+  /** What the publisher's vault is opened with, and its fee in hundredths of a percent. */
+  vault: { era: string; dbucks: string; feeBps: number };
+  /** What the grant lets the game ask for without asking the player again. */
+  grant: { era: { perRequest: string; total: string }; dbucks: { perRequest: string; total: string } };
+  skins: SkinForSale[];
+}
+
 export interface World {
   catalogue: Catalogue;
   parcels: Map<string, Parcel>;
   economy: Economy;
+  shop: ShopWorld;
 }
 
 /** The world folder shipped beside the server. */
@@ -38,7 +58,9 @@ export function loadWorld(dir: string = WORLD_DIR): World {
   for (const resource of catalogue.resources) {
     if (!economy.resources.some((r) => r.symbol === resource)) throw new Error(`nothing issues the catalogue's resource ${resource}`);
   }
-  return { catalogue, parcels: readParcels(bytes("parcels.json")), economy };
+  const shop = JSON.parse(new TextDecoder().decode(bytes("shop.json"))) as ShopWorld;
+  if (new Set(shop.skins.map((k) => k.id)).size !== shop.skins.length) throw new Error("the shop lists a skin twice");
+  return { catalogue, parcels: readParcels(bytes("parcels.json")), economy, shop };
 }
 
 /**

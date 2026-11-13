@@ -38,6 +38,7 @@ const publisher = new Publisher({
   store,
   catalogue: world.catalogue,
   parcels: world.parcels,
+  shop: world.shop,
   storageSet: storageSetOf(required("DSM_ENV_CONFIG")),
   name: "Sennite: Factions",
   now: Date.now,

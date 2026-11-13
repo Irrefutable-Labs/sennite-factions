@@ -316,6 +316,43 @@ export class Service {
       };
     }
 
+    // The shop: the game's currency and the skins the publisher sells for it (spec 10.5).
+    if (is("GET", "shop")) {
+      const shop = publisher.shop.world;
+      return { status: 200, body: { currency: { symbol: shop.currency.symbol, name: shop.currency.name }, skins: shop.skins } };
+    }
+
+    // The wallet trades ERA for D-bucks through the publisher's vault, at the price the vault's reserves set.
+    if (is("POST", "shop", "dbucks")) {
+      const player = this.player(req);
+      const connection = await this.connected(player);
+      const era = text((await body(req)).era, "era");
+      if (!/^[0-9]{1,6}(\.[0-9]{1,2})?$/.test(era) || Number(era) <= 0) throw new HttpError(400, "the ERA to trade is not an amount above zero");
+      return {
+        status: 202,
+        body: this.start(player, async () => {
+          const quoted = await publisher.shop.price(connection, era);
+          // the price is the vault's at the time of the trade: a little less than quoted is taken, much less is not
+          const traded = await publisher.shop.buyDbucks(connection, era, Math.floor(quoted * 0.97));
+          return traded.ok ? { ok: true, message: `${era} ERA traded for D-bucks` } : { ok: false, message: traded.why };
+        }),
+      };
+    }
+
+    // The wallet buys a skin: it pays in D-bucks, and the publisher's account issues the skin and gives it once it has the payment.
+    if (is("POST", "shop", "skins")) {
+      const player = this.player(req);
+      const connection = await this.connected(player);
+      const skin = publisher.shop.skin(text((await body(req)).skinId, "skinId"));
+      return {
+        status: 202,
+        body: this.start(player, async () => {
+          const sold = await publisher.shop.buySkin(connection, skin.id);
+          return sold.ok ? { ok: true, message: `${sold.skin.name} #${sold.skin.serial} is the wallet's` } : { ok: false, message: sold.why };
+        }),
+      };
+    }
+
     // The wallets connected to the game that are in no faction: who a member can invite.
     if (is("GET", "players", "free")) {
       const caller = await this.connected(this.player(req));
@@ -337,10 +374,10 @@ export class Service {
       return {
         status: 202,
         body: this.start(player, async () => {
-          const materials = await publisher.materials(connection);
-          return materials === undefined
+          const holdings = await publisher.holdings(connection);
+          return holdings === undefined
             ? { ok: false, message: "the wallet proved nothing about what it holds" }
-            : { ok: true, message: "the wallet proved what it holds", data: { materials } };
+            : { ok: true, message: "the wallet proved what it holds", data: { ...holdings } };
         }),
       };
     }

@@ -69,6 +69,25 @@ export interface PlayerRecord {
   lastSeen?: number;
 }
 
+/** A skin the shop sold: the one object issued for it. */
+export interface SoldSkin {
+  /** Which skin of the shop it is. */
+  skinId: string;
+  /** Its number among the skins sold, and the symbol it was issued under. */
+  serial: number;
+  symbol: string;
+}
+
+/** The shop's own record (spec 10.5). Who owns what is never here: a wallet proves that. */
+export interface ShopRecord {
+  /** How many skins the shop has sold. */
+  serial: number;
+  /** object id (Base32 Crockford) -> the skin it is */
+  skins: Record<string, SoldSkin>;
+  /** payment (lowercase hex of the accepted transfer's id) -> the object it bought. A payment buys once. */
+  paid: Record<string, string>;
+}
+
 export interface StoreData {
   /** cell (its name and writer set, as `cellRecordKey` gives it) -> the writes asked there, in the order asked */
   asked: Record<string, AskedWrite[]>;
@@ -79,9 +98,10 @@ export interface StoreData {
    * player's place in the game; it is never DSM authority.
    */
   players: Record<string, PlayerRecord>;
+  shop: ShopRecord;
 }
 
-const empty = (): StoreData => ({ asked: {}, factions: {}, players: {} });
+const empty = (): StoreData => ({ asked: {}, factions: {}, players: {}, shop: { serial: 0, skins: {}, paid: {} } });
 
 export class Store {
   readonly data: StoreData;

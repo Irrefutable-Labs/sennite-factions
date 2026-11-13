@@ -4,6 +4,7 @@
  * account, called through its ingress as the wallet's screens call it. The game is not a party to
  * any of them.
  */
+import { readFile } from "node:fs/promises";
 import { IngressError, pb, type WalletAccount } from "dsm-app-client";
 import { unhex } from "../../src/faction/canonical.js";
 import type { Member } from "../../src/faction/state.js";
@@ -63,6 +64,11 @@ export async function holds(wallet: WalletAccount, symbol: string): Promise<{ av
   return { available: owned?.amount ?? 0n, locked };
 }
 
+/** What this wallet can spend of `symbol`: the number its own screen shows. */
+export async function spendable(wallet: WalletAccount, symbol: string): Promise<bigint> {
+  return (await wallet.owned()).find((o) => o.object.symbol === symbol)?.amount ?? 0n;
+}
+
 /** One outcome of an escrow vault's terms, as the wallet's own escrow screen names it. */
 export interface Branch {
   outcome: string;
@@ -108,4 +114,27 @@ export async function decideAndRelease(wallet: WalletAccount, vault: Uint8Array,
   );
   const release = "escrow.release";
   answered(release, await wallet.ingress.call("invoke", release, new pb.EscrowReleaseRequest({ vaultId: vault })), "sofiPositionResponse");
+}
+
+/**
+ * This wallet takes up an object by its id (Base32 Crockford), as a player does in the wallet's
+ * Add Token screen: a wallet receives only an object it has added. The route takes the id as text,
+ * so this goes to the wallet host's ingress directly, with this launch's secret.
+ */
+export async function takeUp(host: { url: string; secretFile: string }, object: string): Promise<void> {
+  const route = "tokens.addByAnchor";
+  const request = new pb.IngressRequest({
+    operation: { case: "routerInvoke", value: new pb.RouterInvokeOp({ method: route, args: new TextEncoder().encode(object) }) },
+  });
+  const response = await fetch(`${host.url}/ingress`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${await readFile(host.secretFile, "utf8")}`, "content-type": "application/x-protobuf" },
+    body: request.toBinary(),
+  });
+  if (!response.ok) throw new IngressError(route, response.status, await response.text());
+  const answer = pb.IngressResponse.fromBinary(new Uint8Array(await response.arrayBuffer()));
+  if (answer.result.case === "error") throw new IngressError(route, answer.result.value.code, answer.result.value.message);
+  if (answer.result.case !== "okBytes") throw new IngressError(route, 0, "the wallet answered nothing");
+  const envelope = pb.Envelope.fromBinary(answer.result.value.subarray(1));
+  if (envelope.payload.case === "error") throw new IngressError(route, envelope.payload.value.code, envelope.payload.value.message);
 }

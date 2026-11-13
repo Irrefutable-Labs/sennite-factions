@@ -25,8 +25,10 @@ import { judge } from "../faction/validity.js";
 import { AccountCells } from "../dsm/cells.js";
 import { Contributions, type Funding } from "../dsm/contributions.js";
 import { party, publishAuthored, readAuthored, type Party } from "../dsm/routes.js";
+import { Refused } from "./refused.js";
+import { Shop, type Purse } from "./shop.js";
 import type { Store } from "./store.js";
-import type { Economy } from "./world.js";
+import type { Economy, ShopWorld } from "./world.js";
 
 /** How long a leaver's materials stay committed after they go (spec 3): 48 hours. */
 export const NOTICE_MS = 48 * 60 * 60 * 1000;
@@ -37,6 +39,8 @@ export interface PublisherOptions {
   store: Store;
   catalogue: Catalogue;
   parcels: Map<string, Parcel>;
+  /** The game's currency, the vault that sells it and the shop (spec 10.5). */
+  shop: ShopWorld;
   /** The five member ids of the storage set the account is on. */
   storageSet: string[];
   /** The name wallets show for the game. */
@@ -79,6 +83,7 @@ export interface Structure {
 export class Publisher {
   readonly cells: AccountCells;
   readonly contributions: Contributions;
+  readonly shop: Shop;
   readonly #mirrors = new Map<string, Mirror>();
   readonly #walking = new Map<string, Promise<void>>();
   #party: Party | undefined;
@@ -86,6 +91,7 @@ export class Publisher {
   constructor(private readonly options: PublisherOptions) {
     this.cells = new AccountCells(options.app, options.store);
     this.contributions = new Contributions(options.app, options.store, options.catalogue);
+    this.shop = new Shop(options.app, options.store, options.shop);
   }
 
   get app(): AppAccount {
@@ -103,7 +109,9 @@ export class Publisher {
 
   /**
    * Issue each resource the account has not issued yet, with its fixed
-   * maximum supply (spec 8.1, 8.5). The account then holds the whole supply.
+   * maximum supply (spec 8.1, 8.5), and D-bucks with theirs, and open the
+   * vault that sells D-bucks for ERA (spec 10.5). The account then holds each
+   * whole supply but what it put in the vault.
    */
   async issueResources(economy: Economy): Promise<void> {
     const owned = new Set((await this.options.app.owned()).map((o) => o.object.symbol));
@@ -111,14 +119,16 @@ export class Publisher {
       if (owned.has(resource.symbol)) continue;
       await this.options.app.issue({ symbol: resource.symbol, name: resource.name, supply: resource.supply });
     }
+    await this.shop.open();
   }
 
   /**
    * The connect code a player's wallet reads. The grant lets the game ask the
    * wallet, without asking the player again, to sign and store changes to the
    * faction's state, to commit materials within caps and take them back, to
-   * prove what it owns of the materials, and to take in objects the publisher
-   * issued.
+   * trade ERA for D-bucks through the publisher's vault and pay D-bucks to the
+   * shop within caps, to prove what it owns of the materials, D-bucks and ERA,
+   * and to take in objects the publisher issued.
    */
   async offer(caps: { symbol: string; perRequest: string; total: string }[]): Promise<Offer> {
     return this.options.app.offer({
@@ -126,10 +136,11 @@ export class Publisher {
       grants: [
         grant.state(),
         grant.contribute(caps.map((c) => ({ object: c.symbol, perRequest: c.perRequest, total: c.total }))),
-        grant.owns(caps.map((c) => c.symbol)),
+        grant.owns([...caps.map((c) => c.symbol), this.shop.symbol, "ERA"]),
         grant.accept(),
+        ...this.shop.grants(),
       ],
-      adopt: caps.map((c) => c.symbol),
+      adopt: [...caps.map((c) => c.symbol), this.shop.symbol],
       freeRequests: 4096,
     });
   }
@@ -379,21 +390,40 @@ export class Publisher {
   }
 
   /**
-   * What the wallet on `connection` owns of each resource, from a proof the
+   * What the wallet on `connection` owns, by object id, from a proof the
    * wallet gives and the publisher's account verifies (spec 10.2: a holding
-   * counts only once it is proven, never on a client's say-so). Undefined when
+   * counts only once it is proven, never on a client's say-so). It covers the
+   * resources, D-bucks, ERA and every skin the shop has sold. Undefined when
    * no proof was established.
    */
-  async materials(connection: Connection): Promise<Record<string, number> | undefined> {
-    const resources = this.options.catalogue.resources;
-    const result = await this.options.app.wait(await this.options.app.request(connection, ask.owns(resources)));
+  async proven(connection: Connection): Promise<Map<string, bigint> | undefined> {
+    // a proof covers the objects it is asked about: the skins are asked about one by one, each by its object id
+    const asked = [...this.options.catalogue.resources, this.shop.symbol, "ERA", ...Object.keys(this.options.store.data.shop.skins)];
+    const result = await this.options.app.wait(await this.options.app.request(connection, ask.owns(asked)));
     if (result.fact !== "owns" || result.owns === undefined) return undefined;
-    const proven: Record<string, number> = {};
-    for (const symbol of resources) {
-      const id = (await this.options.app.object(symbol)).id;
-      proven[symbol] = Number(result.owns.find((o) => o.object === id)?.amount ?? 0n);
+    return new Map(result.owns.map((o) => [o.object, o.amount]));
+  }
+
+  /** What a proof says the wallet owns of each resource. */
+  private async materialsAmong(proven: Map<string, bigint>): Promise<Record<string, number>> {
+    const materials: Record<string, number> = {};
+    for (const symbol of this.options.catalogue.resources) {
+      materials[symbol] = Number(proven.get((await this.options.app.object(symbol)).id) ?? 0n);
     }
-    return proven;
+    return materials;
+  }
+
+  /** What the wallet on `connection` proves it owns of each resource. */
+  async materials(connection: Connection): Promise<Record<string, number> | undefined> {
+    const proven = await this.proven(connection);
+    return proven === undefined ? undefined : this.materialsAmong(proven);
+  }
+
+  /** Everything the game shows of a wallet, from one proof: its materials, its D-bucks and ERA, and its skins. */
+  async holdings(connection: Connection): Promise<({ materials: Record<string, number> } & Purse) | undefined> {
+    const proven = await this.proven(connection);
+    if (proven === undefined) return undefined;
+    return { materials: await this.materialsAmong(proven), ...(await this.shop.purse(proven)) };
   }
 
   /** The faction that lists `signingKey` as a member now, among those the server has assigned parcels to. */
@@ -518,5 +548,4 @@ export class Publisher {
   }
 }
 
-/** A request the server refused before anything was written. */
-export class Refused extends Error {}
+export { Refused };

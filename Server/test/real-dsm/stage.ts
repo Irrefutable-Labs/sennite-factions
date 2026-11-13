@@ -29,6 +29,8 @@ export interface Stage {
   publisherHost: Host;
   app: AppAccount;
   publisher: Publisher;
+  /** The record `publisher` keeps. */
+  store: Store;
   players: Record<string, Player>;
   /** The server's clock: `advance` moves it forward without waiting. */
   clock: { now: () => number; advance: (ms: number) => void };
@@ -73,6 +75,7 @@ export async function accounts(run: string, names: string[]): Promise<Accounts> 
       store,
       catalogue: world.catalogue,
       parcels: world.parcels,
+      shop: world.shop,
       storageSet: storageSetOf(required("DSM_ENV_CONFIG")),
       name: GAME,
       now: clock.now,
@@ -127,6 +130,7 @@ export async function stage(run: string, names: string[]): Promise<Stage> {
     publisherHost: a.publisherHost,
     app: a.app,
     publisher: a.publisher,
+    store: a.store,
     players,
     clock: a.clock,
     restarted: a.restarted,
