@@ -917,6 +917,24 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 		else {
 			Line(TEXT("materials"), TEXT("M: show what the wallet holds"), 10, Dim);
 		}
+		// what the wallet won in matches and has not collected: one line a match, and where the wallet finds it.
+		// The game cannot ask the wallet to collect it; the player does, in the wallet.
+		TArray<FString> Won;
+		for (const FSennitePrize& Prize : Server->Prizes) {
+			Won.AddUnique(Prize.MatchId);
+		}
+		for (int32 Index = 0; Index < Won.Num() && Index < 3; ++Index) {
+			FString What;
+			FString Cell;
+			for (const FSennitePrize& Prize : Server->Prizes) {
+				if (Prize.MatchId == Won[Index]) {
+					What += FString::Printf(TEXT("%s%d %s"), What.IsEmpty() ? TEXT("") : TEXT(", "), Prize.Amount, *Prize.Resource);
+					Cell = Prize.Cell;
+				}
+			}
+			Line(*FString::Printf(TEXT("prize%d"), Index),
+				FString::Printf(TEXT("PRIZE WAITING   %s   won in match %s. Collect it in your DSM wallet: Escrow, verdict cell %s"), *What, *Won[Index], *Cell), 11, Good);
+		}
 	}
 
 	const FSenniteBaseView* View = Editor->Base();

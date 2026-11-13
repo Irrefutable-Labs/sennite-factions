@@ -41,11 +41,21 @@ export interface ShopWorld {
   skins: SkinForSale[];
 }
 
+/**
+ * What a match pays (spec 10.6): for each material, the whole units the
+ * winning faction's members share. Every unit of it is new supply entering
+ * circulation, out of the material's fixed cap.
+ */
+export interface MatchWorld {
+  prize: Record<string, number>;
+}
+
 export interface World {
   catalogue: Catalogue;
   parcels: Map<string, Parcel>;
   economy: Economy;
   shop: ShopWorld;
+  matches: MatchWorld;
 }
 
 /** The world folder shipped beside the server. */
@@ -60,7 +70,12 @@ export function loadWorld(dir: string = WORLD_DIR): World {
   }
   const shop = JSON.parse(new TextDecoder().decode(bytes("shop.json"))) as ShopWorld;
   if (new Set(shop.skins.map((k) => k.id)).size !== shop.skins.length) throw new Error("the shop lists a skin twice");
-  return { catalogue, parcels: readParcels(bytes("parcels.json")), economy, shop };
+  const matches = JSON.parse(new TextDecoder().decode(bytes("matches.json"))) as MatchWorld;
+  for (const [resource, amount] of Object.entries(matches.prize)) {
+    if (!catalogue.resources.includes(resource)) throw new Error(`a match's prize names ${resource}, which is not a resource`);
+    if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error(`a match's prize of ${resource} is not a whole number of units above zero`);
+  }
+  return { catalogue, parcels: readParcels(bytes("parcels.json")), economy, shop, matches };
 }
 
 /**

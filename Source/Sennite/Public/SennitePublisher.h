@@ -45,6 +45,16 @@ struct FSenniteOwnedSkin
 	int32 Serial = 0;
 };
 
+/** A share of a match's prize the wallet won and has not collected yet. The wallet collects it itself. */
+struct FSennitePrize
+{
+	FString MatchId;
+	/** The match's verdict cell, as the wallet's escrow screen takes it: where the wallet finds the share. */
+	FString Cell;
+	FString Resource;
+	int32 Amount = 0;
+};
+
 /** One parcel of the publisher's registry. */
 struct FSenniteParcel
 {
@@ -189,6 +199,11 @@ public:
 	/** Wear an owned skin, or with an empty id, none. */
 	void Wear(const FString& SkinId);
 
+	/** What the wallet has won in matches and not collected yet, as the server last read it. */
+	TArray<FSennitePrize> Prizes;
+	/** How many times the prizes have been read from the server. */
+	int32 PrizesRead = 0;
+
 	/** The wallets connected to the game that are in no faction: who a member can invite. */
 	TArray<FSennitePerson> FreePlayers;
 
@@ -243,6 +258,7 @@ private:
 	void SendChange(const TSharedRef<FJsonObject>& Change);
 	void SendChangeTo(const FString& InFactionId, const TSharedRef<FJsonObject>& Change, const TCHAR* Waiting);
 	void AskFree();
+	void AskPrizes();
 	void AskShop();
 	void SaveToken() const;
 
@@ -285,6 +301,8 @@ private:
 	double NextRequest = 0.0;
 	double NextFree = 0.0;
 	bool bFreeAsked = false;
+	double NextPrizes = 0.0;
+	bool bPrizesAsked = false;
 	bool bShop = false;
 	bool bShopAsked = false;
 	/** The skin being bought by the request that has not settled yet. */

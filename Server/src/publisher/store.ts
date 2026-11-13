@@ -88,6 +88,36 @@ export interface ShopRecord {
   paid: Record<string, string>;
 }
 
+/** One member's share of a match's prize (spec 10.6): an escrow vault the publisher's account locks. */
+export interface PrizeShare {
+  /** The faction whose win pays this share to the member. Any other outcome pays it back to the publisher. */
+  factionId: string;
+  /** The member: signing key, genesis and device id (lowercase hex), as the faction's state listed them when the match opened. */
+  signingKey: string;
+  genesis: string;
+  deviceId: string;
+  resource: string;
+  amount: number;
+  /** The vault (lowercase hex); empty until it is locked. */
+  vault: string;
+  /** Whether the server has read the vault released: to the member, or back to the publisher. */
+  released: boolean;
+}
+
+/** A match and its prize, as the publisher's server opened it. What each vault holds is read from DSM. */
+export interface MatchRecord {
+  /** The factions in the match: each is an outcome of every vault. */
+  factions: string[];
+  /** The one verdict cell every vault of the match is bound to (lowercase hex); empty until the first is locked. */
+  cell: string;
+  shares: PrizeShare[];
+  /** Whether every share is locked. */
+  opened: boolean;
+  /** The outcome the cell's final verdict names: a faction, or `void`; empty until the match is decided. */
+  outcome: string;
+  openedAt: number;
+}
+
 export interface StoreData {
   /** cell (its name and writer set, as `cellRecordKey` gives it) -> the writes asked there, in the order asked */
   asked: Record<string, AskedWrite[]>;
@@ -99,9 +129,11 @@ export interface StoreData {
    */
   players: Record<string, PlayerRecord>;
   shop: ShopRecord;
+  /** match id -> the match and its prize (spec 10.6) */
+  matches: Record<string, MatchRecord>;
 }
 
-const empty = (): StoreData => ({ asked: {}, factions: {}, players: {}, shop: { serial: 0, skins: {}, paid: {} } });
+const empty = (): StoreData => ({ asked: {}, factions: {}, players: {}, shop: { serial: 0, skins: {}, paid: {} }, matches: {} });
 
 export class Store {
   readonly data: StoreData;

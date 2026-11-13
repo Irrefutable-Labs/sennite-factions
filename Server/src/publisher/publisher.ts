@@ -2,7 +2,8 @@
 // publisher's account on dsm-app-host, signs parcel assignments, asks members'
 // wallets to write their changes, keeps the clock for a leaver's 48 hours,
 // records destruction and turns a fully funded plan into a built structure.
-// It never holds a player's keys or materials, and it never decides the order
+// It opens matches, locks their prizes and decides who won (spec 10.6). It
+// never holds a player's keys or materials, and it never decides the order
 // of a faction's changes: the leader of each successor cell does.
 
 import { ask, grant, type AppAccount, type Connection, type Offer, type RequestRef, type Result } from "dsm-app-client";
@@ -25,10 +26,11 @@ import { judge } from "../faction/validity.js";
 import { AccountCells, leaderUnread } from "../dsm/cells.js";
 import { Contributions, type Funding } from "../dsm/contributions.js";
 import { party, publishAuthored, readAuthored, type Party } from "../dsm/routes.js";
+import { Matches } from "./matches.js";
 import { Refused } from "./refused.js";
 import { Shop, type Purse } from "./shop.js";
 import type { Store } from "./store.js";
-import type { Economy, ShopWorld } from "./world.js";
+import type { Economy, MatchWorld, ShopWorld } from "./world.js";
 
 /** How many times a wallet is asked for a proof before the game says it proved nothing. */
 const PROOF_ATTEMPTS = 5;
@@ -50,6 +52,8 @@ export interface PublisherOptions {
   parcels: Map<string, Parcel>;
   /** The game's currency, the vault that sells it and the shop (spec 10.5). */
   shop: ShopWorld;
+  /** What a match pays (spec 10.6). */
+  matches: MatchWorld;
   /** The five member ids of the storage set the account is on. */
   storageSet: string[];
   /** The name wallets show for the game. */
@@ -110,6 +114,7 @@ export class Publisher {
   readonly cells: AccountCells;
   readonly contributions: Contributions;
   readonly shop: Shop;
+  readonly matches: Matches;
   readonly #mirrors = new Map<string, Mirror>();
   readonly #walking = new Map<string, Promise<void>>();
   #party: Party | undefined;
@@ -118,6 +123,14 @@ export class Publisher {
     this.cells = new AccountCells(options.app, options.store);
     this.contributions = new Contributions(options.app, options.store, options.catalogue);
     this.shop = new Shop(options.app, options.store, options.shop);
+    this.matches = new Matches({
+      app: options.app,
+      store: options.store,
+      world: options.matches,
+      members: async (factionId) => (await this.follow(factionId)).mirror.state.members,
+      party: () => this.party(),
+      now: options.now,
+    });
   }
 
   get app(): AppAccount {

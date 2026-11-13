@@ -23,7 +23,7 @@ export interface ServiceOptions {
   publisher: Publisher;
   world: World;
   store: Store;
-  /** What the publisher's match server sends to record destruction. Never given to a player's game. */
+  /** What the publisher's match server sends to record destruction and to open and decide matches. Never given to a player's game. */
   matchSecret: string;
 }
 
@@ -122,6 +122,15 @@ export class Service {
   private bearer(req: IncomingMessage): string {
     const header = req.headers.authorization ?? "";
     return header.startsWith("Bearer ") ? header.slice(7) : "";
+  }
+
+  /** Refuse a request that does not carry the publisher's match server's secret. No player's game has it. */
+  private matchServer(req: IncomingMessage, does: string): void {
+    const want = Buffer.from(this.options.matchSecret);
+    const got = Buffer.from(this.bearer(req));
+    if (want.length === 0 || got.length !== want.length || !timingSafeEqual(got, want)) {
+      throw new HttpError(401, `only the publisher's match server ${does}`);
+    }
   }
 
   /** The player a request comes from, by the token the server gave their game. */
@@ -314,6 +323,13 @@ export class Service {
           invitations: await publisher.invitationsOf(signingKey),
         },
       };
+    }
+
+    // What the player's wallet has won in matches and not collected yet (spec 10.6). The wallet
+    // collects it itself, in its escrow screen, by the verdict cell: the game cannot ask it to.
+    if (is("GET", "players", "me", "prizes")) {
+      const connection = await this.connected(this.player(req));
+      return { status: 200, body: { prizes: await publisher.matches.waiting(hex(connection.opponent.signingKey)) } };
     }
 
     // The shop: the game's currency and the skins the publisher sells for it (spec 10.5).
@@ -549,15 +565,32 @@ export class Service {
 
     // The publisher's match server records that a battle destroyed a built structure (spec 7.6).
     if (is("POST", "factions", null, "destroyed") && b !== undefined) {
-      const want = Buffer.from(this.options.matchSecret);
-      const got = Buffer.from(this.bearer(req));
-      if (want.length === 0 || got.length !== want.length || !timingSafeEqual(got, want)) {
-        throw new HttpError(401, "only the publisher's match server records destruction");
-      }
+      this.matchServer(req, "records destruction");
       if (!Object.hasOwn(store.data.factions, b)) throw new HttpError(404, "no such faction");
       await publisher.destroyed(b, text((await body(req)).instanceId, "instanceId"));
       this.#bases.delete(b);
       return { status: 200, body: {} };
+    }
+
+    // The publisher's match server opens a match between factions: the prize is locked before it is played (spec 10.6).
+    if (is("POST", "matches", null) && b !== undefined) {
+      this.matchServer(req, "opens a match");
+      const factions = (await body(req)).factions;
+      if (!Array.isArray(factions) || factions.length > 16 || !factions.every((f) => typeof f === "string")) {
+        throw new HttpError(400, "factions is missing");
+      }
+      return { status: 201, body: await publisher.matches.open(b, factions as string[]) };
+    }
+
+    // The publisher's match server says who won, or that nobody did: the publisher's key decides the prize.
+    if (is("POST", "matches", null, "outcome") && b !== undefined) {
+      this.matchServer(req, "decides a match");
+      return { status: 200, body: await publisher.matches.decide(b, text((await body(req)).outcome, "outcome")) };
+    }
+
+    if (is("GET", "matches", null) && b !== undefined) {
+      this.matchServer(req, "reads a match's prize");
+      return { status: 200, body: await publisher.matches.read(b) };
     }
 
     void a;

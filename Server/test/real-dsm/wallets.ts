@@ -5,7 +5,8 @@
  * any of them.
  */
 import { readFile } from "node:fs/promises";
-import { IngressError, pb, type WalletAccount } from "dsm-app-client";
+import { IngressError, pb, type Account, type WalletAccount } from "dsm-app-client";
+import { settling } from "../../src/dsm/routes.js";
 import { unhex } from "../../src/faction/canonical.js";
 import type { Member } from "../../src/faction/state.js";
 
@@ -80,13 +81,14 @@ export async function send(wallet: WalletAccount, to: Member, symbol: string, am
 }
 
 /**
- * What this wallet can spend of `symbol` (the number its own screen shows) and what it holds in
+ * What this account can spend of `symbol` (the number its own screen shows) and what it holds in
  * its own Active escrow vaults (`escrow.vaults`, each walked to its head).
  */
-export async function holds(wallet: WalletAccount, symbol: string): Promise<{ available: bigint; locked: bigint }> {
+export async function holds(wallet: Account, symbol: string): Promise<{ available: bigint; locked: bigint }> {
   const route = "escrow.vaults";
-  // While a release or a trade of the wallet's is settling, the wallet will not walk its vaults:
-  // what it holds in them is read once that has settled.
+  // While a release or a trade of the wallet's is settling, the wallet will not walk its vaults,
+  // and just after one a vault's walk may not be complete yet: the account says so.
+  // What it holds in them is read once that has settled.
   const deadline = Date.now() + 120_000;
   for (;;) {
     try {
@@ -96,14 +98,14 @@ export async function holds(wallet: WalletAccount, symbol: string): Promise<{ av
         .reduce((sum, v) => sum + v.amount, 0n);
       return { available: await spendable(wallet, symbol), locked };
     } catch (e) {
-      if (!(e instanceof IngressError) || !e.detail.includes("is pending") || Date.now() > deadline) throw e;
+      if (!settling(e) || Date.now() > deadline) throw e;
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
   }
 }
 
 /** What this wallet can spend of `symbol`: the number its own screen shows. */
-export async function spendable(wallet: WalletAccount, symbol: string): Promise<bigint> {
+export async function spendable(wallet: Account, symbol: string): Promise<bigint> {
   return (await wallet.owned()).find((o) => o.object.symbol === symbol)?.amount ?? 0n;
 }
 

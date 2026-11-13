@@ -120,10 +120,40 @@ then on finds every vault on it, whoever made it). A vault a member locked in th
 without ever committing through the game, is not found. That can only leave funding lower than it
 is, never higher.
 
-## 5. Notes that are not gaps
+## 5. A match's prize: one vault, and collecting it from the game
 
-- `escrow.locked`, `escrow.party`, `authored.publish` and `authored.read` are on the ingress but not
-  in the `dsm-app-client` package; the server calls them through `ingress.call` (`src/dsm/routes.ts`).
+**Needed by:** 10.6 ("One vault per match … Its outcomes name the factions in the match … the
+referee pattern DSM Connect already uses for staked matches (Amendment A12), with the publisher as
+the only staker … Members of the winning faction collect their shares from the vault").
+
+**As built in DSM:**
+
+- An escrow vault holds one object and is released whole, once, to the one identity its decided
+  outcome pays (SoFi §19.9). A faction is not an identity, and a prize is several materials. So one
+  vault cannot pay a faction's members their shares.
+- A connected wallet collects at the application's asking (`ask.match.collect`) only a vault whose
+  terms are exactly the two-player match template, with the wallet as one of the two players, and
+  the template refuses the application as a player (`sdk/connect/wager.rs`, "the application cannot
+  be a player in a match it decides"). A vault the publisher locked is not that.
+
+**Built with what DSM has (owner, 2026-11-13: "Yes, per share"):** the publisher's account locks
+one vault per member's share (`escrow.create` on its own ingress). Every vault of a match has the
+same outcomes, the factions and `void`, each decided by the publisher's key alone, so all of them
+are bound to one verdict cell and the publisher decides once. A member's vault pays that member on
+their faction's outcome and the publisher on any other. A winner collects in their own wallet: its
+escrow screen finds the vaults by the match's verdict cell and releases the ones that pay it. The
+game shows that a prize is waiting and that cell.
+
+**Missing:** a Connect request by which a wallet collects, at the application's asking, a vault the
+application locked that pays the wallet (the generic escrow template of 12.2 item 2 would carry
+it). Until then the game cannot hand a winner their prize: the player types or pastes a 52-character
+verdict cell into their wallet. The run `test/real-dsm/prizes.test.ts` shows the wallet's refusal.
+
+## 6. Notes that are not gaps
+
+- `escrow.locked`, `escrow.party`, `escrow.create`, `escrow.vaults`, `escrow.verdict`,
+  `escrow.release`, `authored.publish` and `authored.read` are on the ingress but not in the
+  `dsm-app-client` package; the server calls them through `ingress.call` (`src/dsm/routes.ts`).
 - An offer connects one wallet: each player reads a connect code of their own.
 - The state grant has no caps (12.2 item 3 says "within caps"): a write spends nothing. The offer's
   count of free requests (4,096 here) is the only bound; past it each write waits for the player.

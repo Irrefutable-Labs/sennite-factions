@@ -76,6 +76,7 @@ export async function accounts(run: string, names: string[]): Promise<Accounts> 
       catalogue: world.catalogue,
       parcels: world.parcels,
       shop: world.shop,
+      matches: world.matches,
       storageSet: storageSetOf(required("DSM_ENV_CONFIG")),
       name: GAME,
       now: clock.now,

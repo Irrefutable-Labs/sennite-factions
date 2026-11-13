@@ -11,8 +11,8 @@ What is here:
 |---|---|
 | `src/faction/` | The faction state machine with no game and no account attached: the committed state, the kinds of change, the validity rules of spec section 7, and the mirror that walks a lineage. |
 | `src/dsm/` | What the server asks of the publisher's account: cell writes and their facts, contributions and the funding read, authored objects. |
-| `src/publisher/` | The publisher's server: parcel assignments, proposing members' changes, the 48-hour clock, what stands in play, the shop (`shop.ts`: D-bucks, the vault that sells them for ERA, skins), and what the game client asks of it over HTTP (`service.ts`). `main.ts` starts it. |
-| `world/` | The publisher's game assets: the prefab catalogue, the parcel registry, what the account issues, and the shop (`shop.json`: D-bucks, the vault's opening reserves and fee, the skins and their prices). |
+| `src/publisher/` | The publisher's server: parcel assignments, proposing members' changes, the 48-hour clock, what stands in play, the shop (`shop.ts`: D-bucks, the vault that sells them for ERA, skins), matches and their prizes (`matches.ts`), and what the game client asks of it over HTTP (`service.ts`). `main.ts` starts it. |
+| `world/` | The publisher's game assets: the prefab catalogue, the parcel registry, what the account issues, the shop (`shop.json`: D-bucks, the vault's opening reserves and fee, the skins and their prices), and what a match pays (`matches.json`). |
 | `vendor/` | DSM's TypeScript client, packed from DSM `main` at `2d109bb58` (`clients/typescript`, `npm pack`). |
 | `docs/dsm-gaps.md` | What the specification needs that DSM's app surface does not offer yet. |
 
@@ -40,6 +40,11 @@ once, and an old one comes back and writes. `conservation.test.ts` counts every 
 24 drawn acts (contribute, withdraw, leave, replace, dismantle); `SENNITE_SEED` draws another
 sequence.
 
+`prizes.test.ts` is a match's prize (spec 10.6): locked before the match as one vault per member's
+share on one verdict cell, decided once by the publisher's key, collected by the winners in their
+own wallets and by nobody else, and whole again with the publisher when nobody won. In it a server
+is killed while it opens a match, and the one started on its record locks no share twice.
+
 The runs that take storage seats offline (spec Stage 4: the leader seat). They stop and start the
 set's own `storage_node` processes, so they run only on a developer's own set on this machine
 (`make nodes-up`), never on a hosted one, and need the node binary as well:
@@ -51,10 +56,12 @@ DSM_APP_HOST_BIN=<...> DSM_ENV_CONFIG=<...> DSM_STORAGE_NODE_BIN=<dsm checkout>/
 Every seat is serving again when they end, whatever happened.
 
 The game itself, with the same two settings and Unreal Engine on this machine. It runs the Unreal
-game headless on the test range against this server, four times, with real wallets answering: the
+game headless on the test range against this server, five times, with real wallets answering: the
 base editor (plan, commit, built in play), the faction's people (join, vote, invite), the shop
-(D-bucks, a skin bought, worn and sold on), and the server killed while a player plans (the game
-shows the base, says there is no live session, and builds on the same base when a server is back):
+(D-bucks, a skin bought, worn and sold on), the server killed while a player plans (the game
+shows the base, says there is no live session, and builds on the same base when a server is back),
+and a match won (the game says a prize is waiting and where the wallet finds it, and the player
+collects it in their own wallet):
 
 ```bash
 DSM_APP_HOST_BIN=<...> DSM_ENV_CONFIG=<...> ../Tools/check_base_editor.sh
@@ -67,6 +74,18 @@ it builds again when the seat returns:
 ```bash
 DSM_APP_HOST_BIN=<...> DSM_ENV_CONFIG=<...> DSM_STORAGE_NODE_BIN=<...> ../Tools/check_building_paused.sh
 ```
+
+## Matches
+
+The publisher's match server opens and decides matches with the secret the server writes to
+`<SENNITE_DATA_DIR>/match-secret` at each launch (the same one it records destruction with):
+
+- `POST /matches/<id>` with `{"factions": [...]}` opens a match and locks its prize. Asked again, it
+  locks only what is not locked yet.
+- `POST /matches/<id>/outcome` with `{"outcome": "<faction id>"}` or `"void"` decides it.
+- `GET /matches/<id>` reads the prize, share by share, as DSM holds it.
+
+A player's game reads what its wallet has won and not collected at `GET /players/me/prizes`.
 
 ## Running it for the game
 

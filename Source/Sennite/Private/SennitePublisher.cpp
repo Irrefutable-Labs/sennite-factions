@@ -168,6 +168,10 @@ bool USennitePublisher::Tick(float)
 	if (bConnected && !FactionId.IsEmpty() && !bFreeAsked && Now >= NextFree) {
 		AskFree();
 	}
+	// a match's prize goes to a faction's members: a wallet in no faction has none to ask about
+	if (bConnected && !FactionId.IsEmpty() && !bPrizesAsked && Now >= NextPrizes) {
+		AskPrizes();
+	}
 	return true;
 }
 
@@ -451,6 +455,30 @@ void USennitePublisher::AskFree()
 			Person.Wallet = One->GetStringField(TEXT("wallet"));
 			FreePlayers.Add(MoveTemp(Person));
 		}
+	});
+}
+
+void USennitePublisher::AskPrizes()
+{
+	bPrizesAsked = true;
+	Send(TEXT("GET"), TEXT("/players/me/prizes"), nullptr, [this](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+		bPrizesAsked = false;
+		NextPrizes = FPlatformTime::Seconds() + 5.0;
+		const TArray<TSharedPtr<FJsonValue>>* Waiting = nullptr;
+		if (Status != 200 || !Json.IsValid() || !Json->TryGetArrayField(TEXT("prizes"), Waiting)) {
+			return;
+		}
+		Prizes.Reset();
+		for (const TSharedPtr<FJsonValue>& Value : *Waiting) {
+			const TSharedPtr<FJsonObject> One = Value->AsObject();
+			FSennitePrize Prize;
+			Prize.MatchId = One->GetStringField(TEXT("matchId"));
+			Prize.Cell = One->GetStringField(TEXT("cell"));
+			Prize.Resource = One->GetStringField(TEXT("resource"));
+			Prize.Amount = One->GetIntegerField(TEXT("amount"));
+			Prizes.Add(MoveTemp(Prize));
+		}
+		++PrizesRead;
 	});
 }
 

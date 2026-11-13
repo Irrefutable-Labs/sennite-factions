@@ -39,6 +39,7 @@ const publisher = new Publisher({
   catalogue: world.catalogue,
   parcels: world.parcels,
   shop: world.shop,
+  matches: world.matches,
   storageSet: storageSetOf(required("DSM_ENV_CONFIG")),
   name: "Sennite: Factions",
   now: Date.now,
@@ -47,7 +48,7 @@ const publisher = new Publisher({
 console.log(`[publisher] the account is ${await app.id()}`);
 await publisher.issueResources(world.economy);
 
-// What the publisher's match server sends to record destruction: new at each launch, readable by this user only.
+// What the publisher's match server sends to record destruction and to open and decide matches: new at each launch, readable by this user only.
 const matchSecret = randomBytes(32).toString("hex");
 writeFileSync(join(dataDir, "match-secret"), matchSecret, { mode: 0o600 });
 
@@ -65,4 +66,6 @@ setInterval(() => {
     },
     (e: unknown) => console.error(`[publisher] the 48-hour clock: ${e instanceof Error ? e.message : String(e)}`),
   );
+  // The shares a decided match pays back to the publisher that have not come back yet.
+  publisher.matches.tick().catch((e: unknown) => console.error(`[publisher] match prizes: ${e instanceof Error ? e.message : String(e)}`));
 }, 60_000);
