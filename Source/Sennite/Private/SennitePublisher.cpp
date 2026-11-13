@@ -60,6 +60,7 @@ void USennitePublisher::Initialize(FSubsystemCollectionBase& Collection)
 		if (Json->GetStringField(TEXT("url")) == PublisherUrl) {
 			Token = Json->GetStringField(TEXT("player"));
 			ConnectCode = Json->GetStringField(TEXT("code"));
+			Json->TryGetStringField(TEXT("wearing"), Wearing);
 		}
 	}
 	TickHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateUObject(this, &USennitePublisher::Tick), 0.1f);
@@ -126,8 +127,34 @@ bool USennitePublisher::Tick(float)
 	if (!bMeAsked && Now >= NextMe) {
 		AskMe();
 	}
+	if (!bShop && !bShopAsked) {
+		AskShop();
+	}
 	if (BasesAsked == 0 && Now >= NextBases) {
 		AskBases();
+	}
+	// a skin the shop gave reaches the wallet on the wallet's own time: until its proof lists the skin, the game
+	// asks again every few seconds, a bounded number of times
+	if (!OnItsWay.IsEmpty() && !ProofPending() && Now >= NextArrival) {
+		if (Owns(OnItsWay) || ArrivalProofs >= 60) {
+			OnItsWay.Reset();
+		}
+		else {
+			++ArrivalProofs;
+			NextArrival = Now + 5.0;
+			bProofWanted = true;
+		}
+	}
+	// once the wallet is connected the game asks it, once, what it holds: the skin a player owns is on their character
+	if (bConnected && !bProvedOnConnect) {
+		bProvedOnConnect = true;
+		bProofWanted = true;
+	}
+	if (bConnected && bProofWanted && !bProving) {
+		StartProof();
+	}
+	if (!PendingProof.IsEmpty() && !bProofAsked && Now >= NextProof) {
+		AskProof();
 	}
 	if (!PendingRequest.IsEmpty() && !bRequestAsked && Now >= NextRequest) {
 		AskRequest();
@@ -211,14 +238,70 @@ void USennitePublisher::AskPlayer()
 		}
 		Token = Json->GetStringField(TEXT("player"));
 		ConnectCode = Json->GetStringField(TEXT("code"));
-		const TSharedRef<FJsonObject> Keep = MakeShared<FJsonObject>();
-		Keep->SetStringField(TEXT("url"), PublisherUrl);
-		Keep->SetStringField(TEXT("player"), Token);
-		Keep->SetStringField(TEXT("code"), ConnectCode);
-		FString Text;
-		FJsonSerializer::Serialize(Keep, TJsonWriterFactory<>::Create(&Text));
-		FFileHelper::SaveStringToFile(Text, *TokenFile());
+		// a new player at the server has chosen nothing to wear yet
+		Wearing.Reset();
+		SaveToken();
 	});
+}
+
+void USennitePublisher::SaveToken() const
+{
+	const TSharedRef<FJsonObject> Keep = MakeShared<FJsonObject>();
+	Keep->SetStringField(TEXT("url"), PublisherUrl);
+	Keep->SetStringField(TEXT("player"), Token);
+	Keep->SetStringField(TEXT("code"), ConnectCode);
+	Keep->SetStringField(TEXT("wearing"), Wearing);
+	FString Text;
+	FJsonSerializer::Serialize(Keep, TJsonWriterFactory<>::Create(&Text));
+	FFileHelper::SaveStringToFile(Text, *TokenFile());
+}
+
+void USennitePublisher::AskShop()
+{
+	bShopAsked = true;
+	Send(TEXT("GET"), TEXT("/shop"), nullptr, [this](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+		bShopAsked = false;
+		const TArray<TSharedPtr<FJsonValue>>* Skins = nullptr;
+		if (Status != 200 || !Json.IsValid() || !Json->TryGetArrayField(TEXT("skins"), Skins)) {
+			return;
+		}
+		ShopSkins.Reset();
+		for (const TSharedPtr<FJsonValue>& Value : *Skins) {
+			const TSharedPtr<FJsonObject> One = Value->AsObject();
+			FSenniteSkinForSale Skin;
+			Skin.Id = One->GetStringField(TEXT("id"));
+			Skin.Name = One->GetStringField(TEXT("name"));
+			Skin.Price = FCString::Atoi(*One->GetStringField(TEXT("price")));
+			ShopSkins.Add(MoveTemp(Skin));
+		}
+		bShop = true;
+	});
+}
+
+void USennitePublisher::BuyDBucks(const FString& InEra)
+{
+	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("era"), InEra);
+	Ask(TEXT("/shop/dbucks"), Body, TEXT("waiting for the wallet to trade ERA for D-bucks..."));
+	bProveAfter = bBusy;
+}
+
+void USennitePublisher::BuySkin(const FString& SkinId)
+{
+	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("skinId"), SkinId);
+	if (bBusy) {
+		return;
+	}
+	Ask(TEXT("/shop/skins"), Body, TEXT("waiting for the wallet to pay for the skin..."));
+	bProveAfter = bBusy;
+	BuyingSkin = SkinId;
+}
+
+void USennitePublisher::Wear(const FString& SkinId)
+{
+	Wearing = SkinId;
+	SaveToken();
 }
 
 void USennitePublisher::AskMe()
@@ -381,28 +464,20 @@ void USennitePublisher::AskRequest()
 		PendingRequest.Reset();
 		bBusy = false;
 		bLastOk = Json->GetBoolField(TEXT("ok"));
-		const TSharedPtr<FJsonObject>* Proven = nullptr;
-		if (Json->TryGetObjectField(TEXT("materials"), Proven)) {
-			Materials.Reset();
-			for (const FString& Resource : Resources) {
-				Materials.Add(Resource, (*Proven)->GetIntegerField(Resource));
+		if (!BuyingSkin.IsEmpty()) {
+			// bought and given: it is the wallet's once the wallet has taken it in and proves it
+			if (bLastOk) {
+				OnItsWay = BuyingSkin;
+				ArrivalProofs = 0;
+				NextArrival = FPlatformTime::Seconds() + 2.0;
 			}
-			bMaterialsKnown = true;
-			// a proof asked for after a commitment or a withdrawal leaves that one's message standing
-			if (!bProveAfter) {
-				Message = Json->GetStringField(TEXT("message"));
-			}
-			bProveAfter = false;
+			BuyingSkin.Reset();
 		}
-		else {
-			Message = Json->GetStringField(TEXT("message"));
-			if (bProveAfter) {
-				const FString Kept = Message;
-				const bool bKeptOk = bLastOk;
-				ProveMaterials();
-				Message = Kept;
-				bLastOk = bKeptOk;
-			}
+		Message = Json->GetStringField(TEXT("message"));
+		if (bProveAfter) {
+			// what the wallet holds changed with this: ask it again, without holding the player up
+			bProveAfter = false;
+			bProofWanted = true;
 		}
 		// what changed shows at once, not at the next round
 		NextBases = 0.0;
@@ -427,6 +502,8 @@ void USennitePublisher::Ask(const FString& Path, const TSharedPtr<FJsonObject>& 
 			return;
 		}
 		bBusy = false;
+		// nothing was started: a skin that was to be bought is not being bought
+		BuyingSkin.Reset();
 		Message = ErrorOf(Status, Json);
 	});
 }
@@ -436,7 +513,82 @@ void USennitePublisher::ProveMaterials()
 	if (!bConnected) {
 		return;
 	}
-	Ask(TEXT("/players/me/materials"), MakeShared<FJsonObject>(), TEXT("waiting for the wallet to prove what it holds..."));
+	bProofWanted = true;
+	bProofByHand = true;
+	if (!bBusy) {
+		Message = TEXT("waiting for the wallet to prove what it holds...");
+		bLastOk = false;
+	}
+}
+
+void USennitePublisher::StartProof()
+{
+	bProofWanted = false;
+	bProving = true;
+	Send(TEXT("POST"), TEXT("/players/me/materials"), MakeShared<FJsonObject>(), [this](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+		FString Request;
+		if (Status == 202 && Json.IsValid() && Json->TryGetStringField(TEXT("request"), Request)) {
+			PendingProof = Request;
+			NextProof = 0.0;
+			return;
+		}
+		bProving = false;
+		if (bProofByHand && !bBusy) {
+			Message = ErrorOf(Status, Json);
+		}
+		bProofByHand = false;
+	});
+}
+
+void USennitePublisher::AskProof()
+{
+	bProofAsked = true;
+	Send(TEXT("GET"), TEXT("/requests/") + PendingProof, nullptr, [this](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+		bProofAsked = false;
+		NextProof = FPlatformTime::Seconds() + 0.5;
+		const bool bGone = Status == 404;
+		if (!bGone && (Status != 200 || !Json.IsValid() || Json->GetStringField(TEXT("state")) != TEXT("done"))) {
+			return;
+		}
+		PendingProof.Reset();
+		bProving = false;
+		const TSharedPtr<FJsonObject>* Proven = nullptr;
+		const bool bProved = !bGone && Json->TryGetObjectField(TEXT("materials"), Proven);
+		if (bProved) {
+			ReadHoldings(*Json);
+		}
+		if (bProofByHand && !bBusy) {
+			bLastOk = bProved;
+			Message = bGone ? FString(TEXT("the publisher's server no longer knows the request")) : Json->GetStringField(TEXT("message"));
+		}
+		bProofByHand = false;
+	});
+}
+
+void USennitePublisher::ReadHoldings(const FJsonObject& Json)
+{
+	const TSharedPtr<FJsonObject> Proven = Json.GetObjectField(TEXT("materials"));
+	Materials.Reset();
+	for (const FString& Resource : Resources) {
+		Materials.Add(Resource, Proven->GetIntegerField(Resource));
+	}
+	DBucks = Json.GetIntegerField(TEXT("dbucks"));
+	Era = Json.GetStringField(TEXT("era"));
+	OwnedSkins.Reset();
+	Inventory.Reset();
+	const TArray<TSharedPtr<FJsonValue>>* Skins = nullptr;
+	if (Json.TryGetArrayField(TEXT("skins"), Skins)) {
+		for (const TSharedPtr<FJsonValue>& Value : *Skins) {
+			const TSharedPtr<FJsonObject> One = Value->AsObject();
+			FSenniteOwnedSkin Skin;
+			Skin.SkinId = One->GetStringField(TEXT("skinId"));
+			Skin.Name = One->GetStringField(TEXT("name"));
+			Skin.Serial = One->GetIntegerField(TEXT("serial"));
+			OwnedSkins.AddUnique(Skin.SkinId);
+			Inventory.Add(MoveTemp(Skin));
+		}
+	}
+	bMaterialsKnown = true;
 }
 
 void USennitePublisher::Found(const FString& InParcelId)

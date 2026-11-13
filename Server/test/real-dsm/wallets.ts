@@ -20,6 +20,35 @@ function answered<C extends PayloadCase>(route: string, envelope: pb.Envelope, e
   return envelope.payload.value as PayloadOf<C>;
 }
 
+/**
+ * Two wallets become contacts: each adds the other, and both wait until their own wallet shows the
+ * relationship established, which is when value may move over it. DSM sends only over a
+ * relationship both sides have added; a send made before it is established is refused.
+ */
+export async function becomeContacts(a: { wallet: WalletAccount; is: Member; name: string }, b: { wallet: WalletAccount; is: Member; name: string }): Promise<void> {
+  await addContact(a.wallet, b.name, b.is);
+  await addContact(b.wallet, a.name, a.is);
+  const deadline = Date.now() + 240_000;
+  for (const [mine, other] of [
+    [a, b],
+    [b, a],
+  ] as const) {
+    for (;;) {
+      if (await established(mine.wallet, other.is)) break;
+      if (Date.now() > deadline) throw new Error(`${mine.name}'s wallet did not show its relationship with ${other.name} established`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+}
+
+/** Whether this wallet shows its relationship with `other` established. */
+async function established(wallet: WalletAccount, other: Member): Promise<boolean> {
+  const route = "contacts.list";
+  const list = answered(route, await wallet.ingress.call("query", route, undefined, { quiet: true }), "contactsListResponse");
+  const contact = list.contacts.find((c) => Buffer.from(c.deviceId).toString("hex") === other.deviceId);
+  return contact?.relationshipState === pb.RelationshipState.ESTABLISHED;
+}
+
 /** Add `other` as a contact of this wallet's: DSM sends only over a relationship both sides have added. */
 export async function addContact(wallet: WalletAccount, alias: string, other: Member): Promise<void> {
   const route = "contacts.addManual";
@@ -55,13 +84,22 @@ export async function send(wallet: WalletAccount, to: Member, symbol: string, am
  * its own Active escrow vaults (`escrow.vaults`, each walked to its head).
  */
 export async function holds(wallet: WalletAccount, symbol: string): Promise<{ available: bigint; locked: bigint }> {
-  const owned = (await wallet.owned()).find((o) => o.object.symbol === symbol);
   const route = "escrow.vaults";
-  const mine = answered(route, await wallet.ingress.call("invoke", route, new pb.EscrowVaultsRequest(), { quiet: true }), "escrowVaultsResponse");
-  const locked = mine.vaults
-    .filter((v) => v.tokenSymbol === symbol && v.status === pb.SofiVaultStatus.ACTIVE)
-    .reduce((sum, v) => sum + v.amount, 0n);
-  return { available: owned?.amount ?? 0n, locked };
+  // While a release or a trade of the wallet's is settling, the wallet will not walk its vaults:
+  // what it holds in them is read once that has settled.
+  const deadline = Date.now() + 120_000;
+  for (;;) {
+    try {
+      const mine = answered(route, await wallet.ingress.call("invoke", route, new pb.EscrowVaultsRequest(), { quiet: true }), "escrowVaultsResponse");
+      const locked = mine.vaults
+        .filter((v) => v.tokenSymbol === symbol && v.status === pb.SofiVaultStatus.ACTIVE)
+        .reduce((sum, v) => sum + v.amount, 0n);
+      return { available: await spendable(wallet, symbol), locked };
+    } catch (e) {
+      if (!(e instanceof IngressError) || !e.detail.includes("is pending") || Date.now() > deadline) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
 }
 
 /** What this wallet can spend of `symbol`: the number its own screen shows. */

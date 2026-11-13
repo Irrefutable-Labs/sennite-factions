@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { until } from "./hosts.js";
 import { player, stage, type Stage } from "./stage.js";
-import { addContact, send, spendable, takeUp } from "./wallets.js";
+import { becomeContacts, send, spendable, takeUp } from "./wallets.js";
 
 const DBUCKS = "DBUCKS";
 let s: Stage;
@@ -118,8 +118,7 @@ describe("D-bucks and the shop", () => {
     const [aliceBefore, bobBefore, takings, record] = [await dbucksOf("alice"), await dbucksOf("bob"), await publishers(DBUCKS), JSON.stringify(s.store.data.shop)];
 
     // Seller and buyer are contacts; the buyer's wallet takes up the skin's object so it can hold it.
-    await addContact(alice.wallet, "bob", bob.member);
-    await addContact(bob.wallet, "alice", alice.member);
+    await becomeContacts({ wallet: alice.wallet, is: alice.member, name: "alice" }, { wallet: bob.wallet, is: bob.member, name: "bob" });
     await takeUp(bob.host, skin.object);
 
     // The buyer sends D-bucks, the seller sends the skin.

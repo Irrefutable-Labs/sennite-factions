@@ -17,7 +17,7 @@ import type { Change } from "../../src/faction/change.js";
 import { NOTICE_MS, Publisher, type Structure } from "../../src/publisher/publisher.js";
 import { until } from "./hosts.js";
 import { player, stage, type Player, type Stage } from "./stage.js";
-import { addContact, decideAndRelease, holds, lockEscrow, send } from "./wallets.js";
+import { becomeContacts, decideAndRelease, holds, lockEscrow, send } from "./wallets.js";
 
 const PARCEL = "east-shore";
 const STEEL = "STEEL";
@@ -135,8 +135,7 @@ describe("contributions", () => {
 
   it("A tries to send the committed 200 steel to C: the transfer fails, because the units are in the vault", async () => {
     const [alice, carol] = [player(s, "alice"), player(s, "carol")];
-    await addContact(alice.wallet, "carol", carol.member);
-    await addContact(carol.wallet, "alice", alice.member);
+    await becomeContacts({ wallet: alice.wallet, is: alice.member, name: "alice" }, { wallet: carol.wallet, is: carol.member, name: "carol" });
     const before = await holds(carol.wallet, STEEL);
 
     const attempt = await send(alice.wallet, carol.member, STEEL, "200");

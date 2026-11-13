@@ -215,7 +215,7 @@ namespace
 			const int32 Needs = Plan != nullptr && Plan->Needs.Num() > 0 ? Plan->Needs[0].Shortfall : 0;
 			const FString Resource = Plan != nullptr && Plan->Needs.Num() > 0 ? Plan->Needs[0].Resource : FString();
 			if (Server->bMaterialsKnown && Needs > 0 && Server->Materials.FindRef(Resource) >= Needs) {
-				if (Server->bBusy) {
+				if (Server->bBusy || Server->ProofPending()) {
 					return false;
 				}
 				Test->TestTrue(TEXT("The panel shows what the wallet proved it holds"), Drawn(Editor, TEXT("materials")).Contains(FString::Printf(TEXT("%s %d"), *Resource, Server->Materials.FindRef(Resource))));
@@ -228,7 +228,7 @@ namespace
 			if (Elapsed(World) > 180.0) {
 				return Fail(FString::Printf(TEXT("The wallet did not prove it holds the steel in 180 s: %s"), *Server->Message));
 			}
-			if (!Server->bBusy && World->GetTimeSeconds() - LastProof > 3.0) {
+			if (!Server->bBusy && !Server->ProofPending() && World->GetTimeSeconds() - LastProof > 3.0) {
 				LastProof = World->GetTimeSeconds();
 				Tap(Controller, EKeys::M);
 			}
@@ -237,7 +237,8 @@ namespace
 
 		case EPhase::Built: {
 			const FSenniteStructureView* Tower = Editor->Selected();
-			if (Tower == nullptr || !Tower->bStanding || Server->bBusy) {
+			// the commitment has settled, and so has the proof the game asks for after it
+			if (Tower == nullptr || !Tower->bStanding || Server->bBusy || Server->ProofPending()) {
 				return Elapsed(World) > 120.0 ? Fail(FString::Printf(TEXT("The funded plan was not built in 120 s: %s"), *Server->Message)) : false;
 			}
 			if (Elapsed(World) < 1.5) {

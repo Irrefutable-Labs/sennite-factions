@@ -83,16 +83,26 @@ export async function accounts(run: string, names: string[]): Promise<Accounts> 
   const store = new Store(storeFile);
   const publisher = make(store);
 
-  const made = await Promise.all(hosts.map((h) => h.wallet()));
-  await Promise.all([funded("publisher", app), ...made.map((w, i) => funded(names[i] as string, w))]);
-  await publisher.issueResources(world.economy);
-  const caps = world.economy.resources.map((r) => ({
-    symbol: r.symbol,
-    perRequest: world.economy.grant.perRequest,
-    total: world.economy.grant.total,
-  }));
+  const stop = async (): Promise<void> => {
+    await Promise.all([publisherHost, ...hosts].map((h) => h.stop()));
+  };
   const wallets: Accounts["wallets"] = {};
-  for (const [i, name] of names.entries()) wallets[name] = { host: hosts[i] as Host, wallet: made[i] as WalletAccount };
+  let caps: Accounts["caps"];
+  try {
+    const made = await Promise.all(hosts.map((h) => h.wallet()));
+    await Promise.all([funded("publisher", app), ...made.map((w, i) => funded(names[i] as string, w))]);
+    await publisher.issueResources(world.economy);
+    caps = world.economy.resources.map((r) => ({
+      symbol: r.symbol,
+      perRequest: world.economy.grant.perRequest,
+      total: world.economy.grant.total,
+    }));
+    for (const [i, name] of names.entries()) wallets[name] = { host: hosts[i] as Host, wallet: made[i] as WalletAccount };
+  } catch (e) {
+    // a suite that cannot start leaves no account running behind it
+    await stop();
+    throw e;
+  }
 
   return {
     dir,
@@ -106,9 +116,7 @@ export async function accounts(run: string, names: string[]): Promise<Accounts> 
     clock,
     restarted: () => make(),
     caps,
-    stop: async () => {
-      await Promise.all([publisherHost, ...hosts].map((h) => h.stop()));
-    },
+    stop,
   };
 }
 
@@ -116,12 +124,17 @@ export async function accounts(run: string, names: string[]): Promise<Accounts> 
 export async function stage(run: string, names: string[]): Promise<Stage> {
   const a = await accounts(run, names);
   const players: Record<string, Player> = {};
-  for (const name of names) {
-    const { host, wallet } = a.wallets[name] as { host: Host; wallet: WalletAccount };
-    // An offer connects one wallet: each player reads a connect code of their own.
-    const offer = await a.publisher.offer(a.caps);
-    const connection = await connect(a.app, wallet, offer.code, GAME);
-    players[name] = { name, host, wallet, connection, member: a.publisher.member(connection) };
+  try {
+    for (const name of names) {
+      const { host, wallet } = a.wallets[name] as { host: Host; wallet: WalletAccount };
+      // An offer connects one wallet: each player reads a connect code of their own.
+      const offer = await a.publisher.offer(a.caps);
+      const connection = await connect(a.app, wallet, offer.code, GAME);
+      players[name] = { name, host, wallet, connection, member: a.publisher.member(connection) };
+    }
+  } catch (e) {
+    await a.stop();
+    throw e;
   }
   return {
     dir: a.dir,

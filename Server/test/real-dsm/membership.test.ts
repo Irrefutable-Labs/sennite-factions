@@ -15,7 +15,7 @@ import type { Change } from "../../src/faction/change.js";
 import { NOTICE_MS, Refused, type Structure } from "../../src/publisher/publisher.js";
 import { until } from "./hosts.js";
 import { player, stage, type Player, type Stage } from "./stage.js";
-import { addContact, holds, send } from "./wallets.js";
+import { becomeContacts, holds, send } from "./wallets.js";
 
 const STEEL = "STEEL";
 const SUPPLY = 1_000_000n;
@@ -161,8 +161,7 @@ describe("a second faction and trade", () => {
     expect(await s.publisher.materials(dave.connection)).toMatchObject({ STEEL: 0 });
 
     // The trade is between two wallets: two contacts, an ordinary transfer, no faction and no host involved.
-    await addContact(alice.wallet, "dave", dave.member);
-    await addContact(dave.wallet, "alice", alice.member);
+    await becomeContacts({ wallet: alice.wallet, is: alice.member, name: "alice" }, { wallet: dave.wallet, is: dave.member, name: "dave" });
     const lineages = [(await s.publisher.follow(first)).mirror.commitment, (await s.publisher.follow(second)).mirror.commitment];
     await until("alice sends dave 50 steel", 240_000, async () => {
       const sent = await send(alice.wallet, dave.member, STEEL, "50");

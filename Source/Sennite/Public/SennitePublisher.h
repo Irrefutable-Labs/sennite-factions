@@ -27,6 +27,24 @@ struct FSennitePrefab
 	TArray<TPair<FString, int32>> Recipe;
 };
 
+/** One skin the publisher's shop sells, and its price in D-bucks. */
+struct FSenniteSkinForSale
+{
+	FString Id;
+	FString Name;
+	int32 Price = 0;
+};
+
+/** One skin the wallet proved it owns: an object of which one exists. */
+struct FSenniteOwnedSkin
+{
+	/** Which skin of the shop it is. */
+	FString SkinId;
+	FString Name;
+	/** Its number among the skins the shop has sold. */
+	int32 Serial = 0;
+};
+
 /** One parcel of the publisher's registry. */
 struct FSenniteParcel
 {
@@ -142,14 +160,37 @@ public:
 	TMap<FString, int32> Materials;
 	bool bMaterialsKnown = false;
 
+	/** What the shop sells. */
+	TArray<FSenniteSkinForSale> ShopSkins;
+	/** What the wallet proved it holds of D-bucks and ERA, and the skins it proved it owns (by the shop's skin id). */
+	int32 DBucks = 0;
+	FString Era;
+	TArray<FString> OwnedSkins;
+	/** The same skins, one by one, as the inventory lists them. */
+	TArray<FSenniteOwnedSkin> Inventory;
+	/** The skin the player chose to wear. It is worn only while the wallet proves it owns it. */
+	FString Wearing;
+	/** A skin the shop sold and gave that the wallet has not proved it owns yet: it is on its way. */
+	FString OnItsWay;
+
+	bool Owns(const FString& SkinId) const { return OwnedSkins.Contains(SkinId); }
+	/** Trade ERA for D-bucks through the publisher's vault. */
+	void BuyDBucks(const FString& InEra);
+	/** Buy a skin from the shop with D-bucks. */
+	void BuySkin(const FString& SkinId);
+	/** Wear an owned skin, or with an empty id, none. */
+	void Wear(const FString& SkinId);
+
 	/** The wallets connected to the game that are in no faction: who a member can invite. */
 	TArray<FSennitePerson> FreePlayers;
 
 	/** Each parcel's base, by parcel id. */
 	TMap<FString, FSenniteBaseView> Bases;
 
-	/** Whether something asked of the wallet has not settled yet. */
+	/** Whether something the player asked of the wallet has not settled yet. */
 	bool bBusy = false;
+	/** Whether a proof of what the wallet holds is wanted or in flight. A proof never holds up what the player asks. */
+	bool ProofPending() const { return bProofWanted || bProving; }
 	/** What became of the last thing asked, in the server's words. */
 	FString Message;
 	/** Whether the last thing asked was carried out. */
@@ -194,6 +235,8 @@ private:
 	void SendChange(const TSharedRef<FJsonObject>& Change);
 	void SendChangeTo(const FString& InFactionId, const TSharedRef<FJsonObject>& Change, const TCHAR* Waiting);
 	void AskFree();
+	void AskShop();
+	void SaveToken() const;
 
 	void AskWorld();
 	void AskPlayer();
@@ -214,6 +257,18 @@ private:
 	bool bRequestAsked = false;
 	/** The wallet's holdings changed with what was just asked: prove them again once it settles. */
 	bool bProveAfter = false;
+	/** A proof is to be asked for as soon as none is in flight. */
+	bool bProofWanted = false;
+	/** A proof is in flight: asked of the server, not settled yet. */
+	bool bProving = false;
+	/** The player asked for this proof by hand: its outcome is theirs to read. */
+	bool bProofByHand = false;
+	FString PendingProof;
+	bool bProofAsked = false;
+	double NextProof = 0.0;
+	void StartProof();
+	void AskProof();
+	void ReadHoldings(const FJsonObject& Json);
 	int32 BasesAsked = 0;
 	double NextWorld = 0.0;
 	double NextMe = 0.0;
@@ -221,4 +276,12 @@ private:
 	double NextRequest = 0.0;
 	double NextFree = 0.0;
 	bool bFreeAsked = false;
+	bool bShop = false;
+	bool bShopAsked = false;
+	/** The skin being bought by the request that has not settled yet. */
+	FString BuyingSkin;
+	double NextArrival = 0.0;
+	int32 ArrivalProofs = 0;
+	/** Whether the wallet has been asked what it holds since it connected. */
+	bool bProvedOnConnect = false;
 };

@@ -18,6 +18,13 @@
 // P opens the faction's people: its members, those it has invited, and the players in no faction.
 // W and S choose one; I invites, X withdraws an invitation, K votes to remove a member, U takes the
 // vote back, and L, on yourself, leaves the faction.
+//
+// H opens the shop: D-bucks bought with ERA through the publisher's vault, and skins bought with
+// D-bucks. W and S choose; F buys. What is bought is the wallet's: it goes to the inventory.
+//
+// I opens the inventory: what the wallet proves it holds of D-bucks and ERA, and each skin it owns.
+// W and S choose a skin; F wears it or takes it off. A skin need not be worn to be owned, and it is
+// on the hero only while the wallet proves it owns it.
 
 #pragma once
 
@@ -38,7 +45,21 @@ struct FSennitePerson;
 struct FSennitePrefab;
 struct FSenniteStructureView;
 
-UCLASS()
+/** The hero mesh a shop skin is. */
+USTRUCT()
+struct FSenniteSkinMesh
+{
+	GENERATED_BODY()
+
+	/** The shop's id for the skin. */
+	UPROPERTY()
+	FString Id;
+
+	UPROPERTY()
+	FSoftObjectPath Mesh;
+};
+
+UCLASS(Config = Game)
 class SENNITE_API ASenniteBaseEditor : public AActor
 {
 	GENERATED_BODY()
@@ -71,6 +92,21 @@ public:
 	int32 NeedIndex = 0;
 	/** Which amount the commit button commits: all that is needed, or a part. */
 	int32 AmountIndex = 0;
+
+	/** Which hero mesh each shop skin is. Set in DefaultGame.ini. */
+	UPROPERTY(Config)
+	TArray<FSenniteSkinMesh> Skins;
+
+	/** Whether the panel shows the shop. */
+	bool bShop = false;
+	/** Which row of the shop is chosen: the first buys D-bucks, the rest are the skins. */
+	int32 ShopIndex = 0;
+	/** Whether the panel shows the inventory. */
+	bool bInventory = false;
+	/** Which skin of the inventory is chosen. */
+	int32 InventoryIndex = 0;
+	/** The mesh the hero is dressed in now. */
+	FSoftObjectPath Dressed;
 
 	/** Whether the panel shows the faction's people instead of the parcel. */
 	bool bPeople = false;
@@ -128,6 +164,11 @@ private:
 	void CopyCode();
 	void ProveMaterials();
 	void TogglePeople();
+	void ToggleShop();
+	void ShopAct();
+	void ToggleInventory();
+	void InventoryAct();
+	void DressHero();
 	void Join();
 	void InvitePerson();
 	void VotePerson();
@@ -170,6 +211,9 @@ private:
 	/** The grid cell the cursor is on, marked on the ground. */
 	UPROPERTY()
 	UStaticMeshComponent* CursorTile = nullptr;
+
+	/** The pawn the hero mesh was last set on: a new pawn starts in the hero's own mesh. */
+	TWeakObjectPtr<APawn> DressedPawn;
 };
 
 /** Puts the base editor in every game world when a publisher's server is set. */

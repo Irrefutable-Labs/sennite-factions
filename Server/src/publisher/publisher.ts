@@ -30,6 +30,11 @@ import { Shop, type Purse } from "./shop.js";
 import type { Store } from "./store.js";
 import type { Economy, ShopWorld } from "./world.js";
 
+/** How many times a wallet is asked for a proof before the game says it proved nothing. */
+const PROOF_ATTEMPTS = 5;
+/** How long an answered proof is given to be established before the wallet is asked again. */
+const PROOF_SETTLE_MS = 2_000;
+
 /** How long a leaver's materials stay committed after they go (spec 3): 48 hours. */
 export const NOTICE_MS = 48 * 60 * 60 * 1000;
 
@@ -399,9 +404,22 @@ export class Publisher {
   async proven(connection: Connection): Promise<Map<string, bigint> | undefined> {
     // a proof covers the objects it is asked about: the skins are asked about one by one, each by its object id
     const asked = [...this.options.catalogue.resources, this.shop.symbol, "ERA", ...Object.keys(this.options.store.data.shop.skins)];
-    const result = await this.options.app.wait(await this.options.app.request(connection, ask.owns(asked)));
-    if (result.fact !== "owns" || result.owns === undefined) return undefined;
-    return new Map(result.owns.map((o) => [o.object, o.amount]));
+    // A proof stands only while the wallet has not moved on from the position it was made at. A
+    // wallet that takes something in just after answering leaves a proof that establishes nothing:
+    // that is no answer about what it holds, so the wallet is asked again.
+    for (let attempt = 0; attempt < PROOF_ATTEMPTS; attempt++) {
+      const ref = await this.options.app.request(connection, ask.owns(asked));
+      const answered = await this.options.app.wait(ref, { until: "answered" });
+      if (answered.outcome !== "carried_out") return undefined;
+      const deadline = this.options.now() + PROOF_SETTLE_MS;
+      for (;;) {
+        const result = await this.options.app.result(ref);
+        if (result.fact === "owns" && result.owns !== undefined) return new Map(result.owns.map((o) => [o.object, o.amount]));
+        if (this.options.now() > deadline) break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+    return undefined;
   }
 
   /** What a proof says the wallet owns of each resource. */

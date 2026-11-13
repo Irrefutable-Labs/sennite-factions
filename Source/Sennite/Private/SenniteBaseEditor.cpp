@@ -18,11 +18,17 @@
 #include "GameFramework/PlayerController.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "Materials/MaterialInterface.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "SenniteCharacter.h"
 #include "SennitePublisher.h"
 #include "SenniteStructure.h"
 
 namespace
 {
+	/** How much ERA the shop's first row trades for D-bucks. */
+	const TCHAR* EraForDBucks = TEXT("2");
+
 	/** How much the commit button commits: everything still needed, or a part of it. */
 	const int32 Amounts[] = { 0, 100, 50, 10 };
 
@@ -225,6 +231,7 @@ void ASenniteBaseEditor::Open()
 	EditorInput->BindKey(EKeys::O, IE_Pressed, this, &ASenniteBaseEditor::CopyCode);
 	EditorInput->BindKey(EKeys::M, IE_Pressed, this, &ASenniteBaseEditor::ProveMaterials);
 	EditorInput->BindKey(EKeys::P, IE_Pressed, this, &ASenniteBaseEditor::TogglePeople);
+	EditorInput->BindKey(EKeys::H, IE_Pressed, this, &ASenniteBaseEditor::ToggleShop);
 	EditorInput->BindKey(EKeys::J, IE_Pressed, this, &ASenniteBaseEditor::Join);
 	EditorInput->BindKey(EKeys::I, IE_Pressed, this, &ASenniteBaseEditor::InvitePerson);
 	EditorInput->BindKey(EKeys::K, IE_Pressed, this, &ASenniteBaseEditor::VotePerson);
@@ -240,6 +247,8 @@ void ASenniteBaseEditor::Close()
 	}
 	bEditing = false;
 	bPeople = false;
+	bShop = false;
+	bInventory = false;
 	if (APlayerController* Controller = GetWorld()->GetFirstPlayerController()) {
 		if (EditorInput != nullptr) {
 			Controller->PopInputComponent(EditorInput);
@@ -288,7 +297,13 @@ void ASenniteBaseEditor::Move(int32 DX, int32 DY)
 // the camera looks straight down with the map's +X up the screen and +Y to the right
 void ASenniteBaseEditor::MoveUp()
 {
-	if (bPeople) {
+	if (bInventory) {
+		InventoryIndex = FMath::Max(0, InventoryIndex - 1);
+	}
+	else if (bShop) {
+		ShopIndex = FMath::Max(0, ShopIndex - 1);
+	}
+	else if (bPeople) {
 		PersonIndex = FMath::Max(0, PersonIndex - 1);
 	}
 	else {
@@ -298,7 +313,14 @@ void ASenniteBaseEditor::MoveUp()
 
 void ASenniteBaseEditor::MoveDown()
 {
-	if (bPeople) {
+	const USennitePublisher* Shop = Publisher();
+	if (bInventory) {
+		InventoryIndex = FMath::Min(FMath::Max(0, (Shop != nullptr ? Shop->Inventory.Num() : 0) - 1), InventoryIndex + 1);
+	}
+	else if (bShop) {
+		ShopIndex = FMath::Min(Shop != nullptr ? Shop->ShopSkins.Num() : 0, ShopIndex + 1);
+	}
+	else if (bPeople) {
 		PersonIndex = FMath::Min(FMath::Max(0, PeopleRows().Num() - 1), PersonIndex + 1);
 	}
 	else {
@@ -331,6 +353,16 @@ void ASenniteBaseEditor::Turn()
 
 void ASenniteBaseEditor::Place()
 {
+	if (bInventory) {
+		// in the inventory the same key wears a skin and takes it off
+		InventoryAct();
+		return;
+	}
+	if (bShop) {
+		// in the shop the same key buys
+		ShopAct();
+		return;
+	}
 	USennitePublisher* Server = Publisher();
 	const FSennitePrefab* Prefab = Chosen();
 	if (Server == nullptr || Prefab == nullptr || Selected() != nullptr) {
@@ -497,7 +529,91 @@ void ASenniteBaseEditor::TogglePeople()
 	const FSenniteBaseView* View = Base();
 	// a faction's people are its members' to see
 	bPeople = !bPeople && View != nullptr && View->bMember;
+	bShop = false;
+	bInventory = false;
 	PersonIndex = 0;
+}
+
+void ASenniteBaseEditor::ToggleShop()
+{
+	const USennitePublisher* Server = Publisher();
+	// the shop sells to a connected wallet
+	bShop = !bShop && Server != nullptr && Server->bConnected;
+	bPeople = false;
+	bInventory = false;
+	ShopIndex = 0;
+}
+
+void ASenniteBaseEditor::ToggleInventory()
+{
+	const USennitePublisher* Server = Publisher();
+	// an inventory is a connected wallet's
+	bInventory = !bInventory && Server != nullptr && Server->bConnected;
+	bPeople = false;
+	bShop = false;
+	InventoryIndex = 0;
+}
+
+void ASenniteBaseEditor::InventoryAct()
+{
+	USennitePublisher* Server = Publisher();
+	if (Server == nullptr || !Server->Inventory.IsValidIndex(InventoryIndex)) {
+		return;
+	}
+	// wearing is the player's choice among what the wallet owns: nothing is asked of the wallet for it
+	const FString& SkinId = Server->Inventory[InventoryIndex].SkinId;
+	Server->Wear(Server->Wearing == SkinId ? FString() : SkinId);
+}
+
+void ASenniteBaseEditor::ShopAct()
+{
+	USennitePublisher* Server = Publisher();
+	if (Server == nullptr || !Server->bConnected) {
+		return;
+	}
+	if (ShopIndex == 0) {
+		Server->BuyDBucks(EraForDBucks);
+		return;
+	}
+	if (!Server->ShopSkins.IsValidIndex(ShopIndex - 1)) {
+		return;
+	}
+	// what is bought goes to the wallet, and shows in the inventory: the shop only sells
+	Server->BuySkin(Server->ShopSkins[ShopIndex - 1].Id);
+}
+
+void ASenniteBaseEditor::DressHero()
+{
+	const USennitePublisher* Server = Publisher();
+	const APlayerController* Controller = GetWorld()->GetFirstPlayerController();
+	ASenniteCharacter* Hero = Controller != nullptr ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
+	if (Server == nullptr || Hero == nullptr) {
+		return;
+	}
+	if (DressedPawn.Get() != Hero) {
+		// a new pawn starts in the hero's own mesh
+		DressedPawn = Hero;
+		Dressed = GetDefault<ASenniteCharacter>()->HeroMesh;
+	}
+	// the skin the player chose, only while the wallet's proof says it owns it; otherwise the hero as she ships
+	FSoftObjectPath Want = GetDefault<ASenniteCharacter>()->HeroMesh;
+	if (Server->bMaterialsKnown && !Server->Wearing.IsEmpty() && Server->Owns(Server->Wearing)) {
+		const ASenniteBaseEditor* Shared = GetDefault<ASenniteBaseEditor>();
+		if (const FSenniteSkinMesh* Skin = Shared->Skins.FindByPredicate([Server](const FSenniteSkinMesh& S) { return S.Id == Server->Wearing; })) {
+			Want = Skin->Mesh;
+		}
+	}
+	if (Want == Dressed) {
+		return;
+	}
+	if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(Want.TryLoad())) {
+		Hero->GetMesh()->SetSkeletalMeshAsset(Mesh);
+		Dressed = Want;
+	}
+	else {
+		UE_LOG(LogTemp, Error, TEXT("Skin mesh '%s' did not load ([/Script/Sennite.SenniteBaseEditor] in DefaultGame.ini)"), *Want.ToString());
+		Dressed = Want;
+	}
 }
 
 void ASenniteBaseEditor::Join()
@@ -511,6 +627,11 @@ void ASenniteBaseEditor::Join()
 
 void ASenniteBaseEditor::InvitePerson()
 {
+	if (!bPeople) {
+		// off the people page the same key opens the inventory
+		ToggleInventory();
+		return;
+	}
 	USennitePublisher* Server = Publisher();
 	FPersonRow Row;
 	if (Server != nullptr && ChosenPerson(Row) && Row.Kind == FPersonRow::EKind::Free) {
@@ -659,7 +780,7 @@ void ASenniteBaseEditor::UpdateGhost()
 	const FSennitePrefab* Prefab = Chosen();
 	const FSenniteBaseView* View = Base();
 	// the prefab to place shows where it would go, on free ground of a parcel the player may plan
-	const bool bShow = bEditing && !bPeople && Prefab != nullptr && View != nullptr && View->bMember && Selected() == nullptr;
+	const bool bShow = bEditing && !bPeople && !bShop && !bInventory && Prefab != nullptr && View != nullptr && View->bMember && Selected() == nullptr;
 	if (!bShow) {
 		if (Ghost != nullptr) {
 			Ghost->Destroy();
@@ -691,6 +812,7 @@ void ASenniteBaseEditor::Tick(float DeltaTime)
 	SyncStructures();
 	UpdateGhost();
 	UpdateCursorTile();
+	DressHero();
 }
 
 void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
@@ -796,6 +918,60 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 		Line(TEXT("faction"), TEXT("ANOTHER FACTION'S PARCEL"), 11, Dim);
 	}
 
+	const FString Purse = Server->bMaterialsKnown ? FString::Printf(TEXT("D-BUCKS %d   ERA %s"), Server->DBucks, *Server->Era) : FString(TEXT("M: show what the wallet holds"));
+	if (Editor->bInventory && Server->bConnected) {
+		// what the wallet proves it holds: a skin is owned whether or not it is worn
+		Line(TEXT("page"), TEXT("INVENTORY"), 13, White);
+		Line(TEXT("purse"), Purse, 11, Server->bMaterialsKnown ? White : Dim);
+		const int32 At = FMath::Clamp(Editor->InventoryIndex, 0, FMath::Max(0, Server->Inventory.Num() - 1));
+		if (!Server->bMaterialsKnown) {
+			Line(TEXT("skins"), TEXT("asking the wallet what it holds..."), 11, Dim);
+		}
+		else if (Server->Inventory.Num() == 0) {
+			Line(TEXT("skins"), TEXT("NO SKINS"), 11, Dim);
+		}
+		for (int32 Index = 0; Index < Server->Inventory.Num(); ++Index) {
+			const FSenniteOwnedSkin& Skin = Server->Inventory[Index];
+			Line(*FString::Printf(TEXT("skin%d"), Index), FString::Printf(TEXT("%s%s #%d%s"), Index == At ? TEXT("> ") : TEXT("  "), *Skin.Name.ToUpper(), Skin.Serial,
+				Server->Wearing == Skin.SkinId ? TEXT("   WORN") : TEXT("")), 11, Index == At ? White : Dim);
+		}
+		if (Server->Inventory.IsValidIndex(At)) {
+			Line(TEXT("keys"), Server->Wearing == Server->Inventory[At].SkinId ? TEXT("F: take off   W S: choose   I: back   H: shop") : TEXT("F: wear   W S: choose   I: back   H: shop"), 10, Dim);
+		}
+		else {
+			Line(TEXT("keys"), TEXT("I: back   H: shop"), 10, Dim);
+		}
+		if (!Server->Message.IsEmpty()) {
+			Line(TEXT("message"), Server->Message, 11, Server->bBusy ? Dim : Server->bLastOk ? Good : Short);
+		}
+		Draw();
+		return;
+	}
+
+	if (Editor->bShop && Server->bConnected) {
+		Line(TEXT("page"), TEXT("SHOP"), 13, White);
+		Line(TEXT("purse"), Purse, 11, Server->bMaterialsKnown ? White : Dim);
+		const int32 At = FMath::Clamp(Editor->ShopIndex, 0, Server->ShopSkins.Num());
+		Line(TEXT("shop0"), FString::Printf(TEXT("%sBUY D-BUCKS   %s ERA"), At == 0 ? TEXT("> ") : TEXT("  "), EraForDBucks), 11, At == 0 ? White : Dim);
+		for (int32 Index = 0; Index < Server->ShopSkins.Num(); ++Index) {
+			const FSenniteSkinForSale& Skin = Server->ShopSkins[Index];
+			int32 Owned = 0;
+			for (const FSenniteOwnedSkin& Mine : Server->Inventory) {
+				Owned += Mine.SkinId == Skin.Id ? 1 : 0;
+			}
+			const FString Note = Server->OnItsWay == Skin.Id && Owned == 0 ? FString(TEXT("   ON ITS WAY TO THE WALLET"))
+				: Owned > 0 ? FString::Printf(TEXT("   OWNED %d"), Owned) : FString();
+			Line(*FString::Printf(TEXT("shop%d"), Index + 1), FString::Printf(TEXT("%s%s   %d D-BUCKS%s"), At == Index + 1 ? TEXT("> ") : TEXT("  "), *Skin.Name.ToUpper(), Skin.Price, *Note), 11,
+				Owned > 0 ? Good : At == Index + 1 ? White : Dim);
+		}
+		Line(TEXT("keys"), At == 0 ? TEXT("F: trade ERA for D-bucks   W S: choose   H: back   I: inventory") : TEXT("F: buy   W S: choose   H: back   I: inventory"), 10, Dim);
+		if (!Server->Message.IsEmpty()) {
+			Line(TEXT("message"), Server->Message, 11, Server->bBusy ? Dim : Server->bLastOk ? Good : Short);
+		}
+		Draw();
+		return;
+	}
+
 	if (Editor->bPeople && View != nullptr && View->bMember) {
 		// the faction's people, the chosen one marked
 		const TArray<FPersonRow> Rows = Editor->PeopleRows();
@@ -863,7 +1039,7 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 	}
 	else if (Prefab != nullptr) {
 		Line(TEXT("prefab"), FString::Printf(TEXT("%s   %s"), *Prefab->Name.ToUpper(), *RecipeOf(*Prefab)), 13, White);
-		Line(TEXT("keys"), View != nullptr && View->bMember ? TEXT("F: place   Q E: prefab   R: turn   W A S D: move   P: people") : TEXT("W A S D: move   TAB: next parcel"), 10, Dim);
+		Line(TEXT("keys"), View != nullptr && View->bMember ? TEXT("F: place   Q E: prefab   R: turn   W A S D: move   P: people   H: shop   I: inventory") : TEXT("W A S D: move   TAB: next parcel   H: shop   I: inventory"), 10, Dim);
 	}
 
 	if (!Server->Message.IsEmpty()) {
