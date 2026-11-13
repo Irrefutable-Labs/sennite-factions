@@ -16,7 +16,7 @@ import {
   type Founding,
 } from "./state.js";
 import { decodeChange, type Change } from "./change.js";
-import { judge } from "./validity.js";
+import { judge, type Verdict } from "./validity.js";
 
 /** What a reader found at a cell. */
 export type CellReading =
@@ -109,7 +109,14 @@ export class Mirror {
    * advances past the cell (spec 7.4).
    */
   accept(occupant: { signerKey: string; payload: Uint8Array; step: Uint8Array }): LineageEntry {
-    const verdict = judge(this.#state, this.#commitment, this.catalogue, this.parcel, occupant.signerKey, occupant.payload);
+    // The rules never throw on an occupant's bytes. If one ever did, every mirror
+    // would still spend the cell the same way: as an occupant that changes nothing.
+    let verdict: Verdict;
+    try {
+      verdict = judge(this.#state, this.#commitment, this.catalogue, this.parcel, occupant.signerKey, occupant.payload);
+    } catch {
+      verdict = { valid: false, why: "the change could not be judged" };
+    }
     const next = verdict.valid ? verdict.next : this.#state;
     const entry: LineageEntry = {
       parent: this.#commitment,

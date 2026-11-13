@@ -23,7 +23,7 @@ export function covered(prefab: Prefab, x: number, y: number, rotation: Rotation
 
 function configAllowed(prefab: Prefab, config: Record<string, string>): string | undefined {
   for (const [option, value] of Object.entries(config)) {
-    const allowed = prefab.options[option];
+    const allowed = Object.hasOwn(prefab.options, option) ? prefab.options[option] : undefined;
     if (allowed === undefined) return `the catalogue gives ${prefab.id} no option ${option}`;
     if (!allowed.includes(value)) return `the catalogue does not allow ${option} = ${value} on ${prefab.id}`;
   }

@@ -249,20 +249,23 @@ export class Publisher {
       this.#mirrors.set(factionId, mirror);
     }
     const before = mirror.height;
+    // Members only leave on this walk, so whoever leaves is listed here.
+    const listed = [...mirror.state.members];
     const end = await mirror.walk(this.cells);
-    this.noteLeavers(factionId, mirror, before);
+    this.noteLeavers(factionId, mirror, before, listed);
     return { mirror, end };
   }
 
   /** Start the 48-hour clock for each member whose own change left the faction since `from`. */
-  private noteLeavers(factionId: string, mirror: Mirror, from: number): void {
+  private noteLeavers(factionId: string, mirror: Mirror, from: number, listed: Member[]): void {
     const record = this.options.store.faction(factionId);
     let noted = false;
     for (const entry of mirror.lineage.slice(from)) {
-      if (entry.valid && entry.change?.kind === "leave" && record.notices[entry.signerKey] === undefined) {
-        record.notices[entry.signerKey] = { leftAt: this.options.now(), returnedAt: 0 };
-        noted = true;
-      }
+      if (!entry.valid || entry.change?.kind !== "leave" || record.notices[entry.signerKey] !== undefined) continue;
+      const leaver = listed.find((m) => m.signingKey === entry.signerKey);
+      if (leaver === undefined) throw new Error("a member left whom the state did not list");
+      record.notices[entry.signerKey] = { genesis: leaver.genesis, deviceId: leaver.deviceId, leftAt: this.options.now(), returnedAt: 0 };
+      noted = true;
     }
     if (noted) this.options.store.save();
   }
@@ -348,6 +351,11 @@ export class Publisher {
     return result;
   }
 
+  /** Commit to a structure and wait for what the publisher's account established. */
+  async contribute(factionId: string, connection: Connection, instanceId: string, resource: string, amount: string): Promise<Result> {
+    return this.committed(factionId, connection, instanceId, await this.commit(factionId, connection, instanceId, resource, amount));
+  }
+
   /** Ask the wallet on `connection` to take contributions back (spec 8.4: withdraw, or release after a dismantle). */
   async takeBack(connection: Connection, vaults: Uint8Array[]): Promise<Result> {
     return this.options.app.wait(await this.options.app.request(connection, ask.contribution.takeBack(vaults)));
@@ -358,7 +366,8 @@ export class Publisher {
     const { mirror } = await this.follow(factionId);
     const record = this.options.store.faction(factionId);
     const publisher = await this.party();
-    return this.contributions.funding(factionId, mirror.state, Object.keys(record.notices), publisher);
+    const leavers = Object.entries(record.notices).map(([signingKey, n]) => ({ signingKey, genesis: n.genesis, deviceId: n.deviceId }));
+    return this.contributions.funding(factionId, mirror.state, leavers, publisher);
   }
 
   /**

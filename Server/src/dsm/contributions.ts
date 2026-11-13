@@ -14,7 +14,7 @@
 import { pb, type AppAccount } from "dsm-app-client";
 import { hex, unhex } from "../faction/canonical.js";
 import type { Catalogue } from "../faction/catalogue.js";
-import type { FactionState } from "../faction/state.js";
+import type { FactionState, Member } from "../faction/state.js";
 import type { Store } from "../publisher/store.js";
 import { lockedVaults, type Party } from "./routes.js";
 
@@ -32,6 +32,8 @@ export interface Contribution {
   amount: number;
   /** Whether it meets all four conditions of spec 8.3. */
   counts: boolean;
+  /** Whether it counts only because its owner left by their own change and the 48-hour notice has not run. */
+  leaving: boolean;
   /** Why it does not count; empty when it does. */
   why: string;
 }
@@ -101,6 +103,7 @@ export class Contributions {
     }
     const [decidesWithdraw] = withdraw.signers;
     if (withdraw.signers.length !== 1 || decidesWithdraw === undefined) return { why: "its withdraw is not decided by one key" };
+    if (decidesWithdraw.signatureAlg !== publisher.signatureAlg) return { why: "its withdraw is not decided by a device key" };
     if (same(decidesWithdraw.publicKey, publisher.signingKey)) return { why: "its withdraw is decided by the publisher" };
     return { owner: hex(decidesWithdraw.publicKey) };
   }
@@ -110,7 +113,7 @@ export class Contributions {
     factionId: string,
     instanceId: string,
     state: FactionState,
-    leavers: string[],
+    leavers: Member[],
     publisher: Party,
   ): Promise<{ contributions: Contribution[]; notEstablished: string[] }> {
     const recorded = this.store.faction(factionId).contributions[instanceId] ?? [];
@@ -131,24 +134,26 @@ export class Contributions {
         const resource = resources.get(hex(vault.tokenPolicyCommit)) ?? "";
         const owner = "owner" in terms ? terms.owner : "";
         let why = "";
+        let leaving = false;
         if ("why" in terms) why = terms.why;
         else if (vault.status !== pb.SofiVaultStatus.ACTIVE) why = "it is not Active: its units went back to its owner";
         else if (resource === "") why = "it holds something that is not a resource";
         else {
-          const member = state.members.find((m) => m.signingKey === owner);
-          const listed =
-            member !== undefined && member.genesis === hex(vault.ownerGenesis) && member.deviceId === hex(vault.ownerDeviceId);
+          const isOwner = (m: Member): boolean =>
+            m.signingKey === owner && m.genesis === hex(vault.ownerGenesis) && m.deviceId === hex(vault.ownerDeviceId);
+          const listed = state.members.some(isOwner);
           // A member who left by their own change still counts while the vault is Active (spec 8.3, condition 4).
-          if (!listed && !leavers.includes(owner)) why = "its owner is not a member of the faction";
+          leaving = !listed && leavers.some(isOwner);
+          if (!listed && !leaving) why = "its owner is not a member of the faction";
         }
-        contributions.push({ vault: hex(vault.vaultId), owner, resource, amount: Number(vault.amount), counts: why === "", why });
+        contributions.push({ vault: hex(vault.vaultId), owner, resource, amount: Number(vault.amount), counts: why === "", leaving, why });
       }
     }
     return { contributions, notEstablished };
   }
 
-  /** The funding of every placed structure (spec 8.3). `leavers` are the signing keys of members who left by their own change. */
-  async funding(factionId: string, state: FactionState, leavers: string[], publisher: Party): Promise<Map<string, Funding>> {
+  /** The funding of every placed structure (spec 8.3). `leavers` are the members who left by their own change. */
+  async funding(factionId: string, state: FactionState, leavers: Member[], publisher: Party): Promise<Map<string, Funding>> {
     const out = new Map<string, Funding>();
     for (const placed of state.placed) {
       const prefab = this.catalogue.prefabs.get(placed.prefabId);

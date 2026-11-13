@@ -30,6 +30,9 @@ export interface ContributionRecord {
 
 /** A leaver's 48-hour notice (spec 3): the publisher's server keeps the clock. */
 export interface Notice {
+  /** The leaver's genesis and device id (lowercase hex), as the state listed them. */
+  genesis: string;
+  deviceId: string;
   /** When the leave was final, on the server's clock (milliseconds). */
   leftAt: number;
   /** When the server returned the leaver's vaults; 0 until it has. */

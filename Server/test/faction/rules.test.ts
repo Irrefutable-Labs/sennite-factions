@@ -94,6 +94,8 @@ describe("placing a prefab", () => {
     expect(verdict(fresh(), a.signingKey, wall({ gate: "open" })).valid).toBe(true);
     expect(verdict(fresh(), a.signingKey, wall({ gate: "ajar" })).valid).toBe(false);
     expect(verdict(fresh(), a.signingKey, wall({ moat: "yes" })).valid).toBe(false);
+    // An option named like something every object carries is still no option of the catalogue's.
+    expect(verdict(fresh(), a.signingKey, wall({ constructor: "x" }))).toMatchObject({ valid: false, why: "the catalogue gives wall no option constructor" });
   });
 
   it("turns the footprint with the prefab", () => {
