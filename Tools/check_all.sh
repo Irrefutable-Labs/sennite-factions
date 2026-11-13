@@ -3,7 +3,7 @@
 # Exit status 0 only if all of them passed.
 cd "$(dirname "$0")"
 failed=0
-for check in check_first_playable.sh check_weapons.sh check_building.sh check_hud.sh; do
+for check in check_first_playable.sh check_weapons.sh check_building.sh check_hud.sh check_storm.sh; do
   if ./$check > /dev/null 2>&1; then
     echo "passed  $check"
   else

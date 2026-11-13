@@ -83,7 +83,7 @@ FString ASenniteGameMode::InitNewPlayer(APlayerController* NewPlayerController, 
 
 void ASenniteGameMode::GenericPlayerInitialization(AController* NewPlayer) {
 	Super::GenericPlayerInitialization(NewPlayer);
-	if (!GameStarted && GetNumPlayers() >= 2) {
+	if (!GameStarted && GetNumPlayers() >= PlayersToStartStorm) {
 		GameStarted = true;
 		TArray<AActor*> StormActors;
 		UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStormActor::StaticClass(), StormActors);
@@ -93,7 +93,7 @@ void ASenniteGameMode::GenericPlayerInitialization(AController* NewPlayer) {
 			}
 		}
 		FTimerHandle StormSetupTimerHandle;
-		GetWorldTimerManager().SetTimer(StormSetupTimerHandle, this, &ASenniteGameMode::GameModeStartStorm, 30.0f, false);
+		GetWorldTimerManager().SetTimer(StormSetupTimerHandle, this, &ASenniteGameMode::GameModeStartStorm, FMath::Max(0.1f, StormStartDelay), false);
 		FTimerHandle InactivityCheckTimerHandle;
 		GetWorldTimerManager().SetTimer(InactivityCheckTimerHandle, this, &ASenniteGameMode::CheckRemainingPlayers, 1.0f, true);
 	}
@@ -113,7 +113,10 @@ void ASenniteGameMode::NetMulticastSpawnStorm_Implementation() {
 }
 
 void ASenniteGameMode::GameModeStartStorm_Implementation() {
-	CurrentStorm->ServerStartStorm();
+	// a map with no storm placed in it has none to start
+	if (CurrentStorm != nullptr) {
+		CurrentStorm->ServerStartStorm();
+	}
 }
 
 bool ASenniteGameMode::GameModeStartStorm_Validate() {

@@ -53,7 +53,28 @@ return lerp(float3(0.20, 0.21, 0.22), float3(0.30, 0.31, 0.32), odd);
     return mat
 
 
+def build_storm_material():
+    """The storm's wall: a see-through violet sheet, seen from both sides, that takes no light."""
+    path = "/Game/Storm/M_StormWall"
+    if eal.does_asset_exist(path):
+        eal.delete_asset(path)
+    mat = unreal.AssetToolsHelpers.get_asset_tools().create_asset("M_StormWall", "/Game/Storm", unreal.Material, unreal.MaterialFactoryNew())
+    mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    mat.set_editor_property("two_sided", True)
+    colour = mel.create_material_expression(mat, unreal.MaterialExpressionConstant3Vector, -400, 0)
+    colour.set_editor_property("constant", unreal.LinearColor(0.28, 0.05, 0.55, 1.0))
+    opacity = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -400, 200)
+    opacity.set_editor_property("r", 0.45)
+    if not (mel.connect_material_property(colour, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+            and mel.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)):
+        raise RuntimeError("storm material did not wire up")
+    mel.recompile_material(mat)
+    eal.save_loaded_asset(mat)
+
+
 grid = build_grid_material()
+build_storm_material()
 unreal.EditorLoadingAndSavingUtils.new_blank_map(False)
 actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 cube = eal.load_asset(CUBE)
@@ -127,6 +148,11 @@ ppv.set_editor_property("settings", s)
 # weapons to pick up, to the right of the start, lying at knee height
 spawn(unreal.SenniteRifle, "rifle_pickup", unreal.Vector(0, 250, 60), unreal.Rotator(0, 0, 0), "pickups")
 spawn(unreal.SenniteShotgun, "shotgun_pickup", unreal.Vector(0, 450, 60), unreal.Rotator(0, 0, 0), "pickups")
+
+# the storm: its safe circle is centred ahead of the start, so the start is well inside it and its
+# wall crosses the range 2,500 behind the start
+storm = spawn(unreal.StormActor, "storm", unreal.Vector(2500, 0, 0), folder="range")
+storm.set_editor_property("start_radius", 5000.0)
 
 # where the player starts: standing on the ground, facing the blocks (+X)
 spawn(unreal.PlayerStart, "start", unreal.Vector(0, 0, 110), unreal.Rotator(0, 0, 0), "range")

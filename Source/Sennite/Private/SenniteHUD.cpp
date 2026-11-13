@@ -10,6 +10,7 @@
 #include "SenniteCharacter.h"
 #include "SennitePlayerState.h"
 #include "Engine/Font.h"
+#include "StormActor.h"
 #include "WeaponActor.h"
 
 ASenniteHUD::ASenniteHUD()
@@ -47,6 +48,10 @@ FSenniteHudReadout ASenniteHUD::ReadState() const
 		Readout.Reserve = State->EquippedWeaponsAmmunition.IsValidIndex(Weapon->WeaponType) ? State->EquippedWeaponsAmmunition[Weapon->WeaponType] : 0;
 	}
 	Readout.Kills = State->KillCount;
+	if (const AStormActor* Storm = Hero->CurrentStorm) {
+		Readout.bInStorm = Hero->InStorm;
+		Readout.StormDamage = Storm->Damage;
+	}
 	if (const AGameStateBase* Game = GetWorld()->GetGameState()) {
 		for (const APlayerState* Player : Game->PlayerArray) {
 			Readout.Alive += Player != nullptr && !Player->IsSpectator() ? 1 : 0;
@@ -140,6 +145,12 @@ void ASenniteHUD::DrawStatus()
 	DrawRect(Plate, W - 222.0f * S, 16.0f * S, 198.0f * S, 34.0f * S);
 	Label(TEXT("alive"), FString::Printf(TEXT("%d ALIVE"), Now.Alive), W - 210.0f * S, 24.0f * S, 14, White);
 	Label(TEXT("kills"), FString::Printf(TEXT("%d KILLS"), Now.Kills), W - 110.0f * S, 24.0f * S, 14, White);
+
+	// top centre: a warning while the player is outside the safe circle
+	if (Now.bInStorm) {
+		DrawRect(FLinearColor(0.25f, 0.02f, 0.4f, 0.6f), W * 0.5f - 130.0f * S, 16.0f * S, 260.0f * S, 34.0f * S);
+		Label(TEXT("storm"), TEXT("IN THE STORM"), W * 0.5f - 62.0f * S, 24.0f * S, 14, White);
+	}
 
 	LastDrawn = Drawing;
 }

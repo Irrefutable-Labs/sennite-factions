@@ -399,6 +399,11 @@ void ASenniteCharacter::Tick(float DeltaTime) {
 	Super::Tick(DeltaTime);
 	// The weapon that is part of the hero's own mesh gives way to a game weapon in the hand.
 	// CurrentWeapon is replicated, so every machine hides and shows it alike.
+	// In the storm means outside its safe circle: farther from the circle's centre than its radius.
+	// The server decides; InStorm is replicated.
+	if (HasAuthority() && CurrentStorm != nullptr) {
+		InStorm = FVector::Dist2D(GetActorLocation(), CurrentStorm->GetActorLocation()) > CurrentStorm->GetRadius();
+	}
 	const bool bHideBuiltIn = CurrentWeapon != nullptr;
 	if (bHideBuiltIn != bBuiltInWeaponHidden && GetMesh() != nullptr) {
 		bBuiltInWeaponHidden = bHideBuiltIn;
@@ -553,12 +558,6 @@ void ASenniteCharacter::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AAct
 					Ammo->Destroy();
 				}
 			}
-			else if (OtherActor->IsA(AStormActor::StaticClass())) {
-				/*FString LogMsg = FString("storm overlap begin ") + FString::FromInt(GetNetMode());
-				GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, LogMsg);
-				UE_LOG(LogSenniteCharacter, Warning, TEXT("%s"), *LogMsg);*/
-				InStorm = false;
-			}
 			//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, OtherActor->GetName());
 		}
 	}
@@ -572,9 +571,6 @@ void ASenniteCharacter::OnOverlapEnd(UPrimitiveComponent* OverlappedComp, AActor
 		if (OtherActor != nullptr) {
 			if (OtherActor == this) {
 				return;
-			}
-			if (OtherActor->IsA(AStormActor::StaticClass())) {
-				InStorm = true;
 			}
 		}
 	}
