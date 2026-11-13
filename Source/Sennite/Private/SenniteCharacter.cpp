@@ -22,6 +22,8 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/Material.h"
+#include "Engine/SkeletalMesh.h"
+#include "Animation/AnimInstance.h"
 
 DEFINE_LOG_CATEGORY(LogSenniteCharacter);
 //////////////////////////////////////////////////////////////////////////
@@ -113,9 +115,35 @@ ASenniteCharacter::ASenniteCharacter()
 	JustReloadedShotgun = false;
 	KillCount = 0;*/
 
-	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
-	// are set in the derived blueprint asset named MyCharacter (to avoid direct content references in C++)
+	// The hero's mesh and animation Blueprint are named in DefaultGame.ini (HeroMesh, HeroAnimClass) and put on
+	// the Mesh component in PreInitializeComponents. The heroes are authored facing +Y with their feet at the
+	// origin, so the mesh sits at the bottom of the capsule, turned to face the capsule's forward.
+	GetMesh()->SetRelativeLocationAndRotation(FVector(0.0f, 0.0f, -97.0f), FRotator(0.0f, -90.0f, 0.0f));
 
+	Health = 100.0f;
+	Shield = 0.0f;
+}
+
+void ASenniteCharacter::PreInitializeComponents()
+{
+	Super::PreInitializeComponents();
+
+	USkeletalMeshComponent* HeroComponent = GetMesh();
+	if (HeroComponent == nullptr) {
+		return;
+	}
+	if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(HeroMesh.TryLoad())) {
+		HeroComponent->SetSkeletalMeshAsset(Mesh);
+	}
+	else {
+		UE_LOG(LogSenniteCharacter, Error, TEXT("Hero mesh '%s' did not load; the character has no body"), *HeroMesh.ToString());
+	}
+	if (UClass* AnimClass = HeroAnimClass.TryLoadClass<UAnimInstance>()) {
+		HeroComponent->SetAnimInstanceClass(AnimClass);
+	}
+	else {
+		UE_LOG(LogSenniteCharacter, Error, TEXT("Hero animation class '%s' did not load; the character will not animate"), *HeroAnimClass.ToString());
+	}
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -702,30 +730,31 @@ void ASenniteCharacter::MoveRight(float Value)
 
 void ASenniteCharacter::Sprint(float Value) {
 	APlayerController* LocalController = Cast<APlayerController>(GetController());
+	if (LocalController == nullptr) {
+		return;
+	}
 	bool ADown = LocalController->IsInputKeyDown(EKeys::A);
 	bool WDown = LocalController->IsInputKeyDown(EKeys::W);
 	bool SDown = LocalController->IsInputKeyDown(EKeys::S);
 	bool DDown = LocalController->IsInputKeyDown(EKeys::D);
 	bool OnlyAOrDDown = !WDown && !SDown && (ADown || DDown);
-	UThirdPersonAnimInstance* Animation = Cast<UThirdPersonAnimInstance>(GetMesh()->GetAnimInstance());
-	if (Animation) {
-		if (Animation->AimedIn) {
-			//ServerSetAimedInSpeed();
-		}
-		else if (Value == 0) {
-			//ServerSetWalkingSpeed();
-			ServerSetIsRunningFalse();
+	// The character's own aim state decides this, whichever animation class the hero uses.
+	if (AimedIn) {
+		//ServerSetAimedInSpeed();
+	}
+	else if (Value == 0) {
+		//ServerSetWalkingSpeed();
+		ServerSetIsRunningFalse();
+	}
+	else {
+		// can only sprint if the w key is held down by itself or in combination with the a or d keys
+		if (!(OnlyAOrDDown || SDown) && WDown) {
+			//ServerSetRunningSpeed();
+			ServerSetIsRunningTrue();
 		}
 		else {
-			// can only sprint if the w key is held down by itself or in combination with the a or d keys
-			if (!(OnlyAOrDDown || SDown) && WDown) {
-				//ServerSetRunningSpeed();
-				ServerSetIsRunningTrue();
-			}
-			else {
-				//ServerSetWalkingSpeed();
-				ServerSetIsRunningFalse();
-			}
+			//ServerSetWalkingSpeed();
+			ServerSetIsRunningFalse();
 		}
 	}
 	//Server_SetAnimationVariables();

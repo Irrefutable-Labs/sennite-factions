@@ -77,6 +77,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
 	TSubclassOf<UThirdPersonAnimInstance> AnimInstanceClass;
 
+	/** The hero this character is: the skeletal mesh, with the materials it ships with. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FSoftObjectPath HeroMesh;
+
+	/** The hero's animation Blueprint class. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FSoftClassPath HeroAnimClass;
+
 	UPROPERTY(EditDefaultsOnly, Category = "State")
 	TSubclassOf<ASennitePlayerState> PlayerStateClass;
 
@@ -361,6 +369,9 @@ public:
 	virtual void Tick(float DeltaTime) override;
 	// Override playanimmontage to use pawn mesh
 	virtual float PlayAnimMontage(class UAnimMontage* AnimMontage, float InPlayRate = 1.f, FName StartSectionName = NAME_None) override;
+
+	/** Gives the mesh component its hero before the components start up. */
+	virtual void PreInitializeComponents() override;
 
 	virtual void PostInitializeComponents() override;
 
