@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:dsm": "vitest run --config vitest.dsm.config.ts",
+    "test:game": "vitest run --config vitest.game.config.ts",
     "start": "node dist/publisher/main.js"
   },
   "dependencies": {

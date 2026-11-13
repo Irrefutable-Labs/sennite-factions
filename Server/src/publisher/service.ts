@@ -8,7 +8,7 @@
 // takes back is asked of the wallet by the publisher's account, and the server
 // answers only with facts that account established.
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Connection } from "dsm-app-client";
 import { hex } from "../faction/canonical.js";
@@ -32,6 +32,8 @@ interface Job {
   state: "pending" | "done";
   ok: boolean;
   message: string;
+  /** What else the answer carries, beside whether it was carried out. */
+  data: Record<string, unknown>;
 }
 
 class HttpError extends Error {
@@ -44,6 +46,10 @@ class HttpError extends Error {
 }
 
 const MAX_BODY_BYTES = 64 * 1024;
+/** The most players the server keeps a record of. */
+const MAX_PLAYERS = 10_000;
+/** How long a player whose wallet never connected is kept. */
+const UNCONNECTED_MS = 60 * 60 * 1000;
 /** How long a base read is served again before it is read anew. */
 const BASE_FRESH_MS = 1000;
 
@@ -121,6 +127,16 @@ export class Service {
     return (await this.options.publisher.app.connections()).find((c) => c.connected && hex(c.raw.offerDigest) === offer);
   }
 
+  /** Drop the players whose connect code no wallet approved within the hour. */
+  private async forgetUnconnected(): Promise<void> {
+    const players = this.options.store.data.players;
+    const stale = Object.entries(players).filter(([, p]) => Date.now() - p.since > UNCONNECTED_MS);
+    if (stale.length === 0) return;
+    const offers = new Set((await this.options.publisher.app.connections()).map((c) => hex(c.raw.offerDigest)));
+    for (const [token, p] of stale) if (!offers.has(p.offer)) delete players[token];
+    this.options.store.save();
+  }
+
   private async connected(player: string): Promise<Connection> {
     const connection = await this.connection(player);
     if (connection === undefined) throw new HttpError(409, "no wallet is connected");
@@ -138,9 +154,13 @@ export class Service {
   }
 
   /** Start work a wallet has to answer; the game reads what became of it under the id. */
-  private start(player: string, work: () => Promise<{ ok: boolean; message: string }>, factionId: string): { request: string } {
+  private start(
+    player: string,
+    work: () => Promise<{ ok: boolean; message: string; data?: Record<string, unknown> }>,
+    factionId = "",
+  ): { request: string } {
     const id = hex(randomBytes(16));
-    const job: Job = { player, state: "pending", ok: false, message: "" };
+    const job: Job = { player, state: "pending", ok: false, message: "", data: {} };
     this.#jobs.set(id, job);
     work()
       .then(
@@ -191,10 +211,12 @@ export class Service {
 
     // A new player: a token for their game, and a connect code for their wallet.
     if (is("POST", "players")) {
+      await this.forgetUnconnected();
+      if (Object.keys(store.data.players).length >= MAX_PLAYERS) throw new HttpError(429, "the server has no room for another player now");
       const grant = world.economy.grant;
       const offer = await publisher.offer(world.economy.resources.map((r) => ({ symbol: r.symbol, ...grant })));
       const player = hex(randomBytes(32));
-      store.data.players[player] = { offer: hex(offer.digest) };
+      store.data.players[player] = { offer: hex(offer.digest), since: Date.now() };
       store.save();
       return { status: 201, body: { player, code: offer.code } };
     }
@@ -209,24 +231,30 @@ export class Service {
       };
     }
 
-    // Found a faction on an unassigned parcel. Every founder is a connected wallet; the caller is one of them.
-    if (is("POST", "factions")) {
+    // What the player's wallet holds of each resource: the wallet proves it, the publisher's account checks the proof.
+    if (is("POST", "players", "me", "materials")) {
       const player = this.player(req);
-      const caller = await this.connected(player);
-      const asked = await body(req);
-      const parcelId = text(asked.parcelId, "parcelId");
-      const callerKey = hex(caller.opponent.signingKey);
-      const keys = Array.isArray(asked.members) ? asked.members.map((k) => text(k, "a member's signing key")) : [callerKey];
-      if (!keys.includes(callerKey)) throw new HttpError(403, "the founders do not include the wallet asking");
-      const connections = (await publisher.app.connections()).filter((x) => x.connected);
-      const members = [];
-      for (const key of keys) {
-        const wallet = connections.find((x) => hex(x.opponent.signingKey) === key);
-        if (wallet === undefined) throw new Refused("a founder's wallet is not connected to the game");
-        if ((await publisher.factionOf(key)) !== undefined) throw new Refused("a founder is already a member of a faction");
-        members.push(publisher.member(wallet));
+      const connection = await this.connected(player);
+      return {
+        status: 202,
+        body: this.start(player, async () => {
+          const materials = await publisher.materials(connection);
+          return materials === undefined
+            ? { ok: false, message: "the wallet proved nothing about what it holds" }
+            : { ok: true, message: "the wallet proved what it holds", data: { materials } };
+        }),
+      };
+    }
+
+    // Found a faction on an unassigned parcel, of the asking player's own wallet alone. Nobody is
+    // made a member of a faction by someone else's request.
+    if (is("POST", "factions")) {
+      const caller = await this.connected(this.player(req));
+      const parcelId = text((await body(req)).parcelId, "parcelId");
+      if ((await publisher.factionOf(hex(caller.opponent.signingKey))) !== undefined) {
+        throw new Refused("the wallet is already a member of a faction");
       }
-      const first = await publisher.assign(publisher.founding(parcelId, members, hex(randomBytes(16))));
+      const first = await publisher.assign(publisher.founding(parcelId, [publisher.member(caller)], hex(randomBytes(16))));
       return { status: 201, body: { factionId: first.factionId, parcelId } };
     }
 
@@ -334,13 +362,16 @@ export class Service {
     if (is("GET", "requests", null) && b !== undefined) {
       const job = this.#jobs.get(b);
       if (job === undefined || job.player !== this.player(req)) throw new HttpError(404, "no such request");
-      return { status: 200, body: job.state === "pending" ? { state: "pending" } : { state: "done", ok: job.ok, message: job.message } };
+      return { status: 200, body: job.state === "pending" ? { state: "pending" } : { ...job.data, state: "done", ok: job.ok, message: job.message } };
     }
 
     // The publisher's match server records that a battle destroyed a built structure (spec 7.6).
     if (is("POST", "factions", null, "destroyed") && b !== undefined) {
-      const secret = this.options.matchSecret;
-      if (secret.length === 0 || this.bearer(req) !== secret) throw new HttpError(401, "only the publisher's match server records destruction");
+      const want = Buffer.from(this.options.matchSecret);
+      const got = Buffer.from(this.bearer(req));
+      if (want.length === 0 || got.length !== want.length || !timingSafeEqual(got, want)) {
+        throw new HttpError(401, "only the publisher's match server records destruction");
+      }
       if (!Object.hasOwn(store.data.factions, b)) throw new HttpError(404, "no such faction");
       await publisher.destroyed(b, text((await body(req)).instanceId, "instanceId"));
       this.#bases.delete(b);

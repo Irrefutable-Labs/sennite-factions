@@ -378,6 +378,24 @@ export class Publisher {
     return last;
   }
 
+  /**
+   * What the wallet on `connection` owns of each resource, from a proof the
+   * wallet gives and the publisher's account verifies (spec 10.2: a holding
+   * counts only once it is proven, never on a client's say-so). Undefined when
+   * no proof was established.
+   */
+  async materials(connection: Connection): Promise<Record<string, number> | undefined> {
+    const resources = this.options.catalogue.resources;
+    const result = await this.options.app.wait(await this.options.app.request(connection, ask.owns(resources)));
+    if (result.fact !== "owns" || result.owns === undefined) return undefined;
+    const proven: Record<string, number> = {};
+    for (const symbol of resources) {
+      const id = (await this.options.app.object(symbol)).id;
+      proven[symbol] = Number(result.owns.find((o) => o.object === id)?.amount ?? 0n);
+    }
+    return proven;
+  }
+
   /** The faction that lists `signingKey` as a member now, among those the server has assigned parcels to. */
   async factionOf(signingKey: string): Promise<{ factionId: string; parcelId: string } | undefined> {
     for (const [factionId, record] of Object.entries(this.options.store.data.factions)) {

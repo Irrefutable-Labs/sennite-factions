@@ -61,6 +61,8 @@ export interface FactionRecord {
 export interface PlayerRecord {
   /** The digest of the offer this player's connect code names (lowercase hex). */
   offer: string;
+  /** When the server made the record, on its clock (milliseconds). */
+  since: number;
 }
 
 export interface StoreData {

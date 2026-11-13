@@ -143,6 +143,9 @@ describe("the game's side of the publisher's server", () => {
     await a.app.give(await alice.id(), "STEEL", "300");
     await until("alice's wallet takes in 300 steel", 240_000, async () => ((await holds(alice, "STEEL")).available === 300n ? true : null));
 
+    // The game shows what the wallet holds only from a proof the publisher's account checked.
+    expect(await settled(game.alice!, "/players/me/materials", {})).toMatchObject({ ok: true, materials: { WOOD: 0, STONE: 0, STEEL: 300 } });
+
     const commit = { instanceId: tower, resource: "STEEL", amount: 300 };
     expect(await settled(game.alice!, `/factions/${game.faction}/commitments`, commit)).toMatchObject({ ok: true });
     expect(await holds(alice, "STEEL")).toEqual({ available: 0n, locked: 300n });

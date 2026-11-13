@@ -7,6 +7,7 @@
 #include "CanvasItem.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
+#include "SenniteBaseEditor.h"
 #include "SenniteCharacter.h"
 #include "SennitePlayerState.h"
 #include "Engine/Font.h"
@@ -21,8 +22,12 @@ ASenniteHUD::ASenniteHUD()
 void ASenniteHUD::DrawHUD()
 {
 	Super::DrawHUD();
-	DrawCrosshair();
-	DrawStatus();
+	// the planning view has its own panel: the fight's crosshair and status are not drawn over it
+	if (!ASenniteBaseEditor::IsPlanning(GetWorld())) {
+		DrawCrosshair();
+		DrawStatus();
+	}
+	ASenniteBaseEditor::DrawOn(this, Canvas);
 }
 
 FSenniteHudReadout ASenniteHUD::ReadState() const
