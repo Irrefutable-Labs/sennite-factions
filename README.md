@@ -64,7 +64,13 @@ Tools/check_healing.sh
 
 checks healing: the hero picks up bandages and potions, loses health outside the storm's circle, then drinks a potion (20 shield) and uses a bandage (15 health) with the real keys; counts, the item in her hand and the HUD follow. Screenshots in `Saved/Healing/`.
 
-`Tools/check_all.sh` runs all six.
+```bash
+Tools/check_two_players.sh
+```
+
+starts two copies of the game on this machine: one hosts the test range as a listen server, the other joins it over the loopback address, and each checks what it sees of the other. The joining player gets a hero, sees the host's, builds a wall the server keeps and charges for, walks and is left where they walked to, sees the host walk, and leaves; the host sees all of that from its side. Logs and screenshots in `Saved/Net/`.
+
+`Tools/check_all.sh` runs all seven.
 
 ## State
 
@@ -77,6 +83,7 @@ checks healing: the hero picks up bandages and potions, loses health outside the
 - Materials: there is no pickaxe yet, so nothing can be harvested; `StartingMaterialCount` under `[/Script/Sennite.SenniteGameMode]` gives every player 100 of each to build with.
 - HUD: `ASenniteHUD::DrawStatus` draws health and shield, the held weapon's rounds, the three building materials (the one in use marked while building), players left and kills straight onto the canvas, sized to the screen, with no widget assets. The hit marker, blood splash and settings menu still expect widget Blueprints that do not exist.
 - Storm: `AStormActor` is a safe circle with a see-through violet wall. A storm placed in a map carries its starting radius and whether its centre is random; `[/Script/Sennite.StormActor]` in `Config/DefaultGame.ini` holds the stage length (30 s; it holds for four stages and shrinks for three), how much of its radius it keeps for each second it shrinks, and how often its damage rises. A player is in the storm when farther from the circle's centre than its radius, and then loses the storm's damage every second. The game mode starts the storm once `PlayersToStartStorm` players (2) are in, after `StormStartDelay` (30 s). The test range has one, centred ahead of the start.
+- Two players: a second player can join a hosted match and play in it (`Tools/check_two_players.sh`). To host by hand, start the game with `/Game/Maps/TestRange?listen`; to join, start it with the host's address in place of a map. The lobby and main menu still have no maps or widgets, so a match cannot yet be started from inside the game. The hero is loaded when the game starts (`USenniteGameInstance`), not when the first hero appears.
 - Healing: `ASenniteBandage` (a pack of 5; each gives back 15 health) and `ASennitePotion` (2; each adds 20 shield), in `Source/Sennite/Public/SenniteHealing.h`. Walk over one to pick it up, 4 and 5 bring them to hand, the left mouse button uses one, which takes a little over three seconds. They have no models yet: a plain box and a plain cylinder stand in, named per item class in `Config/DefaultGame.ini`, and there is no animation for using one.
 
 Third-party notices: `ThirdParty/NOTICE.md`.

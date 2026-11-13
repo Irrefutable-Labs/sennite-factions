@@ -115,6 +115,11 @@ public:
 	/** Fix a weapon to the hero's weapon bone, at the weapon's own grip. */
 	void AttachWeaponToHand(AWeaponActor* Weapon);
 
+	/** What this player last told the server about moving and running: -1, 0 or 1 once told. */
+	int32 LastForwardSent = MAX_int32;
+	int32 LastRightSent = MAX_int32;
+	int32 LastRunSent = MAX_int32;
+
 	/** Whether the hero's built-in weapon is hidden right now. */
 	bool bBuiltInWeaponHidden = false;
 

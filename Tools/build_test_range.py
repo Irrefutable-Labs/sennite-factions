@@ -161,6 +161,9 @@ storm.set_editor_property("start_radius", 5000.0)
 # where the player starts: standing on the ground, facing the blocks (+X)
 spawn(unreal.PlayerStart, "start", unreal.Vector(0, 0, 110), unreal.Rotator(0, 0, 0), "range")
 
+# a second place to start, two cells to the left of the first, for a second player
+spawn(unreal.PlayerStart, "start_2", unreal.Vector(0, -2 * CELL, 110), unreal.Rotator(0, 0, 0), "range")
+
 world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
 if not unreal.EditorLoadingAndSavingUtils.save_map(world, MAP):
     raise RuntimeError("map did not save")

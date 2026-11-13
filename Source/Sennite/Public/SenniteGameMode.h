@@ -40,6 +40,9 @@ public:
 
 	virtual void GenericPlayerInitialization(AController* NewPlayer) override;
 
+	/** Players take the map's start points in order: each gets the first, by name, that no hero is standing on. */
+	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
+
 	/** How many of each building material a player starts a match with. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Materials")
 	int32 StartingMaterialCount = 0;
