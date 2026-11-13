@@ -8,6 +8,8 @@
 #include "StormActor.h"
 #include "SenniteHUD.h"
 #include "WeaponActor.h"
+#include "SenniteWeapons.h"
+#include "Animation/AnimMontage.h"
 #include "BuildingActor.h"
 #include "HealingActor.h"
 #include "AmmunitionActor.h"
@@ -122,6 +124,21 @@ ASenniteCharacter::ASenniteCharacter()
 
 	Health = 100.0f;
 	Shield = 0.0f;
+
+	// slot 0 is the pickaxe, which has no model yet; 1 the assault rifle, 2 the shotgun
+	WeaponClasses.SetNum(3);
+	WeaponClasses[1] = ASenniteRifle::StaticClass();
+	WeaponClasses[2] = ASenniteShotgun::StaticClass();
+}
+
+void ASenniteCharacter::AttachWeaponToHand(AWeaponActor* Weapon)
+{
+	if (Weapon == nullptr || Weapon->WeaponMesh == nullptr) {
+		return;
+	}
+	Weapon->WeaponMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, HeroWeaponBone);
+	// the hero's hand decides how the weapon is turned; the weapon says which point of it the palm closes on
+	Weapon->WeaponMesh->SetRelativeLocationAndRotation(HeroPalmOffset - HeroGripRotation.RotateVector(Weapon->GripPoint), HeroGripRotation);
 }
 
 void ASenniteCharacter::PreInitializeComponents()
@@ -143,6 +160,14 @@ void ASenniteCharacter::PreInitializeComponents()
 	}
 	else {
 		UE_LOG(LogSenniteCharacter, Error, TEXT("Hero animation class '%s' did not load; the character will not animate"), *HeroAnimClass.ToString());
+	}
+	// every shot plays the hero's own firing animation, where no other was given
+	if (UAnimMontage* Fire = Cast<UAnimMontage>(HeroFireMontage.TryLoad())) {
+		for (UAnimMontage** Slot : { &RifleHipShootingAnimation, &RifleIronsightsShootingAnimation, &ShotgunHipShootingAnimation, &ShotgunIronsightsShootingAnimation }) {
+			if (*Slot == nullptr) {
+				*Slot = Fire;
+			}
+		}
 	}
 }
 
@@ -216,8 +241,7 @@ void ASenniteCharacter::BeginPlay() {
 				CurrentWeapon->Holder = this;
 				UGameplayStatics::FinishSpawningActor(CurrentWeapon, SpawnTransform);
 
-				UStaticMeshComponent* WeaponStaticMeshComponent = Cast<UStaticMeshComponent>(CurrentWeapon->GetComponentByClass(UStaticMeshComponent::StaticClass()));
-				WeaponStaticMeshComponent->AttachToComponent(this->GetMesh(), AttachmentRules, WeaponSocketName);
+				AttachWeaponToHand(CurrentWeapon);
 				HoldingWeapon = true;
 				AimedIn = false;
 				HoldingWeaponType = 1;
@@ -320,6 +344,20 @@ void ASenniteCharacter::GetLifetimeReplicatedProps(TArray< FLifetimeProperty > &
 
 void ASenniteCharacter::Tick(float DeltaTime) {
 	Super::Tick(DeltaTime);
+	// The weapon that is part of the hero's own mesh gives way to a game weapon in the hand.
+	// CurrentWeapon is replicated, so every machine hides and shows it alike.
+	const bool bHideBuiltIn = CurrentWeapon != nullptr;
+	if (bHideBuiltIn != bBuiltInWeaponHidden && GetMesh() != nullptr) {
+		bBuiltInWeaponHidden = bHideBuiltIn;
+		for (const FName& Bone : HeroBuiltInWeaponBones) {
+			if (bHideBuiltIn) {
+				GetMesh()->HideBoneByName(Bone, PBO_None);
+			}
+			else {
+				GetMesh()->UnHideBoneByName(Bone);
+			}
+		}
+	}
 	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString("Tick mode ") + FString::FromInt(GetNetMode()));
 	FVector DirectionVector = FVector(0, AimYaw, AimPitch);
 	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString("Tick mode ") + FString::SanitizeFloat(DirectionVector.Z));
@@ -2226,15 +2264,9 @@ void ASenniteCharacter::ServerSpawnAndAttachWeapon_Implementation(int WeaponType
 		if (State) {
 			CurrentWeaponType = WeaponType;
 			CurrentHealingItemType = -1;
-			FName WeaponSocketName = TEXT("hand_right_socket_pickaxe");
-			if (CurrentWeaponType == 1) {
-				WeaponSocketName = TEXT("hand_right_socket_rifle");
-			}
-			else if (CurrentWeaponType == 2) {
-				WeaponSocketName = TEXT("hand_right_socket_shotgun");
-			}
-			FAttachmentTransformRules AttachmentRules(EAttachmentRule::SnapToTarget, EAttachmentRule::KeepRelative, EAttachmentRule::KeepWorld, true);
-			CurrentWeapon = Cast<AWeaponActor>(UGameplayStatics::BeginDeferredActorSpawnFromClass(this, WeaponClasses[WeaponType], SpawnTransform));
+			CurrentWeapon = WeaponClasses.IsValidIndex(WeaponType) && WeaponClasses[WeaponType] != nullptr
+				? Cast<AWeaponActor>(UGameplayStatics::BeginDeferredActorSpawnFromClass(this, WeaponClasses[WeaponType], SpawnTransform))
+				: nullptr;
 			if (CurrentWeapon != nullptr)
 			{
 				CurrentWeapon->CurrentBulletCount = State->EquippedWeaponsClips[CurrentWeaponType];
@@ -2242,8 +2274,7 @@ void ASenniteCharacter::ServerSpawnAndAttachWeapon_Implementation(int WeaponType
 				CurrentWeapon->Holder = this;
 				UGameplayStatics::FinishSpawningActor(CurrentWeapon, SpawnTransform);
 
-				UStaticMeshComponent* WeaponStaticMeshComponent = Cast<UStaticMeshComponent>(CurrentWeapon->GetComponentByClass(UStaticMeshComponent::StaticClass()));
-				WeaponStaticMeshComponent->AttachToComponent(this->GetMesh(), AttachmentRules, WeaponSocketName);
+				AttachWeaponToHand(CurrentWeapon);
 
 				//animinstance properties
 				HoldingWeapon = true;
@@ -2319,47 +2350,25 @@ void ASenniteCharacter::ClientCameraAimOut_Implementation() {
 }
 
 void ASenniteCharacter::ClientGetBulletTransform_Implementation() {
-	FName WeaponSocketName = TEXT("hand_right_socket_pickaxe");
-	if (CurrentWeaponType == 1) {
-		WeaponSocketName = TEXT("hand_right_socket_rifle");
+	// The shot leaves the barrel of the held weapon, along the line the camera looks down,
+	// when that line meets something.
+	APlayerController* PlayerController = Cast<APlayerController>(GetController());
+	if (CurrentWeapon == nullptr || PlayerController == nullptr) {
+		return;
 	}
-	else if (CurrentWeaponType == 2) {
-		WeaponSocketName = TEXT("hand_right_socket_shotgun");
+	FRotator CameraRotation;
+	FVector CameraLocation;
+	PlayerController->GetPlayerViewPoint(CameraLocation, CameraRotation);
+	const FVector ShootDirection = CameraRotation.Vector();
+	const FVector StartTrace = FollowCamera->GetComponentLocation();
+	const FVector EndTrace = StartTrace + ShootDirection * 100000.0;
+	FHitResult Impact;
+	FCollisionQueryParams CollisionParams;
+	CollisionParams.AddIgnoredActor(this);
+	GetWorld()->LineTraceSingleByChannel(Impact, StartTrace, EndTrace, ECC_Visibility, CollisionParams);
+	if (Impact.bBlockingHit) {
+		ServerSpawnProjectile(FTransform(ShootDirection.Rotation(), CurrentWeapon->GetMuzzleLocation()));
 	}
-	if (CurrentWeapon != nullptr) {
-		TArray<UStaticMeshComponent*> Components;
-		CurrentWeapon->GetComponents(Components);
-		// find the muzzle component
-		for (int i = 0; i < Components.Num(); i++) {
-			if (Components[i]->GetName() == "Weapon") {
-				UStaticMeshComponent* WeaponComponent = Components[i];
-
-				FVector MuzzleLocation = WeaponComponent->GetSocketLocation("muzzle");
-				//DrawDebugSphere(GetWorld(), MuzzleLocation, 200, 26, FColor(255, 0, 0), true, -1, 0, 2);
-				//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString::SanitizeFloat(GetActorRotation().Roll) +FString(" ") + FString::SanitizeFloat(GetActorRotation().Pitch) +FString(" ") + FString::SanitizeFloat(GetActorRotation().Yaw));
-				//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString::SanitizeFloat(MuzzleLocation.X) + FString(" ") + FString::SanitizeFloat(MuzzleLocation.Y) + FString(" ") + FString::SanitizeFloat(MuzzleLocation.Z));
-				if (GetController() != nullptr) {
-					APlayerController* PlayerController = Cast<APlayerController>(GetController());
-					FRotator CameraRotation = PlayerController->PlayerCameraManager->GetCameraRotation();
-					FVector CameraLocation = PlayerController->PlayerCameraManager->GetCameraLocation();
-					PlayerController->GetPlayerViewPoint(CameraLocation, CameraRotation);
-					FVector ShootDirection = CameraRotation.Vector();
-					const FVector StartTrace = FollowCamera->GetComponentLocation();
-					const FVector EndTrace = StartTrace + ShootDirection * 100000.0;
-					FHitResult Impact;
-					FCollisionQueryParams CollisionParams;
-					GetWorld()->LineTraceSingleByChannel(Impact, StartTrace, EndTrace, ECC_Visibility, CollisionParams);
-
-					if (Impact.bBlockingHit) {
-						FTransform SpawnTransform(ShootDirection.Rotation(), MuzzleLocation);
-						ServerSpawnProjectile(SpawnTransform);
-					}
-					break;
-				}
-			}
-		}
-	}
-	
 }
 
 void ASenniteCharacter::NetMulticastPlayPickaxeSwingAnimation_Implementation() {

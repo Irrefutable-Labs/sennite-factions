@@ -119,10 +119,14 @@ ppv = spawn(unreal.PostProcessVolume, "exposure", folder="lights")
 ppv.set_editor_property("unbound", True)
 s = ppv.get_editor_property("settings")
 for key, value in (("override_auto_exposure_method", True), ("auto_exposure_method", unreal.AutoExposureMethod.AEM_MANUAL),
-                   ("override_auto_exposure_bias", True), ("auto_exposure_bias", 1.2),
+                   ("override_auto_exposure_bias", True), ("auto_exposure_bias", 0.8),
                    ("override_auto_exposure_apply_physical_camera_exposure", True), ("auto_exposure_apply_physical_camera_exposure", False)):
     s.set_editor_property(key, value)
 ppv.set_editor_property("settings", s)
+
+# weapons to pick up, to the right of the start, lying at knee height
+spawn(unreal.SenniteRifle, "rifle_pickup", unreal.Vector(0, 250, 60), unreal.Rotator(0, 0, 0), "pickups")
+spawn(unreal.SenniteShotgun, "shotgun_pickup", unreal.Vector(0, 450, 60), unreal.Rotator(0, 0, 0), "pickups")
 
 # where the player starts: standing on the ground, facing the blocks (+X)
 spawn(unreal.PlayerStart, "start", unreal.Vector(0, 0, 110), unreal.Rotator(0, 0, 0), "range")

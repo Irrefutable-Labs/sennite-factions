@@ -8,8 +8,9 @@
 
 class AProjectileActor;
 class ASenniteCharacter;
+class UStaticMeshComponent;
 
-UCLASS()
+UCLASS(config=Game)
 class SENNITE_API AWeaponActor : public AActor
 {
 	GENERATED_BODY()
@@ -25,6 +26,27 @@ protected:
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
+
+	/** The weapon's body: what a player walks over to pick it up, and what sits in the holder's hand. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh")
+	UStaticMeshComponent* WeaponMesh;
+
+	/** The static mesh this weapon wears. Set per weapon class in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Mesh")
+	FSoftObjectPath MeshAsset;
+
+	/** The point of the mesh that sits in the holder's palm, in the mesh's own space (+X is the muzzle end). Set per weapon class in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Grip")
+	FVector GripPoint;
+
+	/** The end of the barrel, in the mesh's own space. Set per weapon class in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Bullet")
+	FVector MuzzleOffset;
+
+	/** Where a shot leaves the barrel, in the world. */
+	FVector GetMuzzleLocation() const;
+
+	virtual void PreInitializeComponents() override;
 
 	//associated bullet
 	UPROPERTY(EditDefaultsOnly, Category = "Bullet")

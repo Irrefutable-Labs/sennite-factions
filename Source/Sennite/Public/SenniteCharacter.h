@@ -85,6 +85,32 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
 	FSoftClassPath HeroAnimClass;
 
+	/** The bone of the hero's skeleton a held weapon is fixed to. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FName HeroWeaponBone;
+
+	/** How a held weapon is turned against that bone: its muzzle end (+X) and its top (+Z), in the bone's space. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FRotator HeroGripRotation;
+
+	/** Where the hero's palm is from that bone, in the bone's space; a weapon's grip point sits here. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FVector HeroPalmOffset;
+
+	/** The bones of the weapon that is part of the hero's own mesh; hidden while the hero holds a game weapon. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	TArray<FName> HeroBuiltInWeaponBones;
+
+	/** The hero's own firing animation, played for every shot. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FSoftObjectPath HeroFireMontage;
+
+	/** Fix a weapon to the hero's weapon bone, at the weapon's own grip. */
+	void AttachWeaponToHand(AWeaponActor* Weapon);
+
+	/** Whether the hero's built-in weapon is hidden right now. */
+	bool bBuiltInWeaponHidden = false;
+
 	UPROPERTY(EditDefaultsOnly, Category = "State")
 	TSubclassOf<ASennitePlayerState> PlayerStateClass;
 

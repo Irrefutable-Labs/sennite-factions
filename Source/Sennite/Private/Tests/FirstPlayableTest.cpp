@@ -10,22 +10,15 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "GameCheck.h"
 #include "SenniteCharacter.h"
 #include "Animation/AnimInstance.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Engine/Engine.h"
 #include "Engine/SkeletalMesh.h"
-#include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "GameFramework/PlayerController.h"
-#include "GenericPlatform/GenericPlatformInputDeviceMapper.h"
 #include "HAL/PlatformTime.h"
-#include "InputKeyEventArgs.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "Misc/App.h"
-#include "Misc/Paths.h"
-#include "UnrealClient.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFirstPlayable, Log, All);
 
@@ -38,19 +31,6 @@ namespace
 		void Add(const FVector& Point) { Box += Point; }
 		double Size() const { return Box.IsValid ? Box.GetSize().Size() : 0.0; }
 	};
-
-	UWorld* FindGameWorld()
-	{
-		if (GEngine == nullptr) {
-			return nullptr;
-		}
-		for (const FWorldContext& Context : GEngine->GetWorldContexts()) {
-			if ((Context.WorldType == EWorldType::Game || Context.WorldType == EWorldType::PIE) && Context.World() != nullptr) {
-				return Context.World();
-			}
-		}
-		return nullptr;
-	}
 
 	class FFirstPlayableRun : public IAutomationLatentCommand
 	{
@@ -65,22 +45,9 @@ namespace
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
 
-		void Key(APlayerController* Controller, const FKey& InKey, EInputEvent Event) const
-		{
-			Controller->InputKey(FInputKeyEventArgs::CreateSimulated(InKey, Event, Event == IE_Released ? 0.0f : 1.0f, -1,
-				IPlatformInputDeviceMapper::Get().GetDefaultInputDevice()));
-		}
-		void Mouse(APlayerController* Controller, const FKey& Axis, float Delta) const
-		{
-			Controller->InputKey(FInputKeyEventArgs::CreateSimulated(Axis, IE_Axis, Delta, 1,
-				IPlatformInputDeviceMapper::Get().GetDefaultInputDevice()));
-		}
-		void Shot(const TCHAR* Name) const
-		{
-			if (FApp::CanEverRender()) {
-				FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir() / TEXT("FirstPlayable") / Name, true, false);
-			}
-		}
+		void Key(APlayerController* Controller, const FKey& InKey, EInputEvent Event) const { GameCheck::Key(Controller, InKey, Event); }
+		void Mouse(APlayerController* Controller, const FKey& Axis, float Counts) const { GameCheck::Mouse(Controller, Axis, Counts); }
+		void Shot(const TCHAR* Name) const { GameCheck::Shot(TEXT("FirstPlayable"), Name); }
 		static double AnimNumber(UAnimInstance* Anim, const TCHAR* Name)
 		{
 			const FNumericProperty* Property = CastField<FNumericProperty>(Anim->GetClass()->FindPropertyByName(Name));
@@ -117,7 +84,7 @@ namespace
 
 	bool FFirstPlayableRun::Update()
 	{
-		UWorld* World = FindGameWorld();
+		UWorld* World = GameCheck::FindGameWorld();
 		APlayerController* Controller = World ? World->GetFirstPlayerController() : nullptr;
 		ASenniteCharacter* Hero = Controller ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
 
@@ -157,7 +124,7 @@ namespace
 				const UMaterialInterface* Own = Shipped[Slot].MaterialInterface;
 				if (Shown != Own) {
 					++Changed;
-					UE_LOG(LogFirstPlayable, Error, TEXT("FIRSTPLAYABLE material slot %d shows %s, the hero ships %s"), Slot, *GetPathNameSafe(Shown), *GetPathNameSafe(Own));
+					UE_LOG(LogFirstPlayable, Error, TEXT("GAMECHECK material slot %d shows %s, the hero ships %s"), Slot, *GetPathNameSafe(Shown), *GetPathNameSafe(Own));
 				}
 			}
 			Test->TestEqual(TEXT("Every material slot shows the material the hero ships with"), Changed, 0);
@@ -165,9 +132,9 @@ namespace
 
 			// A run without a window feeds one large stray mouse movement on its first frame, which leaves the camera
 			// pointing at the ground. Start from the view a player has before touching the mouse: behind the hero.
-			UE_LOG(LogFirstPlayable, Display, TEXT("FIRSTPLAYABLE view before reset=%s"), *Controller->GetControlRotation().ToCompactString());
+			UE_LOG(LogFirstPlayable, Display, TEXT("GAMECHECK view before reset=%s"), *Controller->GetControlRotation().ToCompactString());
 			Controller->SetControlRotation(FRotator(-12.0, Hero->GetActorRotation().Yaw, 0.0));
-			UE_LOG(LogFirstPlayable, Display, TEXT("FIRSTPLAYABLE map=%s pawn=%s mesh=%s anim=%s materials=%d"),
+			UE_LOG(LogFirstPlayable, Display, TEXT("GAMECHECK map=%s pawn=%s mesh=%s anim=%s materials=%d"),
 				*World->GetMapName(), *Hero->GetClass()->GetPathName(), *Body->GetPathName(), *Anim->GetClass()->GetName(), Shipped.Num());
 			Enter(EPhase::Idle, World);
 			return false;
@@ -198,7 +165,7 @@ namespace
 				const FVector Back = -Hero->GetActorForwardVector();
 				Test->TestTrue(TEXT("The camera stands off from the hero, in third person"), CameraDistance > 250.0);
 				Test->TestTrue(TEXT("The camera starts behind the hero"), FVector::DotProduct((Camera - Hero->GetActorLocation()).GetSafeNormal2D(), Back) > 0.9);
-				UE_LOG(LogFirstPlayable, Display, TEXT("FIRSTPLAYABLE idle hand_travel=%.2f camera_distance=%.0f"), IdlePose.Size() - 1000.0, CameraDistance);
+				UE_LOG(LogFirstPlayable, Display, TEXT("GAMECHECK idle hand_travel=%.2f camera_distance=%.0f"), IdlePose.Size() - 1000.0, CameraDistance);
 			}
 			WalkFrom = Hero->GetActorLocation();
 			Key(Controller, EKeys::W, IE_Pressed);
@@ -220,7 +187,7 @@ namespace
 				Test->TestTrue(TEXT("The hero turns to face the way she walks"), FMath::Abs(FMath::FindDeltaAngleDegrees(Hero->GetActorRotation().Yaw, Forward.Rotation().Yaw)) < 10.0);
 				Test->TestTrue(TEXT("The animation Blueprint sees the hero's speed"), AnimNumber(Anim, TEXT("Speed")) > 100.0);
 				Test->TestTrue(TEXT("Walking, the hero's feet step"), WalkFeet.Size() > 10.0);
-				UE_LOG(LogFirstPlayable, Display, TEXT("FIRSTPLAYABLE walk moved=%.0f speed=%.0f anim_speed=%.0f foot_travel=%.1f"),
+				UE_LOG(LogFirstPlayable, Display, TEXT("GAMECHECK walk moved=%.0f speed=%.0f anim_speed=%.0f foot_travel=%.1f"),
 					FVector::DotProduct(Moved, Forward), Speed, AnimNumber(Anim, TEXT("Speed")), WalkFeet.Size());
 			}
 			Key(Controller, EKeys::LeftShift, IE_Pressed);
@@ -237,7 +204,7 @@ namespace
 			}
 			Test->TestTrue(TEXT("Holding Left Shift with W sets the running state"), Hero->IsRunning);
 			Test->TestTrue(TEXT("Running is faster than walking"), Speed > WalkSpeed + 100.0);
-			UE_LOG(LogFirstPlayable, Display, TEXT("FIRSTPLAYABLE sprint speed=%.0f"), Speed);
+			UE_LOG(LogFirstPlayable, Display, TEXT("GAMECHECK sprint speed=%.0f"), Speed);
 			Key(Controller, EKeys::LeftShift, IE_Released);
 			JumpFromZ = Hero->GetActorLocation().Z;
 			JumpPeak = JumpFromZ;
@@ -254,7 +221,7 @@ namespace
 			Test->TestTrue(TEXT("Space Bar takes the hero off the ground"), bSawFalling);
 			Test->TestTrue(TEXT("The jump rises"), JumpPeak - JumpFromZ > 30.0);
 			Test->TestTrue(TEXT("The hero lands again"), Movement->IsMovingOnGround());
-			UE_LOG(LogFirstPlayable, Display, TEXT("FIRSTPLAYABLE jump rise=%.0f"), JumpPeak - JumpFromZ);
+			UE_LOG(LogFirstPlayable, Display, TEXT("GAMECHECK jump rise=%.0f"), JumpPeak - JumpFromZ);
 			Key(Controller, EKeys::SpaceBar, IE_Released);
 			Key(Controller, EKeys::W, IE_Released);
 			Enter(EPhase::Stop, World);
@@ -292,7 +259,7 @@ namespace
 				Test->TestTrue(TEXT("Moving the mouse up or down tips the camera"), Pitch > 3.0);
 				Test->TestTrue(TEXT("The camera still looks at the hero"), FVector::DotProduct(Controller->PlayerCameraManager->GetCameraRotation().Vector(), ToHero) > 0.8);
 				Test->TestTrue(TEXT("Looking around does not move the hero"), FVector::Dist(Hero->GetActorLocation(), LookFromLocation) < 1.0);
-				UE_LOG(LogFirstPlayable, Display, TEXT("FIRSTPLAYABLE look yaw=%.0f pitch=%.0f (camera pitch now %.0f)"), Yaw, Pitch, FRotator::NormalizeAxis(Now.Pitch));
+				UE_LOG(LogFirstPlayable, Display, TEXT("GAMECHECK look yaw=%.0f pitch=%.0f (camera pitch now %.0f)"), Yaw, Pitch, FRotator::NormalizeAxis(Now.Pitch));
 			}
 			Shot(TEXT("standing.png"));
 			Enter(EPhase::FrontShot, World);
@@ -303,7 +270,7 @@ namespace
 			if (Elapsed(World) < 0.5) {
 				return false;
 			}
-			UE_LOG(LogFirstPlayable, Display, TEXT("FIRSTPLAYABLE finished"));
+			UE_LOG(LogFirstPlayable, Display, TEXT("GAMECHECK finished"));
 			Phase = EPhase::Done;
 			return true;
 
