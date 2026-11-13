@@ -540,6 +540,17 @@ public:
 	/** The material a piece of this character's own lists is built from and its kind ("Wall", "Ramp", "Floor"), or INDEX_NONE for any other class. */
 	int32 BuildingMaterialOf(TSubclassOf<ABuildingActor> StructureClass, FString& OutPieceKind) const;
 
+	/** Where a piece of this kind ("Wall", "Ramp", "Floor") goes for where the player stands and looks: one rule for the preview and the build. */
+	void BuildPlacement(const FString& PieceKind, FVector& OutLocation, FRotator& OutRotation) const;
+
+	/** The piece classes of a kind: built pieces, or their previews. Null for a kind there is none of. */
+	const TArray<TSubclassOf<ABuildingActor>>* BuildingClassesOf(const FString& PieceKind, bool bPreview) const;
+
+	/** The last build this player asked for, so holding the button does not ask for the same piece every frame. */
+	FVector LastBuildLocation = FVector(TNumericLimits<double>::Max());
+	FString LastBuildKind;
+	double LastBuildTime = 0.0;
+
 	/** Whether a transform is a place the build grid has. */
 	bool IsOnBuildGrid(const FVector& Location, const FRotator& Rotation) const;
 

@@ -98,6 +98,11 @@ void ASenniteGameMode::GenericPlayerInitialization(AController* NewPlayer) {
 		GetWorldTimerManager().SetTimer(InactivityCheckTimerHandle, this, &ASenniteGameMode::CheckRemainingPlayers, 1.0f, true);
 	}
 	if (NewPlayer != nullptr) {
+		if (ASennitePlayerState* State = Cast<ASennitePlayerState>(NewPlayer->PlayerState)) {
+			for (int& Count : State->MaterialCounts) {
+				Count = StartingMaterialCount;
+			}
+		}
 		ASennitePlayerController* SennitePlayerController = Cast<ASennitePlayerController>(NewPlayer);
 		SennitePlayerController->SpawnAsSpectator = false; // since we have switched to server travel, everyone joining the game should be a player
 	}

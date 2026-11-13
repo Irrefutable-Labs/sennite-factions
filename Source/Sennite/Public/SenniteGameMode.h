@@ -40,6 +40,10 @@ public:
 
 	virtual void GenericPlayerInitialization(AController* NewPlayer) override;
 
+	/** How many of each building material a player starts a match with. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Materials")
+	int32 StartingMaterialCount = 0;
+
 	UFUNCTION(NetMulticast, Reliable)
 	void NetMulticastSpawnStorm();
 
