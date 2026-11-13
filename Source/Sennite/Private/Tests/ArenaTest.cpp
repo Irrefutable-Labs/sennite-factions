@@ -232,6 +232,7 @@ namespace
 		UWorld* World = GameCheck::FindGameWorld();
 		APlayerController* Controller = World ? World->GetFirstPlayerController() : nullptr;
 		ASenniteCharacter* Hero = Controller ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
+		const FArenaSizes Size = ASenniteArena::Sizes();
 		ASenniteArena* Arena = nullptr;
 		if (World != nullptr) {
 			TActorIterator<ASenniteArena> It(World);
@@ -260,8 +261,8 @@ namespace
 				Plan.Seed, Plan.Bases.Num(), *Plan.KindsText(), Plan.Boxes.Num(), Plan.Craft.Num(), Connector.Route.Num());
 
 			// a camera above the middle of the connector, looking down along it, for a picture of the whole of it
-			const FVector Middle = Connector.Frame.TransformPosition(FVector(ASenniteArena::ConnectorLength * 0.5, 0.0, 0.0));
-			const FVector Eye = Connector.Frame.TransformPosition(FVector(-1500.0, -2600.0, 3300.0));
+			const FVector Middle = Connector.Frame.TransformPosition(FVector(Size.ConnectorLength * 0.5, 0.0, 0.0));
+			const FVector Eye = Connector.Frame.TransformPosition(FVector(-Size.ConnectorLength * 0.25, -Size.ConnectorLength * 1.3, Size.ConnectorLength * 1.35));
 			Above = World->SpawnActor<ACameraActor>(Eye, (Middle - Eye).Rotation());
 			if (Above.IsValid()) {
 				Controller->SetViewTarget(Above.Get());
@@ -286,6 +287,27 @@ namespace
 				return false;
 			}
 			if (Elapsed(World) < 1.8) {
+				return false;
+			}
+			if (Step == 1) {
+				// and from the side and below, for the bases and what is under them
+				Step = 2;
+				const FVector Middle = Plan.Connectors[0].Frame.TransformPosition(FVector(Size.ConnectorLength * 0.5, 0.0, -Size.ConnectorLength * 0.12));
+				const FVector Eye = Plan.Connectors[0].Frame.TransformPosition(FVector(Size.ConnectorLength * 0.5, -Size.ConnectorLength * 1.9, Size.ConnectorLength * 0.12));
+				if (Above.IsValid()) {
+					Above->SetActorLocationAndRotation(Eye, (Middle - Eye).Rotation());
+				}
+				return false;
+			}
+			if (Elapsed(World) < 2.6) {
+				return false;
+			}
+			if (Step == 2) {
+				Step = 3;
+				GameCheck::Shot(TEXT("Arena"), *FString::Printf(TEXT("%s_from_the_side.png"), *Kind));
+				return false;
+			}
+			if (Elapsed(World) < 3.4) {
 				return false;
 			}
 			if (Hero == nullptr) {
@@ -314,8 +336,8 @@ namespace
 				CrossingBegan = World->GetTimeSeconds();
 			}
 			if (!Walker.Step(Controller, Hero, Arena, 0)) {
-				return Elapsed(World) > 150.0
-					? Fail(FString::Printf(TEXT("The hero did not get across the %s connector in 150 s: stopped at point %d of %d, at %s"), *Kind, Walker.Next, Plan.Connectors[0].Route.Num(), *Hero->GetActorLocation().ToCompactString()))
+				return Elapsed(World) > 420.0
+					? Fail(FString::Printf(TEXT("The hero did not get across the %s connector in 420 s: stopped at point %d of %d, at %s"), *Kind, Walker.Next, Plan.Connectors[0].Route.Num(), *Hero->GetActorLocation().ToCompactString()))
 					: false;
 			}
 			CrossingTook = World->GetTimeSeconds() - CrossingBegan;
@@ -330,7 +352,7 @@ namespace
 				return Fail(TEXT("The hero was lost on arriving"));
 			}
 			Test->TestTrue(FString::Printf(TEXT("The hero crosses the %s connector to the far base"), *Kind),
-				FVector::Dist2D(Hero->GetActorLocation(), Plan.Bases[1]) < ASenniteArena::BaseRadius - 200.0 && Hero->GetCharacterMovement()->IsMovingOnGround());
+				FVector::Dist2D(Hero->GetActorLocation(), Plan.Bases[1]) < Size.BaseRadius - 200.0 && Hero->GetCharacterMovement()->IsMovingOnGround());
 			Test->TestEqual(FString::Printf(TEXT("The hero arrives unhurt across the %s connector"), *Kind), Hero->Health, HealthAtStart);
 			UE_LOG(LogArenaCheck, Display, TEXT("GAMECHECK crossed %s in %.0f s: %d jumps, %d lanes waited for, health %.0f, %.0f from the far base's centre"),
 				*Kind, CrossingTook, Walker.Jumps, Walker.LanesCrossed, Hero->Health, FVector::Dist2D(Hero->GetActorLocation(), Plan.Bases[1]));

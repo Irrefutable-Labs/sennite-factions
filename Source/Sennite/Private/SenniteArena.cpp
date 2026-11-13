@@ -11,8 +11,6 @@
 
 namespace
 {
-	constexpr float Length = ASenniteArena::ConnectorLength;
-	constexpr float Width = ASenniteArena::ConnectorWidth;
 	// connectors' floors sit a hair under the bases', so two surfaces never share a plane
 	constexpr float FloorTop = -2.0f;
 
@@ -23,6 +21,9 @@ namespace
 		FArenaConnector& Connector;
 		FRandomStream& Rand;
 		int32 ConnectorIndex;
+		/** How long the connector is between its two bases, and how wide. */
+		float Length;
+		float Width;
 
 		float R(float Low, float High) { return Rand.FRandRange(Low, High); }
 		bool Chance(float Odds) { return Rand.FRand() < Odds; }
@@ -59,6 +60,15 @@ namespace
 			Piece.Transform = FTransform(Connector.Frame.GetRotation() * Rotation.Quaternion(), Connector.Frame.TransformPosition(Location), Scale);
 			Plan.Props.Add(Piece);
 		}
+		/** A rock, one of the six, turned any way round, filling a box of the given size about a middle. */
+		void Rock(const FVector& Middle, const FVector& Size)
+		{
+			FArenaProp Piece;
+			Piece.Scenery = static_cast<EArenaScenery>(static_cast<int32>(EArenaScenery::RockA) + Rand.RandRange(0, 5));
+			Piece.Transform = FTransform(Connector.Frame.GetRotation() * FRotator(0.0f, Chance(0.5f) ? 180.0f : 0.0f, 0.0f).Quaternion(), Connector.Frame.TransformPosition(Middle), Size);
+			Piece.bFit = true;
+			Plan.Props.Add(Piece);
+		}
 		/** The next point of the way across. */
 		void Step(const FVector& Point, bool bJump = false, int32 Lane = INDEX_NONE)
 		{
@@ -77,35 +87,46 @@ namespace
 		void Bridges();
 	};
 
-	// Pieces to jump between, in two lanes, with nothing under them; some carry a wall to shoot from behind.
+	// Pieces to jump between, in several lanes, with nothing under them: some small, some broad enough
+	// to fight on, some carrying a wall to shoot from behind.
 	void FBuilder::Floating()
 	{
-		Slab(-400.0f, 220.0f, -1000.0f, 1000.0f, FloorTop, 60.0f, EArenaTint::Floating);
+		const float Half = Width * 0.5f;
+		Slab(-400.0f, 220.0f, -Half, Half, FloorTop, 60.0f, EArenaTint::Floating);
 		float FarEdge = Length - 220.0f;
 		Step(FVector(-100.0f, 0.0f, 0.0f));
-		for (int32 LaneIndex = 0; LaneIndex < 2; ++LaneIndex) {
-			const bool bWay = LaneIndex == 0;
-			const float LaneY = LaneIndex == 0 ? -650.0f : 650.0f;
+		const int32 Lanes = FMath::Clamp(FMath::RoundToInt(Width / 2400.0f), 2, 6);
+		const int32 Way = Lanes / 2;
+		for (int32 Lane = 0; Lane < Lanes; ++Lane) {
+			const bool bWay = Lane == Way;
+			const float LaneY = -Half + Width * (Lane + 0.5f) / Lanes;
+			const float Stray = Width / Lanes * 0.3f;
 			float X = 220.0f;
 			float Y = LaneY;
 			float Z = 0.0f;
 			if (bWay) {
 				Step(FVector(195.0f, Y, 0.0f), true);
 			}
-			while (X < Length - 900.0f) {
+			while (X < Length - 2000.0f) {
 				// A jump at a walk carries 2.8 to 3.7 m, less going up and more going down. Every gap, shift
 				// and step is inside what that reaches, with room to land.
 				const float Gap = R(130.0f, 190.0f);
-				const float Size = R(330.0f, 470.0f);
-				Y = FMath::Clamp(Y + R(-120.0f, 120.0f), LaneY - 350.0f, LaneY + 350.0f);
-				// the last few pieces come back down to the far base
-				// and no piece is more than a jump's rise above the one before, however the limits move
-				Z = FMath::Min(Z + 70.0f, FMath::Clamp(Z + R(-90.0f, 70.0f), X > Length - 2200.0f ? -40.0f : -150.0f, X > Length - 2200.0f ? 60.0f : 360.0f));
+				const float Long = Chance(0.3f) ? R(900.0f, 1500.0f) : R(380.0f, 700.0f);
+				const float Wide = FMath::Max(R(380.0f, 900.0f), Long * 0.5f);
+				Y = FMath::Clamp(Y + R(-120.0f, 120.0f), LaneY - Stray, LaneY + Stray);
+				// the last few pieces come back down to the far base, and no piece is more than a jump's
+				// rise above the one before
+				// (the lowest a piece sits is three rises under the base, and the way home is at least three pieces)
+				const bool bHome = X > Length - 8000.0f;
+				Z = FMath::Min(Z + 70.0f, FMath::Clamp(Z + R(-90.0f, 70.0f), bHome ? -40.0f : -200.0f, bHome ? 60.0f : 700.0f));
 				const float X0 = X + Gap;
-				const float X1 = X0 + Size;
-				Slab(X0, X1, Y - Size * 0.5f, Y + Size * 0.5f, Z, 50.0f, EArenaTint::Floating);
-				if (Chance(0.35f)) {
-					Box(FVector((X0 + X1) * 0.5f, Y + Size * 0.34f, Z + 70.0f), FVector(Size * 0.6f, 28.0f, 140.0f), EArenaTint::Cover);
+				const float X1 = X0 + Long;
+				Slab(X0, X1, Y - Wide * 0.5f, Y + Wide * 0.5f, Z, 60.0f, EArenaTint::Floating);
+				// the rock the piece is the top of: a little wider than it, hanging under it
+				const float Deep = FMath::Clamp(FMath::Max(Long, Wide) * R(0.5f, 0.8f), 260.0f, 1000.0f);
+				Rock(FVector((X0 + X1) * 0.5f, Y, Z - 60.0f - Deep * 0.45f), FVector(Long * 1.12f, Wide * 1.12f, Deep));
+				if (Long > 800.0f || Chance(0.3f)) {
+					Box(FVector((X0 + X1) * 0.5f, Y + Wide * 0.34f, Z + 80.0f), FVector(Long * 0.45f, 30.0f, 160.0f), EArenaTint::Cover);
 				}
 				if (bWay) {
 					Step(FVector(X0 + 70.0f, Y, Z));
@@ -119,48 +140,61 @@ namespace
 				Step(FVector(Landing + 90.0f, Y, 0.0f));
 			}
 		}
-		Slab(FarEdge, Length + 400.0f, -1000.0f, 1000.0f, FloorTop, 60.0f, EArenaTint::Floating);
+		Slab(FarEdge, Length + 400.0f, -Half, Half, FloorTop, 60.0f, EArenaTint::Floating);
 		Step(FVector(Length + 100.0f, 0.0f, 0.0f));
 	}
 
 	// A boardwalk between huts on tall trunks: a ramp up from each base, planks from hut to hut.
 	void FBuilder::TreeTop()
 	{
-		const float High = R(520.0f, 680.0f);
-		const float Run = 1150.0f;
-		const float NearY = R(-600.0f, 600.0f);
-		const float FarY = R(-600.0f, 600.0f);
+		const float High = R(900.0f, 1300.0f);
+		const float Run = High / FMath::Tan(FMath::DegreesToRadians(27.0f));
+		const float Spread = Width * 0.36f;
+		const float NearY = R(-Spread * 0.5f, Spread * 0.5f);
+		const float FarY = R(-Spread * 0.5f, Spread * 0.5f);
 		TArray<FVector> Nodes;
 
-		Slab(-400.0f, 60.0f, NearY - 260.0f, NearY + 260.0f, FloorTop, 60.0f, EArenaTint::Boardwalk);
-		Ramp(0.0f, 0.0f, Run, High, NearY, 300.0f, EArenaTint::Boardwalk);
-		Slab(Run, Run + 320.0f, NearY - 180.0f, NearY + 180.0f, High, 30.0f, EArenaTint::Boardwalk);
-		Nodes.Add(FVector(Run + 160.0f, NearY, High));
+		Slab(-400.0f, 60.0f, NearY - 400.0f, NearY + 400.0f, FloorTop, 60.0f, EArenaTint::Boardwalk);
+		Ramp(0.0f, 0.0f, Run, High, NearY, 420.0f, EArenaTint::Boardwalk);
+		Slab(Run, Run + 500.0f, NearY - 300.0f, NearY + 300.0f, High, 30.0f, EArenaTint::Boardwalk);
+		Nodes.Add(FVector(Run + 250.0f, NearY, High));
 
-		const int32 Huts = 3;
+		// a hut every 18 m or so, wandering across the width
+		const float First = Run + 1500.0f;
+		const float Last = Length - Run - 1500.0f;
+		const int32 Huts = FMath::Max(3, FMath::RoundToInt((Last - First) / 1800.0f) + 1);
+		// The walk wanders, but never turns so sharply that a plank meets a hut's wall: at most Turn to
+		// the side from one hut to the next. The first hut is straight on from the near ramp, and the
+		// last few come round to be straight on to the far one.
+		const float Turn = (Last - First) / (Huts - 1) * 0.55f;
+		float Y = NearY;
 		for (int32 Hut = 0; Hut < Huts; ++Hut) {
-			const float X = FMath::Lerp(Run + 1000.0f, Length - Run - 1000.0f, Hut / float(Huts - 1));
-			const float Y = R(-750.0f, 750.0f);
-			Slab(X - 350.0f, X + 350.0f, Y - 350.0f, Y + 350.0f, High, 40.0f, EArenaTint::Boardwalk);
-			Box(FVector(X, Y, High - 40.0f - 1500.0f), FVector(170.0f, 170.0f, 3000.0f), EArenaTint::Trunk);
+			const float X = FMath::Lerp(First, Last, Hut / float(Huts - 1));
+			if (Hut > 0) {
+				const float Left = Turn * (Huts - 1 - Hut);
+				Y = FMath::Clamp(FMath::Clamp(Y + R(-Turn, Turn), -Spread, Spread), FMath::Max(FarY - Left, Y - Turn), FMath::Min(FarY + Left, Y + Turn));
+			}
+			const float Deck = R(450.0f, 700.0f);
+			Slab(X - Deck, X + Deck, Y - Deck, Y + Deck, High, 40.0f, EArenaTint::Boardwalk);
+			Box(FVector(X, Y, High - 40.0f - 2500.0f), FVector(260.0f, 260.0f, 5000.0f), EArenaTint::Trunk);
 			// the hut: a wall on each side of the way through, and a roof
-			Box(FVector(X, Y - 300.0f, High + 120.0f), FVector(560.0f, 24.0f, 240.0f), EArenaTint::Cover);
-			Box(FVector(X, Y + 300.0f, High + 120.0f), FVector(560.0f, 24.0f, 240.0f), EArenaTint::Cover);
-			Box(FVector(X, Y, High + 255.0f), FVector(640.0f, 680.0f, 30.0f), EArenaTint::Boardwalk);
+			Box(FVector(X, Y - Deck + 60.0f, High + 140.0f), FVector(Deck * 1.5f, 24.0f, 280.0f), EArenaTint::Cover);
+			Box(FVector(X, Y + Deck - 60.0f, High + 140.0f), FVector(Deck * 1.5f, 24.0f, 280.0f), EArenaTint::Cover);
+			Box(FVector(X, Y, High + 295.0f), FVector(Deck * 1.7f, Deck * 2.0f, 30.0f), EArenaTint::Boardwalk);
 			Nodes.Add(FVector(X, Y, High));
 		}
 
-		Slab(Length - Run - 320.0f, Length - Run, FarY - 180.0f, FarY + 180.0f, High, 30.0f, EArenaTint::Boardwalk);
-		Nodes.Add(FVector(Length - Run - 160.0f, FarY, High));
-		Ramp(Length - Run, High, Length, 0.0f, FarY, 300.0f, EArenaTint::Boardwalk);
-		Slab(Length - 60.0f, Length + 400.0f, FarY - 260.0f, FarY + 260.0f, FloorTop, 60.0f, EArenaTint::Boardwalk);
+		Slab(Length - Run - 500.0f, Length - Run, FarY - 300.0f, FarY + 300.0f, High, 30.0f, EArenaTint::Boardwalk);
+		Nodes.Add(FVector(Length - Run - 250.0f, FarY, High));
+		Ramp(Length - Run, High, Length, 0.0f, FarY, 420.0f, EArenaTint::Boardwalk);
+		Slab(Length - 60.0f, Length + 400.0f, FarY - 400.0f, FarY + 400.0f, FloorTop, 60.0f, EArenaTint::Boardwalk);
 
 		// planks from each stop to the next, a hair under the platforms they join, on a post
 		for (int32 Node = 0; Node + 1 < Nodes.Num(); ++Node) {
 			const FVector Span = Nodes[Node + 1] - Nodes[Node];
 			const FVector Middle = (Nodes[Node] + Nodes[Node + 1]) * 0.5f;
-			Box(FVector(Middle.X, Middle.Y, High - 4.0f - 15.0f), FVector(Span.Size2D(), 190.0f, 30.0f), EArenaTint::Boardwalk, FRotator(0.0f, Span.Rotation().Yaw, 0.0f));
-			Box(FVector(Middle.X, Middle.Y, High - 34.0f - 1500.0f), FVector(90.0f, 90.0f, 3000.0f), EArenaTint::Trunk);
+			Box(FVector(Middle.X, Middle.Y, High - 4.0f - 15.0f), FVector(Span.Size2D(), 260.0f, 30.0f), EArenaTint::Boardwalk, FRotator(0.0f, Span.Rotation().Yaw, 0.0f));
+			Box(FVector(Middle.X, Middle.Y, High - 34.0f - 2500.0f), FVector(110.0f, 110.0f, 5000.0f), EArenaTint::Trunk);
 		}
 
 		Step(FVector(-100.0f, NearY, 0.0f));
@@ -170,49 +204,59 @@ namespace
 		Step(FVector(Length + 100.0f, FarY, 0.0f));
 	}
 
-	// A winding floor between two cliffs; a ramp at each end of each lets it be held from above.
-	// The cliffs are scenery over hidden blocks: the blocks are the walls and the ground on top.
+	// A winding floor between two walls of cliff; a ramp at each end of each wall lets it be held from
+	// above. The cliffs are scenery over hidden blocks: the blocks are the walls and the ground on top.
 	void FBuilder::Canyon()
 	{
-		Slab(-400.0f, Length + 400.0f, -Width * 0.5f, Width * 0.5f, FloorTop, 100.0f, EArenaTint::Rock);
-		const float RimTop = R(620.0f, 760.0f);
-		const float Mouth = 1350.0f;
+		const float Half = Width * 0.5f;
+		Slab(-400.0f, Length + 400.0f, -Half, Half, FloorTop, 100.0f, EArenaTint::Rock);
+		// the cliff is 17.5 m high as it comes; the walls are about that
+		const float RimTop = R(1300.0f, 1600.0f);
+		const float Mouth = RimTop / FMath::Tan(FMath::DegreesToRadians(27.0f));
 		for (const float Rim : { -1.0f, 1.0f }) {
-			const float Y = Rim * (Width * 0.5f - 260.0f);
-			Ramp(40.0f, 0.0f, Mouth, RimTop, Y, 420.0f, EArenaTint::Rock);
-			Ramp(Length - Mouth, RimTop, Length - 40.0f, 0.0f, Y, 420.0f, EArenaTint::Rock);
-			// The cliff is 60.6 m long, 23.7 m deep and 17.5 m high as it comes. Here it runs the length of
-			// the rim, from past the outer edge in to the nearest the floor comes, a little higher than
-			// the ground on top; the two sides show different faces of it.
-			const float Inner = 400.0f;
-			const float Outer = Width * 0.5f + 120.0f;
-			Prop(EArenaScenery::Cliff, FVector(Length * 0.5f, Rim * (Inner + Outer) * 0.5f, FloorTop), FRotator(0.0f, Rim > 0.0f ? 180.0f : 0.0f, 0.0f),
-				FVector((Length - 2.0f * Mouth + 500.0f) / 6057.0f, (Outer - Inner) / 2367.0f, (RimTop + 130.0f) / 1718.0f));
+			const float Y = Rim * (Half - 500.0f);
+			Ramp(40.0f, 0.0f, Mouth, RimTop, Y, 700.0f, EArenaTint::Rock);
+			Ramp(Length - Mouth, RimTop, Length - 40.0f, 0.0f, Y, 700.0f, EArenaTint::Rock);
 		}
 		Step(FVector(-100.0f, 0.0f, 0.0f));
-		const int32 Reaches = 4;
+		const int32 Reaches = FMath::Max(4, FMath::RoundToInt((Length - 2.0f * Mouth) / 1500.0f));
 		const float Reach = (Length - 2.0f * Mouth) / Reaches;
-		float Middle = R(-80.0f, 80.0f);
+		const float Drift = Width * 0.12f;
+		float Middle = R(-Drift * 0.5f, Drift * 0.5f);
 		for (int32 Each = 0; Each < Reaches; ++Each) {
 			// the floor shifts a little from one reach to the next, always leaving a way through
-			Middle = FMath::Clamp(Middle + R(-90.0f, 90.0f), -110.0f, 110.0f);
-			const float Half = R(330.0f, 420.0f);
+			Middle = FMath::Clamp(Middle + R(-300.0f, 300.0f), -Drift, Drift);
+			const float Open = R(650.0f, 950.0f);
 			const float X0 = Mouth + Each * Reach;
 			const float X1 = X0 + Reach;
-			Slab(X0, X1, -Width * 0.5f, Middle - Half, RimTop, RimTop - FloorTop, EArenaTint::Hidden);
-			Slab(X0, X1, Middle + Half, Width * 0.5f, RimTop, RimTop - FloorTop, EArenaTint::Hidden);
+			Slab(X0, X1, -Half, Middle - Open, RimTop, RimTop - FloorTop, EArenaTint::Hidden);
+			Slab(X0, X1, Middle + Open, Half, RimTop, RimTop - FloorTop, EArenaTint::Hidden);
 			const float Against = Side();
-			Box(FVector(R(X0 + 150.0f, X1 - 150.0f), Middle + Against * (Half - 110.0f), 80.0f), FVector(R(140.0f, 220.0f), R(140.0f, 200.0f), 160.0f), EArenaTint::Cover);
-			Step(FVector((X0 + X1) * 0.5f, Middle - Against * 90.0f, 0.0f));
+			Box(FVector(R(X0 + 200.0f, X1 - 200.0f), Middle + Against * (Open - 160.0f), 100.0f), FVector(R(200.0f, 320.0f), R(180.0f, 280.0f), 200.0f), EArenaTint::Cover);
+			Step(FVector((X0 + X1) * 0.5f, Middle - Against * 150.0f, 0.0f));
 			// rocky ground along the foot of each wall
 			for (const float Wall : { -1.0f, 1.0f }) {
-				Prop(EArenaScenery::RockyGround, FVector(R(X0 + 100.0f, X1 - 100.0f), Middle + Wall * (Half - R(20.0f, 120.0f)), FloorTop), FRotator(0.0f, R(0.0f, 360.0f), 0.0f), FVector(R(1.0f, 1.6f)));
+				Prop(EArenaScenery::RockyGround, FVector(R(X0 + 100.0f, X1 - 100.0f), Middle + Wall * (Open - R(40.0f, 200.0f)), FloorTop), FRotator(0.0f, R(0.0f, 360.0f), 0.0f), FVector(R(1.2f, 2.2f)));
 			}
 		}
-		// and across the two mouths
-		for (int32 Each = 0; Each < 6; ++Each) {
-			const float X = Each < 3 ? R(150.0f, Mouth - 200.0f) : R(Length - Mouth + 200.0f, Length - 150.0f);
-			Prop(EArenaScenery::RockyGround, FVector(X, Side() * R(350.0f, 900.0f), FloorTop), FRotator(0.0f, R(0.0f, 360.0f), 0.0f), FVector(R(1.2f, 2.2f)));
+		// The cliffs: each is 60.6 m long and 23.7 m deep as it comes. They stand end to end along each
+		// wall, near their own size, from past the outer edge in to the nearest the floor comes, a
+		// little higher than the ground on top; each shows a different face.
+		const float Inner = Drift + 700.0f;
+		const float Outer = Half + 200.0f;
+		const int32 Cliffs = FMath::Max(1, FMath::RoundToInt((Length - 2.0f * Mouth) / 5600.0f));
+		const float Run = (Length - 2.0f * Mouth + 600.0f) / Cliffs;
+		for (const float Rim : { -1.0f, 1.0f }) {
+			for (int32 Each = 0; Each < Cliffs; ++Each) {
+				const float X = Mouth - 300.0f + (Each + 0.5f) * Run;
+				Prop(EArenaScenery::Cliff, FVector(X, Rim * (Inner + Outer) * 0.5f, FloorTop), FRotator(0.0f, (Rim > 0.0f ? 180.0f : 0.0f) + (Chance(0.5f) ? 180.0f : 0.0f), 0.0f),
+					FVector(Run * 1.08f / 6057.0f, (Outer - Inner) / 2367.0f, (RimTop + 250.0f) / 1718.0f));
+			}
+		}
+		// and rocky ground across the two mouths
+		for (int32 Each = 0; Each < 12; ++Each) {
+			const float X = Each % 2 == 0 ? R(150.0f, Mouth - 200.0f) : R(Length - Mouth + 200.0f, Length - 150.0f);
+			Prop(EArenaScenery::RockyGround, FVector(X, Side() * R(600.0f, Half - 1300.0f), FloorTop), FRotator(0.0f, R(0.0f, 360.0f), 0.0f), FVector(R(1.5f, 3.0f)));
 		}
 		Step(FVector(Length + 100.0f, 0.0f, 0.0f));
 	}
@@ -220,23 +264,22 @@ namespace
 	// An open deck that hovering craft cross, lane after lane, without stopping.
 	void FBuilder::Traffic()
 	{
-		Slab(-400.0f, Length + 400.0f, -Width * 0.5f, Width * 0.5f, FloorTop, 100.0f, EArenaTint::Deck);
-		for (int32 Wall = 0; Wall < 4; ++Wall) {
-			const float X = Wall < 2 ? R(350.0f, 800.0f) : Length - R(350.0f, 800.0f);
-			Box(FVector(X, Side() * R(380.0f, 1100.0f), 70.0f), FVector(40.0f, R(350.0f, 600.0f), 140.0f), EArenaTint::Cover);
-		}
+		const float Half = Width * 0.5f;
+		Slab(-400.0f, Length + 400.0f, -Half, Half, FloorTop, 100.0f, EArenaTint::Deck);
 		Step(FVector(-100.0f, 0.0f, 0.0f));
-		const int32 Lanes = 5;
+		const float First = 1500.0f;
+		const float Last = Length - 1500.0f;
+		const int32 Lanes = FMath::Max(5, FMath::RoundToInt((Last - First) / 1500.0f) + 1);
 		const float LaneLength = Width + 2000.0f;
 		const bool bFlip = Chance(0.5f);
 		for (int32 Lane = 0; Lane < Lanes; ++Lane) {
-			const float X = 1300.0f + Lane * (Length - 2600.0f) / (Lanes - 1);
+			const float X = FMath::Lerp(First, Last, Lane / float(Lanes - 1));
 			const float Way = ((Lane % 2 == 0) != bFlip) ? 1.0f : -1.0f;
 			// fast enough to be hard to cross, with a gap between craft a sprint fits through
 			const float Speed = R(800.0f, 1300.0f);
-			const int32 Count = Rand.RandRange(2, 3);
-			Slab(X - 175.0f, X - 150.0f, -Width * 0.5f, Width * 0.5f, FloorTop + 3.0f, 3.0f, EArenaTint::Marking);
-			Slab(X + 150.0f, X + 175.0f, -Width * 0.5f, Width * 0.5f, FloorTop + 3.0f, 3.0f, EArenaTint::Marking);
+			const int32 Count = FMath::Max(2, FMath::RoundToInt(LaneLength / R(1900.0f, 2700.0f)));
+			Slab(X - 175.0f, X - 150.0f, -Half, Half, FloorTop + 3.0f, 3.0f, EArenaTint::Marking);
+			Slab(X + 150.0f, X + 175.0f, -Half, Half, FloorTop + 3.0f, 3.0f, EArenaTint::Marking);
 			for (int32 Each = 0; Each < Count; ++Each) {
 				FArenaCraft Craft;
 				Craft.LaneStart = Connector.Frame.TransformPosition(FVector(X, -Way * LaneLength * 0.5f, 115.0f));
@@ -250,6 +293,13 @@ namespace
 				Craft.Lane = Lane;
 				Plan.Craft.Add(Craft);
 			}
+			// cover between the lanes, off the straight way across
+			if (Lane + 1 < Lanes) {
+				const float Between = X + (Last - First) / (Lanes - 1) * 0.5f;
+				for (int32 Wall = 0; Wall < 3; ++Wall) {
+					Box(FVector(Between, Side() * R(500.0f, Half - 400.0f), 80.0f), FVector(R(120.0f, 300.0f), R(300.0f, 700.0f), 160.0f), EArenaTint::Cover);
+				}
+			}
 			// stop short of the lane, and cross when it is clear
 			Step(FVector(X - 320.0f, 0.0f, 0.0f), false, Lane);
 			Step(FVector(X + 320.0f, 0.0f, 0.0f));
@@ -260,24 +310,30 @@ namespace
 	// A solid mass with one passage through it, which turns.
 	void FBuilder::Tunnel()
 	{
-		const float Cell = 480.0f;
-		const int32 Across = FMath::RoundToInt(Width / Cell);
-		const int32 Along = FMath::RoundToInt(Length / Cell);
-		const float Top = 900.0f;
-		const float Clear = 380.0f;
+		const float Cell = 960.0f;
+		const int32 Across = FMath::Max(3, FMath::RoundToInt(Width / Cell));
+		const int32 Along = FMath::Max(3, FMath::RoundToInt(Length / Cell));
+		const float CellX = Length / Along;
+		const float CellY = Width / Across;
+		const float Top = 1500.0f;
+		const float Clear = 520.0f;
 		Slab(-500.0f, Length + 500.0f, -Width * 0.5f, Width * 0.5f, FloorTop, 100.0f, EArenaTint::TunnelRock);
 
 		TArray<bool> Open;
 		Open.Init(false, Across * Along);
-		const auto CellCentre = [&](int32 Column, int32 Row) { return FVector((Column + 0.5f) * Cell, (Row + 0.5f) * Cell - Width * 0.5f, 0.0f); };
-		// the mouths are in the middle rows, where a base's round edge is nearest
-		int32 Row = Rand.RandRange(1, Across - 2);
-		Step(CellCentre(0, Row) - FVector(Cell * 0.5f + 150.0f, 0.0f, 0.0f));
+		const auto CellCentre = [&](int32 Column, int32 Row) { return FVector((Column + 0.5f) * CellX, (Row + 0.5f) * CellY - Width * 0.5f, 0.0f); };
+		// the mouths are in the middle rows, in front of the bases
+		const int32 Low = Across / 2 - 1;
+		const int32 High = Across / 2;
+		int32 Row = Rand.RandRange(Low, High);
+		Step(CellCentre(0, Row) - FVector(CellX * 0.5f + 150.0f, 0.0f, 0.0f));
 		for (int32 Column = 0; Column < Along; ++Column) {
 			Open[Column * Across + Row] = true;
 			Step(CellCentre(Column, Row));
-			if (Column >= 1 && Column < Along - 2 && Chance(0.45f)) {
-				const int32 Turned = FMath::Clamp(Row + (Chance(0.5f) ? -1 : 1), 1, Across - 2);
+			const bool bHome = Column >= Along - 1 - FMath::Abs(Row - (Row < Low ? Low : High));
+			if (Column >= 1 && Column < Along - 1 && (bHome ? Row < Low || Row > High : Chance(0.45f))) {
+				// turn: away as the seed says, or back toward the far mouth when it is near
+				const int32 Turned = bHome ? Row + (Row < Low ? 1 : -1) : FMath::Clamp(Row + (Chance(0.5f) ? -1 : 1), 0, Across - 1);
 				if (Turned != Row) {
 					Row = Turned;
 					Open[Column * Across + Row] = true;
@@ -285,41 +341,46 @@ namespace
 				}
 			}
 		}
-		Step(CellCentre(Along - 1, Row) + FVector(Cell * 0.5f + 150.0f, 0.0f, 0.0f));
+		Step(CellCentre(Along - 1, Row) + FVector(CellX * 0.5f + 150.0f, 0.0f, 0.0f));
 
 		for (int32 Column = 0; Column < Along; ++Column) {
 			for (int32 Each = 0; Each < Across; ++Each) {
 				const FVector Centre = CellCentre(Column, Each);
 				if (Open[Column * Across + Each]) {
 					// the passage's roof
-					Box(FVector(Centre.X, Centre.Y, (Clear + Top) * 0.5f), FVector(Cell, Cell, Top - Clear), EArenaTint::TunnelRock);
+					Box(FVector(Centre.X, Centre.Y, (Clear + Top) * 0.5f), FVector(CellX, CellY, Top - Clear), EArenaTint::TunnelRock);
 				}
 				else {
-					Box(FVector(Centre.X, Centre.Y, (FloorTop + Top) * 0.5f), FVector(Cell, Cell, Top - FloorTop), EArenaTint::TunnelRock);
+					Box(FVector(Centre.X, Centre.Y, (FloorTop + Top) * 0.5f), FVector(CellX, CellY, Top - FloorTop), EArenaTint::TunnelRock);
 				}
 			}
 		}
 	}
 
-	// Narrow spans over the drop: always one that is whole and level, the others arched or broken.
+	// Spans over the drop: always one that is whole and level, the others arched or broken.
 	void FBuilder::Bridges()
 	{
-		Slab(-400.0f, 150.0f, -1050.0f, 1050.0f, FloorTop, 60.0f, EArenaTint::Bridge);
-		Slab(Length - 150.0f, Length + 400.0f, -1050.0f, 1050.0f, FloorTop, 60.0f, EArenaTint::Bridge);
-		TArray<float> Lines = { -800.0f, 0.0f, 800.0f };
-		for (int32 Index = Lines.Num() - 1; Index > 0; --Index) {
-			Lines.Swap(Index, Rand.RandRange(0, Index));
+		const float Half = Width * 0.5f;
+		Slab(-400.0f, 150.0f, -Half, Half, FloorTop, 60.0f, EArenaTint::Bridge);
+		Slab(Length - 150.0f, Length + 400.0f, -Half, Half, FloorTop, 60.0f, EArenaTint::Bridge);
+		const int32 Places = FMath::Clamp(FMath::RoundToInt(Width / 2000.0f), 3, 7);
+		TArray<float> Lines;
+		for (int32 Place = 0; Place < Places; ++Place) {
+			Lines.Add(-Half + Width * (Place + 0.5f) / Places);
 		}
-		const int32 Count = Rand.RandRange(2, 3);
+		for (int32 Each = Lines.Num() - 1; Each > 0; --Each) {
+			Lines.Swap(Each, Rand.RandRange(0, Each));
+		}
+		const int32 Count = Rand.RandRange(FMath::Max(2, Places / 2), Places);
 		const float X0 = 150.0f;
 		const float X1 = Length - 150.0f;
-		for (int32 Index = 0; Index < Count; ++Index) {
-			const float Y = Lines[Index];
-			const float Wide = R(210.0f, 320.0f);
+		for (int32 Each = 0; Each < Count; ++Each) {
+			const float Y = Lines[Each];
+			const float Wide = R(300.0f, 600.0f);
 			// the first is the sure way; the others are one of three sorts
-			const int32 Sort = Index == 0 ? 0 : Rand.RandRange(0, 2);
+			const int32 Sort = Each == 0 ? 0 : Rand.RandRange(0, 2);
 			if (Sort == 1) {
-				const float Rise = R(220.0f, 340.0f);
+				const float Rise = R(500.0f, 1100.0f);
 				const float Third = (X1 - X0) / 3.0f;
 				Ramp(X0, 0.0f, X0 + Third, Rise, Y, Wide, EArenaTint::Bridge);
 				Slab(X0 + Third, X1 - Third, Y - Wide * 0.5f, Y + Wide * 0.5f, Rise, 30.0f, EArenaTint::Bridge);
@@ -335,13 +396,13 @@ namespace
 				Slab(X0, X1, Y - Wide * 0.5f, Y + Wide * 0.5f, FloorTop, 30.0f, EArenaTint::Bridge);
 			}
 			if (Sort != 1) {
-				// posts down alternate sides: something to stand behind
+				// low walls down alternate sides: something to stand behind
 				int32 Post = 0;
-				for (float X = X0 + 500.0f; X < X1 - 300.0f; X += 700.0f, ++Post) {
-					Box(FVector(X, Y + (Post % 2 == 0 ? 1.0f : -1.0f) * (Wide * 0.5f - 15.0f), 55.0f), FVector(30.0f, 30.0f, 110.0f), EArenaTint::Cover);
+				for (float X = X0 + 900.0f; X < X1 - 600.0f; X += 1300.0f, ++Post) {
+					Box(FVector(X, Y + (Post % 2 == 0 ? 1.0f : -1.0f) * (Wide * 0.5f - 15.0f), 60.0f), FVector(R(120.0f, 260.0f), 30.0f, 120.0f), EArenaTint::Cover);
 				}
 			}
-			if (Index == 0) {
+			if (Each == 0) {
 				Step(FVector(-100.0f, Y, 0.0f));
 				Step(FVector(Length + 100.0f, Y, 0.0f));
 			}
@@ -372,8 +433,9 @@ namespace
 		}
 		for (const FArenaProp& Piece : Plan.Props) {
 			Mix(Piece.Transform.GetLocation());
+			Mix(Piece.Transform.GetRotation().Rotator().Euler());
 			Mix(Piece.Transform.GetScale3D() * 1000.0);
-			Hash = HashCombine(Hash, GetTypeHash(static_cast<uint8>(Piece.Scenery)));
+			Hash = HashCombine(Hash, GetTypeHash(static_cast<uint8>(Piece.Scenery) + (Piece.bFit ? 64 : 0)));
 		}
 		return Hash;
 	}
@@ -397,8 +459,27 @@ FString FArenaPlan::KindsText() const
 	return FString::JoinBy(Connectors, TEXT(" "), [](const FArenaConnector& Connector) { return FString(ASenniteArena::KindName(Connector.Kind)); });
 }
 
+FArenaSizes ASenniteArena::Sizes()
+{
+	const ASenniteArena* Settings = GetDefault<ASenniteArena>();
+	FArenaSizes Out;
+	Out.BaseRadius = Settings->BaseRadius;
+	Out.ConnectorLength = Settings->ConnectorLength;
+	Out.ConnectorWidth = Settings->ConnectorWidth;
+	return Out;
+}
+
 FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind)
 {
+	return MakePlan(Seed, BaseCount, ForcedKind, Sizes());
+}
+
+FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind, const FArenaSizes& Size)
+{
+	const float BaseRadius = Size.BaseRadius;
+	const float ConnectorLength = Size.ConnectorLength;
+	const float ConnectorWidth = Size.ConnectorWidth;
+	const float Length = ConnectorLength;
 	FArenaPlan Plan;
 	Plan.Seed = Seed;
 	FRandomStream Rand(Seed);
@@ -426,6 +507,15 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 		Plan.Bases.Add(FRotator(0.0f, Turn + Base * 360.0f / Bases, 0.0f).RotateVector(FVector(Ring, 0.0f, 0.0f)));
 	}
 
+	// An island under each base, each turned a different way. The plan gives where and which way;
+	// the arena sizes and sets it when it builds (IslandWidth).
+	for (int32 Base = 0; Base < Bases; ++Base) {
+		FArenaProp Island;
+		Island.Scenery = EArenaScenery::Island;
+		Island.Transform = FTransform(FRotator(0.0f, Rand.FRandRange(0.0f, 360.0f), 0.0f), Plan.Bases[Base]);
+		Plan.Props.Add(Island);
+	}
+
 	Plan.Connectors.SetNum(Links);
 	for (int32 Link = 0; Link < Links; ++Link) {
 		FArenaConnector& Connector = Plan.Connectors[Link];
@@ -435,11 +525,11 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 		Connector.Frame = FTransform(Along.Rotation(), Plan.Bases[Connector.FromBase] + Along * Reach);
 		Connector.Kind = ForcedKind >= 0 && ForcedKind < static_cast<int32>(EConnectorKind::Count) ? static_cast<EConnectorKind>(ForcedKind) : Kinds[Link % Kinds.Num()];
 
-		FBuilder Builder{ Plan, Connector, Rand, Link };
+		FBuilder Builder{ Plan, Connector, Rand, Link, ConnectorLength, ConnectorWidth };
 		if (Reach > BaseRadius + 1.0f) {
 			// a neck from each base out to where the connector starts
-			Builder.Slab(-(Reach - BaseRadius) - 300.0f, -380.0f, -700.0f, 700.0f, FloorTop - 2.0f, 100.0f, EArenaTint::Base);
-			Builder.Slab(Length + 380.0f, Length + (Reach - BaseRadius) + 300.0f, -700.0f, 700.0f, FloorTop - 2.0f, 100.0f, EArenaTint::Base);
+			Builder.Slab(-(Reach - BaseRadius) - 300.0f, -380.0f, -ConnectorWidth * 0.5f, ConnectorWidth * 0.5f, FloorTop - 2.0f, 100.0f, EArenaTint::Base);
+			Builder.Slab(Length + 380.0f, Length + (Reach - BaseRadius) + 300.0f, -ConnectorWidth * 0.5f, ConnectorWidth * 0.5f, FloorTop - 2.0f, 100.0f, EArenaTint::Base);
 		}
 		switch (Connector.Kind) {
 		case EConnectorKind::Floating: Builder.Floating(); break;
@@ -543,7 +633,7 @@ void ASenniteArena::Build()
 		FLinearColor(0.38f, 0.13f, 0.05f),   // Rock
 		FLinearColor(0.03f, 0.04f, 0.06f),   // Deck
 		FLinearColor(0.90f, 0.30f, 0.02f),   // Craft
-		FLinearColor(0.07f, 0.065f, 0.06f),  // TunnelRock
+		FLinearColor(0.24f, 0.21f, 0.18f),   // TunnelRock: light enough to see by the sky fill, which is all that reaches inside
 		FLinearColor(0.30f, 0.25f, 0.14f),   // Bridge
 		FLinearColor(0.08f, 0.13f, 0.09f),   // Cover
 		FLinearColor(0.80f, 0.60f, 0.02f),   // Marking
@@ -595,7 +685,24 @@ void ASenniteArena::Build()
 	}
 	for (const FArenaProp& Piece : Plan.Props) {
 		if (UInstancedStaticMeshComponent* Set = ByScenery[static_cast<int32>(Piece.Scenery)]) {
-			Set->AddInstance(Piece.Transform, true);
+			FTransform Placed = Piece.Transform;
+			if (Piece.bFit) {
+				// sized to fill its box, and set so the middle of the mesh is the middle of the box
+				const FBox Bounds = Set->GetStaticMesh()->GetBoundingBox();
+				const FVector Scale = Piece.Transform.GetScale3D() / Bounds.GetSize().ComponentMax(FVector(1.0));
+				Placed.SetScale3D(Scale);
+				Placed.AddToTranslation(-Placed.GetRotation().RotateVector(Bounds.GetCenter() * Scale));
+			}
+			if (Piece.Scenery == EArenaScenery::Island) {
+				// The island is the rock under a base. Its mesh is that rock alone, its flat top at its own
+				// height 0 and its middle over its origin; it is sized so its longer side is IslandWidth of
+				// the base's width, and set with its top inside the base's floor.
+				const FVector Size = Set->GetStaticMesh()->GetBoundingBox().GetSize();
+				const float Scale = BaseRadius * 2.0f * IslandWidth / FMath::Max(Size.X, Size.Y);
+				Placed.SetScale3D(FVector(Scale));
+				Placed.AddToTranslation(FVector(0.0f, 0.0f, -100.0f));
+			}
+			Set->AddInstance(Placed, true);
 		}
 	}
 	ByTint[static_cast<int32>(EArenaTint::Hidden)]->SetVisibility(!bAllScenery);

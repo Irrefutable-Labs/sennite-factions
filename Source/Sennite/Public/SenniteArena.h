@@ -43,13 +43,26 @@ enum class EConnectorKind : uint8
 enum class EArenaTint : uint8 { Base, Floating, Boardwalk, Trunk, Rock, Deck, Craft, TunnelRock, Bridge, Cover, Marking, Hidden, Count };
 
 /** A piece of scenery: seen, never stood on or bumped into. The blocks under it are what a player meets. */
-enum class EArenaScenery : uint8 { Cliff, RockyGround, Count };
+enum class EArenaScenery : uint8 { Cliff, RockyGround, Island, RockA, RockB, RockC, RockD, RockE, RockF, Count };
 
 /** One piece of scenery, in the world. */
 struct FArenaProp
 {
 	EArenaScenery Scenery = EArenaScenery::Cliff;
 	FTransform Transform = FTransform::Identity;
+	/**
+	 * When set, the transform's scale is not a scale but the size the piece is to be, in cm, and its
+	 * place is where the middle of the piece is to be; the arena works out the scale from the mesh.
+	 */
+	bool bFit = false;
+};
+
+/** How big an arena is made. */
+struct FArenaSizes
+{
+	float BaseRadius = 12000.0f;
+	float ConnectorLength = 24000.0f;
+	float ConnectorWidth = 12000.0f;
 };
 
 /** One block of the arena: a box, in the world. */
@@ -120,17 +133,29 @@ class SENNITE_API ASenniteArena : public AActor
 public:
 	ASenniteArena();
 
-	/** A base is a round platform this far across. */
-	static constexpr float BaseRadius = 1440.0f;
-	/** A connector is this long between two bases, and this wide. */
-	static constexpr float ConnectorLength = 5760.0f;
-	static constexpr float ConnectorWidth = 2880.0f;
+	/**
+	 * A base is a round plot this far from its middle to its edge: room for a faction's base and
+	 * ground around it. Set in DefaultGame.ini.
+	 */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	float BaseRadius = 12000.0f;
+
+	/** A connector is this long between two bases, and this wide. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	float ConnectorLength = 24000.0f;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	float ConnectorWidth = 12000.0f;
+
+	/** The sizes in the settings. */
+	static FArenaSizes Sizes();
 
 	/**
-	 * The arena for a seed and a number of bases. ForcedKind, when it names a kind, makes every
-	 * connector that kind, for looking at one kind on its own.
+	 * The arena for a seed and a number of bases, at the sizes in the settings or at sizes given.
+	 * ForcedKind, when it names a kind, makes every connector that kind, for looking at one kind on its own.
 	 */
 	static FArenaPlan MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind = INDEX_NONE);
+	static FArenaPlan MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind, const FArenaSizes& Size);
 
 	static const TCHAR* KindName(EConnectorKind Kind);
 
@@ -171,9 +196,13 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	FSoftObjectPath BlockMaterial;
 
-	/** The scenery meshes, in the order of EArenaScenery: the cliff, the rocky ground. Set in DefaultGame.ini. */
+	/** The scenery meshes, in the order of EArenaScenery: the cliff, the rocky ground, the island, six rocks. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	TArray<FSoftObjectPath> SceneryMeshes;
+
+	/** How wide the rock under a base is, as a share of the base's width. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	float IslandWidth = 0.96f;
 
 	/** What a craft takes from a player it runs into. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
