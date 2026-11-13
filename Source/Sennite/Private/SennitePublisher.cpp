@@ -132,6 +132,9 @@ bool USennitePublisher::Tick(float)
 	if (!PendingRequest.IsEmpty() && !bRequestAsked && Now >= NextRequest) {
 		AskRequest();
 	}
+	if (bConnected && !FactionId.IsEmpty() && !bFreeAsked && Now >= NextFree) {
+		AskFree();
+	}
 	return true;
 }
 
@@ -235,17 +238,7 @@ void USennitePublisher::AskMe()
 			return;
 		}
 		bConnected = Json->GetBoolField(TEXT("connected"));
-		Wallet.Reset();
-		FactionId.Reset();
-		ParcelId.Reset();
-		if (bConnected) {
-			Wallet = Json->GetStringField(TEXT("wallet"));
-			const TSharedPtr<FJsonObject>* Faction = nullptr;
-			if (Json->TryGetObjectField(TEXT("faction"), Faction)) {
-				FactionId = (*Faction)->GetStringField(TEXT("factionId"));
-				ParcelId = (*Faction)->GetStringField(TEXT("parcelId"));
-			}
-		}
+		Wallet = bConnected ? Json->GetStringField(TEXT("wallet")) : FString();
 	});
 }
 
@@ -272,7 +265,28 @@ void USennitePublisher::ReadBase(const FString& InParcelId, const FJsonObject& J
 	if (Base.bAssigned) {
 		Base.FactionId = Json.GetStringField(TEXT("factionId"));
 		Base.bMember = Json.GetBoolField(TEXT("member"));
+		Base.bInvited = Json.GetBoolField(TEXT("invited"));
 		Base.Members = Json.GetIntegerField(TEXT("members"));
+		const TSharedPtr<FJsonObject>* People = nullptr;
+		if (Json.TryGetObjectField(TEXT("people"), People)) {
+			for (const TSharedPtr<FJsonValue>& Value : (*People)->GetArrayField(TEXT("members"))) {
+				const TSharedPtr<FJsonObject> One = Value->AsObject();
+				FSennitePerson Person;
+				Person.SigningKey = One->GetStringField(TEXT("signingKey"));
+				Person.Wallet = One->GetStringField(TEXT("wallet"));
+				Person.bYou = One->GetBoolField(TEXT("you"));
+				Person.Votes = One->GetIntegerField(TEXT("votes"));
+				Person.bVoted = One->GetBoolField(TEXT("voted"));
+				Base.People.Add(MoveTemp(Person));
+			}
+			for (const TSharedPtr<FJsonValue>& Value : (*People)->GetArrayField(TEXT("invited"))) {
+				const TSharedPtr<FJsonObject> One = Value->AsObject();
+				FSennitePerson Person;
+				Person.SigningKey = One->GetStringField(TEXT("signingKey"));
+				Person.Wallet = One->GetStringField(TEXT("wallet"));
+				Base.Invited.Add(MoveTemp(Person));
+			}
+		}
 		Base.Height = Json.GetIntegerField(TEXT("height"));
 		for (const TSharedPtr<FJsonValue>& Value : Json.GetArrayField(TEXT("structures"))) {
 			const TSharedPtr<FJsonObject> Entry = Value->AsObject();
@@ -314,6 +328,36 @@ void USennitePublisher::ReadBase(const FString& InParcelId, const FJsonObject& J
 		Parcel->FactionId = Base.FactionId;
 	}
 	Bases.Add(InParcelId, MoveTemp(Base));
+
+	// the wallet's faction is the one whose base says it is a member: known the moment that base is read
+	FactionId.Reset();
+	ParcelId.Reset();
+	for (const TPair<FString, FSenniteBaseView>& Entry : Bases) {
+		if (Entry.Value.bMember) {
+			FactionId = Entry.Value.FactionId;
+			ParcelId = Entry.Key;
+		}
+	}
+}
+
+void USennitePublisher::AskFree()
+{
+	bFreeAsked = true;
+	Send(TEXT("GET"), TEXT("/players/free"), nullptr, [this](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+		bFreeAsked = false;
+		NextFree = FPlatformTime::Seconds() + 2.0;
+		const TArray<TSharedPtr<FJsonValue>>* Players = nullptr;
+		if (Status != 200 || !Json.IsValid() || !Json->TryGetArrayField(TEXT("players"), Players)) {
+			return;
+		}
+		FreePlayers.Reset();
+		for (const TSharedPtr<FJsonValue>& Value : *Players) {
+			const TSharedPtr<FJsonObject> One = Value->AsObject();
+			FSennitePerson Person;
+			Person.Wallet = One->GetStringField(TEXT("wallet"));
+			FreePlayers.Add(MoveTemp(Person));
+		}
+	});
 }
 
 void USennitePublisher::AskRequest()
@@ -363,6 +407,7 @@ void USennitePublisher::AskRequest()
 		// what changed shows at once, not at the next round
 		NextBases = 0.0;
 		NextMe = 0.0;
+		NextFree = 0.0;
 	});
 }
 
@@ -413,15 +458,69 @@ void USennitePublisher::Found(const FString& InParcelId)
 	});
 }
 
+void USennitePublisher::SendChangeTo(const FString& InFactionId, const TSharedRef<FJsonObject>& Change, const TCHAR* Waiting)
+{
+	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetObjectField(TEXT("change"), Change);
+	Ask(FString::Printf(TEXT("/factions/%s/changes"), *InFactionId), Body, Waiting);
+}
+
 void USennitePublisher::SendChange(const TSharedRef<FJsonObject>& Change)
 {
 	if (FactionId.IsEmpty()) {
 		Message = TEXT("the wallet is not a member of a faction");
 		return;
 	}
+	SendChangeTo(FactionId, Change, TEXT("waiting for the wallet to sign the change..."));
+}
+
+void USennitePublisher::Invite(const FString& InWallet)
+{
+	if (FactionId.IsEmpty()) {
+		Message = TEXT("the wallet is not a member of a faction");
+		return;
+	}
 	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
-	Body->SetObjectField(TEXT("change"), Change);
-	Ask(FString::Printf(TEXT("/factions/%s/changes"), *FactionId), Body, TEXT("waiting for the wallet to sign the change..."));
+	Body->SetStringField(TEXT("wallet"), InWallet);
+	Ask(FString::Printf(TEXT("/factions/%s/invitations"), *FactionId), Body, TEXT("waiting for the wallet to sign the invitation..."));
+}
+
+void USennitePublisher::Uninvite(const FString& SigningKey)
+{
+	const TSharedRef<FJsonObject> Change = MakeShared<FJsonObject>();
+	Change->SetStringField(TEXT("kind"), TEXT("uninvite"));
+	Change->SetStringField(TEXT("signingKey"), SigningKey);
+	SendChange(Change);
+}
+
+void USennitePublisher::Accept(const FString& InFactionId)
+{
+	const TSharedRef<FJsonObject> Change = MakeShared<FJsonObject>();
+	Change->SetStringField(TEXT("kind"), TEXT("accept"));
+	SendChangeTo(InFactionId, Change, TEXT("waiting for the wallet to sign the acceptance..."));
+}
+
+void USennitePublisher::Vote(const FString& SigningKey)
+{
+	const TSharedRef<FJsonObject> Change = MakeShared<FJsonObject>();
+	Change->SetStringField(TEXT("kind"), TEXT("vote"));
+	Change->SetStringField(TEXT("signingKey"), SigningKey);
+	SendChange(Change);
+}
+
+void USennitePublisher::Unvote(const FString& SigningKey)
+{
+	const TSharedRef<FJsonObject> Change = MakeShared<FJsonObject>();
+	Change->SetStringField(TEXT("kind"), TEXT("unvote"));
+	Change->SetStringField(TEXT("signingKey"), SigningKey);
+	SendChange(Change);
+}
+
+void USennitePublisher::Leave()
+{
+	const TSharedRef<FJsonObject> Change = MakeShared<FJsonObject>();
+	Change->SetStringField(TEXT("kind"), TEXT("leave"));
+	SendChange(Change);
 }
 
 void USennitePublisher::Place(const FString& PrefabId, int32 X, int32 Y, int32 Rotation)

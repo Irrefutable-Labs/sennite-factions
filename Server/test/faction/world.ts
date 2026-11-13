@@ -21,7 +21,7 @@ export function parcel(id: string): Parcel {
 /** A member whose ids are the byte `n` repeated: distinct, well-formed, and nobody's real key. */
 export function member(n: number): Member {
   const byte = n.toString(16).padStart(2, "0");
-  return { genesis: byte.repeat(32), deviceId: (n + 100).toString(16).padStart(2, "0").repeat(32), signingKey: byte.repeat(32) };
+  return { genesis: byte.repeat(32), deviceId: (n + 100).toString(16).padStart(2, "0").repeat(32), signingKey: byte.repeat(64) };
 }
 
 export function founding(members: Member[], parcelId = "north-bluff"): Founding {

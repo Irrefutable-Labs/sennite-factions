@@ -117,7 +117,8 @@ export class Mirror {
     } catch {
       verdict = { valid: false, why: "the change could not be judged" };
     }
-    const next = verdict.valid ? verdict.next : this.#state;
+    // an invalid occupant leaves the state as it was, but for an invited wallet's used-up invitation
+    const next = verdict.next ?? this.#state;
     const entry: LineageEntry = {
       parent: this.#commitment,
       commitment: nextCommitment(this.#commitment, occupant.step, next),

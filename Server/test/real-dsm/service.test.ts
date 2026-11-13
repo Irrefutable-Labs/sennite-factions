@@ -195,6 +195,10 @@ describe("the game's side of the publisher's server", () => {
     expect((await call("GET", "/players/free", game.alice)).body.players.map((p: Json) => p.wallet)).toContain(bob);
     expect((await call("POST", `/factions/${game.faction}/changes`, game.bob, { change: { kind: "accept" } })).status).toBe(403);
     expect((await call("POST", `/factions/${game.faction}/invitations`, game.bob, { wallet: bob })).status).toBe(403);
+    // Who is connected is told to members only, and an invitation is not taken as bytes from a game.
+    expect((await call("GET", "/players/free", game.bob)).status).toBe(403);
+    const forged = { kind: "invite", member: { genesis: "00".repeat(32), deviceId: "00".repeat(32), signingKey: "07" } };
+    expect((await call("POST", `/factions/${game.faction}/changes`, game.alice, { change: forged })).status).toBe(400);
 
     expect(await settled(game.alice!, `/factions/${game.faction}/invitations`, { wallet: bob })).toMatchObject({ ok: true });
     expect((await call("GET", "/players/me", game.bob)).body.invitations).toEqual([{ factionId: game.faction, parcelId: PARCEL }]);

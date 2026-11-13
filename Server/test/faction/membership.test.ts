@@ -57,12 +57,25 @@ describe("joining", () => {
     take(mirror, a.signingKey, { kind: "invite", member: d });
     const place: Change = { kind: "place", instanceId: instance(1), prefabId: "wall", x: land.boundary[0]![0] + 240, y: land.boundary[0]![1] + 240, rotation: 0, config: {} };
     for (const change of [place, { kind: "invite", member: e }, { kind: "vote", signingKey: a.signingKey }, { kind: "leave" }] as Change[]) {
-      expect(verdict(mirror, d.signingKey, change)).toEqual({ valid: false, why: "the signer is not a member the state lists" });
+      expect(verdict(mirror, d.signingKey, change)).toMatchObject({ valid: false, why: "the signer is not a member the state lists" });
     }
-    // If such a write holds the cell anyway, the lineage advances and nothing changes.
+    // If such a write holds the cell anyway, the lineage advances, nothing of the base changes, and
+    // the invitation is used up: an invited wallet has one write, and cannot spend cell after cell.
     const before = mirror.state;
     expect(take(mirror, d.signingKey, place)).toMatchObject({ valid: false });
-    expect(mirror.state).toEqual(before);
+    expect(mirror.state).toEqual({ ...before, invited: [] });
+    expect(writers(mirror)).toEqual([a.signingKey, b.signingKey]);
+    expect(verdict(mirror, d.signingKey, { kind: "accept" })).toEqual({ valid: false, why: "the signer is not invited" });
+  });
+
+  it("refuses an invitation of a key that is no device's signing key", () => {
+    const mirror = fresh(a, b);
+    // Such a key in the state would leave the faction with a successor cell nobody can write.
+    for (const signingKey of ["", "07", "07".repeat(63), "07".repeat(65)]) {
+      expect(() => encodeChange({ factionId: mirror.state.factionId, parent: mirror.commitment, change: { kind: "invite", member: { ...d, signingKey } } })).not.toThrow();
+      expect(verdict(mirror, a.signingKey, { kind: "invite", member: { ...d, signingKey } })).toMatchObject({ valid: false });
+    }
+    expect(mirror.state.invited).toEqual([]);
   });
 
   it("refuses an invitation of a member or of someone already invited, and one from a non-member", () => {

@@ -17,6 +17,9 @@ export interface Member {
   signingKey: string;
 }
 
+/** The length of a device's signing key. */
+export const SIGNING_KEY_BYTES = 64;
+
 export type Rotation = 0 | 90 | 180 | 270;
 
 /** A placed prefab: this is the base. */
@@ -83,7 +86,9 @@ function memberValue(m: Member): Canonical {
 export function checkMember(m: Member): void {
   if (!isHex(m.genesis, 32)) throw new Error("a member's genesis is not 32 bytes of hex");
   if (!isHex(m.deviceId, 32)) throw new Error("a member's device id is not 32 bytes of hex");
-  if (!isHex(m.signingKey) || m.signingKey.length > 128) throw new Error("a member's signing key is not 1 to 64 bytes of hex");
+  // A device's signing key is 64 bytes. A key of any other length is no key DSM takes as a cell's
+  // writer, and one in the state would leave the faction with a successor cell nobody can write.
+  if (!isHex(m.signingKey, SIGNING_KEY_BYTES)) throw new Error("a member's signing key is not 64 bytes of hex");
 }
 
 export function foundingValue(f: Founding): Canonical {

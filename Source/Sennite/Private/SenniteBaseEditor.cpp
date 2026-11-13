@@ -224,6 +224,12 @@ void ASenniteBaseEditor::Open()
 	EditorInput->BindKey(EKeys::G, IE_Pressed, this, &ASenniteBaseEditor::Rebuild);
 	EditorInput->BindKey(EKeys::O, IE_Pressed, this, &ASenniteBaseEditor::CopyCode);
 	EditorInput->BindKey(EKeys::M, IE_Pressed, this, &ASenniteBaseEditor::ProveMaterials);
+	EditorInput->BindKey(EKeys::P, IE_Pressed, this, &ASenniteBaseEditor::TogglePeople);
+	EditorInput->BindKey(EKeys::J, IE_Pressed, this, &ASenniteBaseEditor::Join);
+	EditorInput->BindKey(EKeys::I, IE_Pressed, this, &ASenniteBaseEditor::InvitePerson);
+	EditorInput->BindKey(EKeys::K, IE_Pressed, this, &ASenniteBaseEditor::VotePerson);
+	EditorInput->BindKey(EKeys::U, IE_Pressed, this, &ASenniteBaseEditor::UnvotePerson);
+	EditorInput->BindKey(EKeys::L, IE_Pressed, this, &ASenniteBaseEditor::LeaveFaction);
 	Controller->PushInputComponent(EditorInput);
 }
 
@@ -233,6 +239,7 @@ void ASenniteBaseEditor::Close()
 		return;
 	}
 	bEditing = false;
+	bPeople = false;
 	if (APlayerController* Controller = GetWorld()->GetFirstPlayerController()) {
 		if (EditorInput != nullptr) {
 			Controller->PopInputComponent(EditorInput);
@@ -279,8 +286,25 @@ void ASenniteBaseEditor::Move(int32 DX, int32 DY)
 }
 
 // the camera looks straight down with the map's +X up the screen and +Y to the right
-void ASenniteBaseEditor::MoveUp() { Move(1, 0); }
-void ASenniteBaseEditor::MoveDown() { Move(-1, 0); }
+void ASenniteBaseEditor::MoveUp()
+{
+	if (bPeople) {
+		PersonIndex = FMath::Max(0, PersonIndex - 1);
+	}
+	else {
+		Move(1, 0);
+	}
+}
+
+void ASenniteBaseEditor::MoveDown()
+{
+	if (bPeople) {
+		PersonIndex = FMath::Min(FMath::Max(0, PeopleRows().Num() - 1), PersonIndex + 1);
+	}
+	else {
+		Move(-1, 0);
+	}
+}
 void ASenniteBaseEditor::MoveLeft() { Move(0, -1); }
 void ASenniteBaseEditor::MoveRight() { Move(0, 1); }
 
@@ -393,6 +417,14 @@ void ASenniteBaseEditor::ReplaceSelected()
 void ASenniteBaseEditor::Dismantle()
 {
 	USennitePublisher* Server = Publisher();
+	if (bPeople) {
+		// on the people page the same key withdraws an invitation
+		FPersonRow Row;
+		if (Server != nullptr && ChosenPerson(Row) && Row.Kind == FPersonRow::EKind::Invited) {
+			Server->Uninvite(Row.Person->SigningKey);
+		}
+		return;
+	}
 	if (const FSenniteStructureView* Structure = Selected(); Server != nullptr && Structure != nullptr) {
 		Server->Dismantle(Structure->InstanceId);
 	}
@@ -424,6 +456,92 @@ void ASenniteBaseEditor::ProveMaterials()
 {
 	if (USennitePublisher* Server = Publisher()) {
 		Server->ProveMaterials();
+	}
+}
+
+TArray<ASenniteBaseEditor::FPersonRow> ASenniteBaseEditor::PeopleRows() const
+{
+	TArray<FPersonRow> Rows;
+	const USennitePublisher* Server = Publisher();
+	const FSenniteBaseView* View = Base();
+	if (Server == nullptr || View == nullptr || !View->bMember) {
+		return Rows;
+	}
+	for (const FSennitePerson& Person : View->People) {
+		Rows.Add({ FPersonRow::EKind::Member, &Person });
+	}
+	for (const FSennitePerson& Person : View->Invited) {
+		Rows.Add({ FPersonRow::EKind::Invited, &Person });
+	}
+	for (const FSennitePerson& Person : Server->FreePlayers) {
+		// someone already invited here is listed as invited
+		if (!View->Invited.ContainsByPredicate([&Person](const FSennitePerson& I) { return I.Wallet == Person.Wallet; })) {
+			Rows.Add({ FPersonRow::EKind::Free, &Person });
+		}
+	}
+	return Rows;
+}
+
+bool ASenniteBaseEditor::ChosenPerson(FPersonRow& Row) const
+{
+	const TArray<FPersonRow> Rows = PeopleRows();
+	if (!bPeople || Rows.Num() == 0) {
+		return false;
+	}
+	Row = Rows[FMath::Clamp(PersonIndex, 0, Rows.Num() - 1)];
+	return true;
+}
+
+void ASenniteBaseEditor::TogglePeople()
+{
+	const FSenniteBaseView* View = Base();
+	// a faction's people are its members' to see
+	bPeople = !bPeople && View != nullptr && View->bMember;
+	PersonIndex = 0;
+}
+
+void ASenniteBaseEditor::Join()
+{
+	USennitePublisher* Server = Publisher();
+	const FSenniteBaseView* View = Base();
+	if (Server != nullptr && View != nullptr && View->bInvited) {
+		Server->Accept(View->FactionId);
+	}
+}
+
+void ASenniteBaseEditor::InvitePerson()
+{
+	USennitePublisher* Server = Publisher();
+	FPersonRow Row;
+	if (Server != nullptr && ChosenPerson(Row) && Row.Kind == FPersonRow::EKind::Free) {
+		Server->Invite(Row.Person->Wallet);
+	}
+}
+
+void ASenniteBaseEditor::VotePerson()
+{
+	USennitePublisher* Server = Publisher();
+	FPersonRow Row;
+	if (Server != nullptr && ChosenPerson(Row) && Row.Kind == FPersonRow::EKind::Member && !Row.Person->bYou && !Row.Person->bVoted) {
+		Server->Vote(Row.Person->SigningKey);
+	}
+}
+
+void ASenniteBaseEditor::UnvotePerson()
+{
+	USennitePublisher* Server = Publisher();
+	FPersonRow Row;
+	if (Server != nullptr && ChosenPerson(Row) && Row.Kind == FPersonRow::EKind::Member && Row.Person->bVoted) {
+		Server->Unvote(Row.Person->SigningKey);
+	}
+}
+
+void ASenniteBaseEditor::LeaveFaction()
+{
+	USennitePublisher* Server = Publisher();
+	FPersonRow Row;
+	if (Server != nullptr && ChosenPerson(Row) && Row.Kind == FPersonRow::EKind::Member && Row.Person->bYou) {
+		Server->Leave();
 	}
 }
 
@@ -541,7 +659,7 @@ void ASenniteBaseEditor::UpdateGhost()
 	const FSennitePrefab* Prefab = Chosen();
 	const FSenniteBaseView* View = Base();
 	// the prefab to place shows where it would go, on free ground of a parcel the player may plan
-	const bool bShow = bEditing && Prefab != nullptr && View != nullptr && View->bMember && Selected() == nullptr;
+	const bool bShow = bEditing && !bPeople && Prefab != nullptr && View != nullptr && View->bMember && Selected() == nullptr;
 	if (!bShow) {
 		if (Ghost != nullptr) {
 			Ghost->Destroy();
@@ -671,8 +789,49 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 		Line(TEXT("faction"), FString::Printf(TEXT("YOUR FACTION   %d member%s   %d change%s"), View->Members, View->Members == 1 ? TEXT("") : TEXT("s"),
 			View->Height, View->Height == 1 ? TEXT("") : TEXT("s")), 11, Good);
 	}
+	else if (View->bInvited) {
+		Line(TEXT("faction"), TEXT("YOU ARE INVITED   J: join"), 11, Good);
+	}
 	else {
 		Line(TEXT("faction"), TEXT("ANOTHER FACTION'S PARCEL"), 11, Dim);
+	}
+
+	if (Editor->bPeople && View != nullptr && View->bMember) {
+		// the faction's people, the chosen one marked
+		const TArray<FPersonRow> Rows = Editor->PeopleRows();
+		const int32 At = FMath::Clamp(Editor->PersonIndex, 0, FMath::Max(0, Rows.Num() - 1));
+		Line(TEXT("page"), TEXT("PEOPLE"), 13, White);
+		int32 Counts[3] = { 0, 0, 0 };
+		for (int32 Index = 0; Index < Rows.Num(); ++Index) {
+			const FPersonRow& Row = Rows[Index];
+			const TCHAR* Mark = Index == At ? TEXT("> ") : TEXT("  ");
+			const FString Name = Row.Person->Wallet.Left(8);
+			const int32 Kind = (int32)Row.Kind;
+			if (Row.Kind == FPersonRow::EKind::Member) {
+				const FString Votes = Row.Person->Votes == 0 ? FString()
+					: FString::Printf(TEXT("   %d vote%s to remove%s"), Row.Person->Votes, Row.Person->Votes == 1 ? TEXT("") : TEXT("s"), Row.Person->bVoted ? TEXT(" (yours)") : TEXT(""));
+				Line(*FString::Printf(TEXT("member%d"), Counts[Kind]++), FString::Printf(TEXT("%s%s%s   member%s"), Mark, Row.Person->bYou ? TEXT("YOU  ") : TEXT(""), *Name, *Votes), 11, Index == At ? White : Dim);
+			}
+			else if (Row.Kind == FPersonRow::EKind::Invited) {
+				Line(*FString::Printf(TEXT("invited%d"), Counts[Kind]++), FString::Printf(TEXT("%s%s   invited"), Mark, *Name), 11, Index == At ? White : Dim);
+			}
+			else {
+				Line(*FString::Printf(TEXT("free%d"), Counts[Kind]++), FString::Printf(TEXT("%s%s   in no faction"), Mark, *Name), 11, Index == At ? White : Dim);
+			}
+		}
+		if (Rows.IsValidIndex(At)) {
+			const FPersonRow& Row = Rows[At];
+			Line(TEXT("keys"), Row.Kind == FPersonRow::EKind::Free ? TEXT("I: invite   W S: choose   P: back")
+				: Row.Kind == FPersonRow::EKind::Invited ? TEXT("X: withdraw the invitation   W S: choose   P: back")
+				: Row.Person->bYou ? TEXT("L: leave the faction   W S: choose   P: back")
+				: Row.Person->bVoted ? TEXT("U: take your vote back   W S: choose   P: back")
+				: TEXT("K: vote to remove   W S: choose   P: back"), 10, Dim);
+		}
+		if (!Server->Message.IsEmpty()) {
+			Line(TEXT("message"), Server->Message, 11, Server->bBusy ? Dim : Server->bLastOk ? Good : Short);
+		}
+		Draw();
+		return;
 	}
 
 	const FSennitePrefab* Prefab = Editor->Chosen();
@@ -704,7 +863,7 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 	}
 	else if (Prefab != nullptr) {
 		Line(TEXT("prefab"), FString::Printf(TEXT("%s   %s"), *Prefab->Name.ToUpper(), *RecipeOf(*Prefab)), 13, White);
-		Line(TEXT("keys"), View != nullptr && View->bMember ? TEXT("F: place   Q E: prefab   R: turn   W A S D: move") : TEXT("W A S D: move   TAB: next parcel"), 10, Dim);
+		Line(TEXT("keys"), View != nullptr && View->bMember ? TEXT("F: place   Q E: prefab   R: turn   W A S D: move   P: people") : TEXT("W A S D: move   TAB: next parcel"), 10, Dim);
 	}
 
 	if (!Server->Message.IsEmpty()) {

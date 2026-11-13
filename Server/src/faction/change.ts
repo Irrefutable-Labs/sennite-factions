@@ -8,7 +8,7 @@
 // to remove another.
 
 import { canonical, isHex, type Canonical } from "./canonical.js";
-import { checkMember, type Member, type Rotation } from "./state.js";
+import { checkMember, SIGNING_KEY_BYTES, type Member, type Rotation } from "./state.js";
 
 export type Change =
   | {
@@ -158,7 +158,7 @@ function changeOf(raw: Record<string, unknown>): Change | string {
     case "uninvite":
     case "vote":
     case "unvote":
-      if (!isHex(raw.signingKey) || raw.signingKey.length > 128) return "it names no signing key";
+      if (!isHex(raw.signingKey, SIGNING_KEY_BYTES)) return "it names no signing key";
       return { kind: raw.kind, signingKey: raw.signingKey };
     default:
       return "it is not a kind of change";

@@ -319,10 +319,13 @@ export class Service {
     // The wallets connected to the game that are in no faction: who a member can invite.
     if (is("GET", "players", "free")) {
       const caller = await this.connected(this.player(req));
+      // only a member of a faction has anyone to invite, and a wallet's DSM identity is all inviting takes
+      if ((await publisher.factionOf(hex(caller.opponent.signingKey))) === undefined) {
+        throw new HttpError(403, "the wallet is not a member of a faction");
+      }
       const free = [];
       for (const other of (await publisher.app.connections()).filter((x) => x.connected && x.id !== caller.id)) {
-        const key = hex(other.opponent.signingKey);
-        if ((await publisher.factionOf(key)) === undefined) free.push({ signingKey: key, wallet: other.peer });
+        if ((await publisher.factionOf(hex(other.opponent.signingKey))) === undefined) free.push({ wallet: other.peer });
       }
       return { status: 200, body: { players: free } };
     }
@@ -411,6 +414,9 @@ export class Service {
       const wallet = text((await body(req)).wallet, "wallet");
       const invitee = (await publisher.app.connections()).find((x) => x.connected && x.peer === wallet);
       if (invitee === undefined) throw new Refused("that wallet is not connected to the game");
+      if ((await publisher.factionOf(hex(invitee.opponent.signingKey))) !== undefined) {
+        throw new Refused("that wallet is already a member of a faction");
+      }
       const change: Change = { kind: "invite", member: publisher.member(invitee) };
       return {
         status: 202,
@@ -430,7 +436,13 @@ export class Service {
     if (is("POST", "factions", null, "changes") && b !== undefined) {
       const player = this.player(req);
       const change = this.change((await body(req)).change);
+      // an invitation names a wallet connected to the game, which the server looks up: it is not taken as bytes from a game
+      if (change.kind === "invite") throw new HttpError(400, "an invitation is sent as an invitation");
       const connection = await this.member(player, b, change.kind === "accept");
+      // a wallet is a member of one faction at a time
+      if (change.kind === "accept" && (await publisher.factionOf(hex(connection.opponent.signingKey))) !== undefined) {
+        throw new Refused("the wallet is already a member of a faction");
+      }
       return {
         status: 202,
         body: this.start(

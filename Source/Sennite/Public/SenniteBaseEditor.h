@@ -13,7 +13,11 @@
 // F places it, N founds a faction on an unassigned parcel, Tab goes to the next parcel. On a
 // structure: C commits, 1 chooses which resource, Z how much, T takes back, V replaces it with the
 // chosen prefab, X dismantles, G rebuilds one a battle destroyed. O copies the connect code, and M
-// has the wallet prove what it holds.
+// has the wallet prove what it holds. J accepts a faction's invitation.
+//
+// P opens the faction's people: its members, those it has invited, and the players in no faction.
+// W and S choose one; I invites, X withdraws an invitation, K votes to remove a member, U takes the
+// vote back, and L, on yourself, leaves the faction.
 
 #pragma once
 
@@ -30,6 +34,7 @@ class UInputComponent;
 class UStaticMeshComponent;
 class USennitePublisher;
 struct FSenniteBaseView;
+struct FSennitePerson;
 struct FSennitePrefab;
 struct FSenniteStructureView;
 
@@ -66,6 +71,23 @@ public:
 	int32 NeedIndex = 0;
 	/** Which amount the commit button commits: all that is needed, or a part. */
 	int32 AmountIndex = 0;
+
+	/** Whether the panel shows the faction's people instead of the parcel. */
+	bool bPeople = false;
+	/** Which person is chosen on the people page. */
+	int32 PersonIndex = 0;
+
+	/** One row of the people page: a member, someone invited, or a player in no faction. */
+	struct FPersonRow
+	{
+		enum class EKind { Member, Invited, Free };
+		EKind Kind = EKind::Member;
+		const FSennitePerson* Person = nullptr;
+	};
+	/** The people page's rows, in the order drawn. */
+	TArray<FPersonRow> PeopleRows() const;
+	/** The row chosen, or null when there is none. */
+	bool ChosenPerson(FPersonRow& Row) const;
 
 	/** Each line the last frame drew, as "name=text". */
 	TArray<FString> LastDrawn;
@@ -105,6 +127,12 @@ private:
 	void Rebuild();
 	void CopyCode();
 	void ProveMaterials();
+	void TogglePeople();
+	void Join();
+	void InvitePerson();
+	void VotePerson();
+	void UnvotePerson();
+	void LeaveFaction();
 
 	void ChooseParcel(const FString& Id);
 	void SyncStructures();

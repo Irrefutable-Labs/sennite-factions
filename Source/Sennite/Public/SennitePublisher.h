@@ -73,6 +73,19 @@ struct FSenniteStructureView
 	TArray<FSenniteCommitted> Committed;
 };
 
+/** A member of a faction, someone it has invited, or a player in no faction: by their wallet's DSM identity. */
+struct FSennitePerson
+{
+	FString SigningKey;
+	/** The wallet's DSM identity, as people read it. */
+	FString Wallet;
+	bool bYou = false;
+	/** How many members have voted to remove this member. */
+	int32 Votes = 0;
+	/** Whether this player's wallet is one of them. */
+	bool bVoted = false;
+};
+
 /** One parcel's base, as the server last gave it. */
 struct FSenniteBaseView
 {
@@ -81,7 +94,12 @@ struct FSenniteBaseView
 	FString FactionId;
 	/** Whether this player's wallet is a member of the faction. */
 	bool bMember = false;
+	/** Whether the faction has invited this player's wallet and it has not accepted yet. */
+	bool bInvited = false;
 	int32 Members = 0;
+	/** The faction's members and those it has invited: only its members are told. */
+	TArray<FSennitePerson> People;
+	TArray<FSennitePerson> Invited;
 	/** How many changes the faction's state has taken. */
 	int32 Height = 0;
 	TArray<FSenniteStructureView> Structures;
@@ -124,6 +142,9 @@ public:
 	TMap<FString, int32> Materials;
 	bool bMaterialsKnown = false;
 
+	/** The wallets connected to the game that are in no faction: who a member can invite. */
+	TArray<FSennitePerson> FreePlayers;
+
 	/** Each parcel's base, by parcel id. */
 	TMap<FString, FSenniteBaseView> Bases;
 
@@ -147,6 +168,17 @@ public:
 	void Dismantle(const FString& InstanceId);
 	/** Rebuild a plan a battle destroyed, as it is. */
 	void Confirm(const FString& InstanceId);
+	/** Invite a wallet connected to the game into this player's faction. */
+	void Invite(const FString& InWallet);
+	/** Withdraw an invitation nobody has accepted. */
+	void Uninvite(const FString& SigningKey);
+	/** Accept a faction's invitation: the wallet's own signature on joining. */
+	void Accept(const FString& InFactionId);
+	/** Vote to remove a member, or take the vote back. */
+	void Vote(const FString& SigningKey);
+	void Unvote(const FString& SigningKey);
+	/** Leave the faction. */
+	void Leave();
 	/** Commit materials from the wallet to a structure. */
 	void Commit(const FString& InstanceId, const FString& Resource, int32 Amount);
 	/** Take back what the wallet still has committed to a structure. */
@@ -160,6 +192,8 @@ private:
 	/** Send something the wallet has to answer; the server names a request to ask about. */
 	void Ask(const FString& Path, const TSharedPtr<FJsonObject>& Body, const TCHAR* Waiting);
 	void SendChange(const TSharedRef<FJsonObject>& Change);
+	void SendChangeTo(const FString& InFactionId, const TSharedRef<FJsonObject>& Change, const TCHAR* Waiting);
+	void AskFree();
 
 	void AskWorld();
 	void AskPlayer();
@@ -185,4 +219,6 @@ private:
 	double NextMe = 0.0;
 	double NextBases = 0.0;
 	double NextRequest = 0.0;
+	double NextFree = 0.0;
+	bool bFreeAsked = false;
 };

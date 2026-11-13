@@ -17,7 +17,12 @@ import {
   type Rotation,
 } from "./state.js";
 
-export type Verdict = { valid: true; next: FactionState } | { valid: false; why: string };
+/**
+ * A valid change gives the next state. An invalid one changes nothing of the
+ * base; `next` is given only when the invalid occupant was an invited wallet's,
+ * whose invitation it used up.
+ */
+export type Verdict = { valid: true; next: FactionState } | { valid: false; why: string; next?: FactionState };
 
 const invalid = (why: string): Verdict => ({ valid: false, why });
 
@@ -186,6 +191,23 @@ export function settled(state: FactionState): FactionState {
  * not list, or breaks a rule is invalid: the base does not change (spec 7.4).
  */
 export function judge(
+  state: FactionState,
+  parent: string,
+  catalogue: Catalogue,
+  parcel: Parcel,
+  signerKey: string,
+  payload: Uint8Array,
+): Verdict {
+  const verdict = judged(state, parent, catalogue, parcel, signerKey, payload);
+  // An invited wallet has one write at the faction's cells: its acceptance. Anything else it
+  // writes there counts for nothing and uses the invitation up, so it cannot spend cell after cell.
+  if (!verdict.valid && invitedBySigningKey(state, signerKey) !== undefined) {
+    return { valid: false, why: verdict.why, next: { ...state, invited: state.invited.filter((m) => m.signingKey !== signerKey) } };
+  }
+  return verdict;
+}
+
+function judged(
   state: FactionState,
   parent: string,
   catalogue: Catalogue,
