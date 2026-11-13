@@ -10,10 +10,11 @@
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { Connection } from "dsm-app-client";
-import { hex } from "../faction/canonical.js";
+import { encodeB32, type Connection } from "dsm-app-client";
+import { hex, unhex } from "../faction/canonical.js";
 import { decodeChange, encodeChange, type Change } from "../faction/change.js";
 import type { Funding } from "../dsm/contributions.js";
+import type { Member } from "../faction/state.js";
 import { Publisher, Refused, type Structure } from "./publisher.js";
 import type { Store } from "./store.js";
 import type { World } from "./world.js";
@@ -206,14 +207,24 @@ export class Service {
     return connection;
   }
 
-  /** The connected wallet of a player, which must be a member of the faction. */
-  private async member(player: string, factionId: string): Promise<Connection> {
+  /**
+   * The connected wallet of a player, which must be a member of the faction;
+   * or, with `orInvited`, one the faction has invited.
+   */
+  private async member(player: string, factionId: string, orInvited = false): Promise<Connection> {
     if (!Object.hasOwn(this.options.store.data.factions, factionId)) throw new HttpError(404, "no such faction");
     const connection = await this.connected(player);
     const { mirror } = await this.options.publisher.follow(factionId);
     const key = hex(connection.opponent.signingKey);
-    if (!mirror.state.members.some((m) => m.signingKey === key)) throw new HttpError(403, "the wallet is not a member of the faction");
+    const listed = mirror.state.members.some((m) => m.signingKey === key);
+    const invited = orInvited && mirror.state.invited.some((m) => m.signingKey === key);
+    if (!listed && !invited) throw new HttpError(403, "the wallet is not a member of the faction");
     return connection;
+  }
+
+  /** A person as a game shows them: by their wallet's DSM identity, as people read it. */
+  private person(m: Member): { signingKey: string; wallet: string } {
+    return { signingKey: m.signingKey, wallet: encodeB32(unhex(m.deviceId, "device id")) };
   }
 
   /** Start work a wallet has to answer; the game reads what became of it under the id. */
@@ -295,8 +306,25 @@ export class Service {
       const signingKey = hex(connection.opponent.signingKey);
       return {
         status: 200,
-        body: { connected: true, wallet: connection.peer, signingKey, faction: (await publisher.factionOf(signingKey)) ?? null },
+        body: {
+          connected: true,
+          wallet: connection.peer,
+          signingKey,
+          faction: (await publisher.factionOf(signingKey)) ?? null,
+          invitations: await publisher.invitationsOf(signingKey),
+        },
       };
+    }
+
+    // The wallets connected to the game that are in no faction: who a member can invite.
+    if (is("GET", "players", "free")) {
+      const caller = await this.connected(this.player(req));
+      const free = [];
+      for (const other of (await publisher.app.connections()).filter((x) => x.connected && x.id !== caller.id)) {
+        const key = hex(other.opponent.signingKey);
+        if ((await publisher.factionOf(key)) === undefined) free.push({ signingKey: key, wallet: other.peer });
+      }
+      return { status: 200, body: { players: free } };
     }
 
     // What the player's wallet holds of each resource: the wallet proves it, the publisher's account checks the proof.
@@ -336,7 +364,18 @@ export class Service {
       const { mirror } = await publisher.follow(factionId);
       const key = connection === undefined ? "" : hex(connection.opponent.signingKey);
       const member = mirror.state.members.some((m) => m.signingKey === key);
+      const invited = mirror.state.invited.some((m) => m.signingKey === key);
       const base = await this.base(factionId);
+      // Who the members and the invited are, and which votes stand, is the members' to see.
+      const people = member
+        ? {
+            members: mirror.state.members.map((m) => {
+              const voters = mirror.state.votes.find((v) => v.target === m.signingKey)?.voters ?? [];
+              return { ...this.person(m), you: m.signingKey === key, votes: voters.length, voted: voters.includes(key) };
+            }),
+            invited: mirror.state.invited.map((m) => this.person(m)),
+          }
+        : undefined;
       const shown = (s: Structure) => ({
         instanceId: s.instanceId,
         prefabId: s.prefabId,
@@ -357,17 +396,41 @@ export class Service {
           commitment: base.commitment,
           height: base.height,
           member,
+          invited,
+          people,
           members: mirror.state.members.length,
           structures: base.structures.filter((s) => member || s.standing).map(shown),
         },
       };
     }
 
-    // A member's change to the faction's state: their wallet signs it and writes it.
-    if (is("POST", "factions", null, "changes") && b !== undefined) {
+    // A member invites a wallet connected to the game: the first of the two signatures a join takes.
+    if (is("POST", "factions", null, "invitations") && b !== undefined) {
       const player = this.player(req);
       const connection = await this.member(player, b);
+      const wallet = text((await body(req)).wallet, "wallet");
+      const invitee = (await publisher.app.connections()).find((x) => x.connected && x.peer === wallet);
+      if (invitee === undefined) throw new Refused("that wallet is not connected to the game");
+      const change: Change = { kind: "invite", member: publisher.member(invitee) };
+      return {
+        status: 202,
+        body: this.start(
+          player,
+          async () => {
+            const done = await publisher.change(b, connection, change);
+            return done.taken ? { ok: true, message: "the invitation is part of the faction's state" } : { ok: false, message: done.why };
+          },
+          b,
+        ),
+      };
+    }
+
+    // A member's change to the faction's state: their wallet signs it and writes it. An invited
+    // wallet may send one change: its own acceptance.
+    if (is("POST", "factions", null, "changes") && b !== undefined) {
+      const player = this.player(req);
       const change = this.change((await body(req)).change);
+      const connection = await this.member(player, b, change.kind === "accept");
       return {
         status: 202,
         body: this.start(

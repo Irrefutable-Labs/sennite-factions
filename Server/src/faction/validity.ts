@@ -7,7 +7,15 @@
 import type { Catalogue, Prefab } from "./catalogue.js";
 import { contains, MAX_COORDINATE, overlaps, type Parcel, type Rect } from "./parcel.js";
 import { decodeChange, type Change } from "./change.js";
-import { memberBySigningKey, type FactionState, type Placed, type Rotation } from "./state.js";
+import {
+  invitedBySigningKey,
+  MAX_MEMBERS,
+  memberBySigningKey,
+  type FactionState,
+  type Placed,
+  type RemovalVote,
+  type Rotation,
+} from "./state.js";
 
 export type Verdict = { valid: true; next: FactionState } | { valid: false; why: string };
 
@@ -105,7 +113,69 @@ function applied(state: FactionState, catalogue: Catalogue, parcel: Parcel, sign
       if (existing === undefined) return invalid(`instance ${change.instanceId} does not exist`);
       return { valid: true, next: state };
     case "leave":
-      return { valid: true, next: { ...state, members: state.members.filter((m) => m.signingKey !== signerKey) } };
+      return { valid: true, next: settled({ ...state, members: state.members.filter((m) => m.signingKey !== signerKey) }) };
+    case "invite": {
+      const key = change.member.signingKey;
+      if (memberBySigningKey(state, key) !== undefined) return invalid("the invited is already a member");
+      if (invitedBySigningKey(state, key) !== undefined) return invalid("the invited is already invited");
+      if (state.members.length + state.invited.length >= MAX_MEMBERS) return invalid("the faction has no room for another");
+      return { valid: true, next: { ...state, invited: [...state.invited, { ...change.member }] } };
+    }
+    case "uninvite":
+      if (invitedBySigningKey(state, change.signingKey) === undefined) return invalid("nobody with that key is invited");
+      return { valid: true, next: { ...state, invited: state.invited.filter((m) => m.signingKey !== change.signingKey) } };
+    case "accept": {
+      // judged before this: the signer is the invited, and nobody else
+      const joiner = invitedBySigningKey(state, signerKey);
+      if (joiner === undefined) return invalid("the signer is not invited");
+      return {
+        valid: true,
+        next: { ...state, members: [...state.members, joiner], invited: state.invited.filter((m) => m.signingKey !== signerKey) },
+      };
+    }
+    case "vote": {
+      const target = change.signingKey;
+      if (target === signerKey) return invalid("a member does not vote on themselves: they leave");
+      if (memberBySigningKey(state, target) === undefined) return invalid("nobody with that key is a member");
+      const standing = state.votes.find((v) => v.target === target);
+      if (standing?.voters.includes(signerKey)) return invalid("the signer has already voted to remove that member");
+      const voters = [...(standing?.voters ?? []), signerKey].sort();
+      const votes = [...state.votes.filter((v) => v.target !== target), { target, voters }].sort(byTarget);
+      return { valid: true, next: settled({ ...state, votes }) };
+    }
+    case "unvote": {
+      const target = change.signingKey;
+      const standing = state.votes.find((v) => v.target === target);
+      if (standing === undefined || !standing.voters.includes(signerKey)) return invalid("the signer has no vote to remove that member");
+      const voters = standing.voters.filter((k) => k !== signerKey);
+      const votes = [...state.votes.filter((v) => v.target !== target), ...(voters.length > 0 ? [{ target, voters }] : [])].sort(byTarget);
+      return { valid: true, next: { ...state, votes } };
+    }
+  }
+}
+
+const byTarget = (a: RemovalVote, b: RemovalVote): number => (a.target < b.target ? -1 : a.target > b.target ? 1 : 0);
+
+/**
+ * The state once the votes that stand are counted (spec 7.2): a member is
+ * removed when more than half of the other members have voted to remove them.
+ * Only members' votes on members count; a vote of someone who is gone, or on
+ * someone who is gone, is dropped. Removing one member can complete the vote on
+ * another, so the count is repeated until nothing changes, lowest key first.
+ */
+export function settled(state: FactionState): FactionState {
+  let members = state.members;
+  let votes = state.votes;
+  for (;;) {
+    const keys = new Set(members.map((m) => m.signingKey));
+    votes = votes
+      .filter((v) => keys.has(v.target))
+      .map((v) => ({ target: v.target, voters: v.voters.filter((k) => keys.has(k) && k !== v.target) }))
+      .filter((v) => v.voters.length > 0)
+      .sort(byTarget);
+    const removed = votes.find((v) => v.voters.length * 2 > members.length - 1);
+    if (removed === undefined) return { ...state, members, votes };
+    members = members.filter((m) => m.signingKey !== removed.target);
   }
 }
 
@@ -130,6 +200,11 @@ export function judge(
   const { factionId, parent: named, change } = read.signedOver;
   if (factionId !== state.factionId) return invalid("the change names another faction");
   if (named !== parent) return invalid("the change names another state");
-  if (memberBySigningKey(state, signerKey) === undefined) return invalid("the signer is not a member the state lists");
+  // An invited wallet may write its acceptance and nothing else; everything else is a member's to write.
+  if (change.kind === "accept") {
+    if (invitedBySigningKey(state, signerKey) === undefined) return invalid("the signer is not invited");
+  } else if (memberBySigningKey(state, signerKey) === undefined) {
+    return invalid("the signer is not a member the state lists");
+  }
   return applied(state, catalogue, parcel, signerKey, change);
 }

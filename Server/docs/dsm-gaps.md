@@ -47,20 +47,28 @@ A request kind a wallet answers from its own read of a cell (under the state gra
 member a reading that is their own wallet's. Whether that, or something else, is what "mirror" means
 in the Connect model is the owner's call.
 
-## 3. More than one signature in one change
+## 3. More than one signature in one change (built another way, with what DSM has)
 
-**Needed by:** 7.2: a member joins ("an existing member and the joiner, both signatures in the
-change") and a member is removed ("more than half of the members ... sign").
+**The specification says** (7.2): a member joins with "an existing member and the joiner, both
+signatures in the change", and a member is removed when "more than half of the members ... sign".
 
-**Missing:** a way to carry them. A cell write carries one writer's signature and a payload of at
-most 16,384 bytes; one SPHINCS+ signature is 49,856 bytes. `ask.sign` gives a signature the account
-verifies (fact `signed`), but it cannot ride in a payload. Either a write that several writers sign,
-or a payload limit that holds the extra signatures, or a ruling that a joiner's consent and a
-remover's vote are cell writes of their own that the change points at (which makes validity read
-more than the three inputs of section 7).
+**What stands in the way:** a cell write carries one writer's signature and a payload of at most
+16,384 bytes; one SPHINCS+ signature is 49,856 bytes.
 
-**Not built because of it:** joining and removal by majority. Stage 3's "B leaves the first faction
-and joins the second" cannot be shown; B can leave.
+**What is built** (owner, 2026-11-13: "Yes, build it"): each person's part is their own signed
+change in the faction's lineage.
+
+- Joining: a member writes an invitation naming the joiner. The state then lists the joiner as
+  invited, and their key is one of the successor cell's writers. The joiner's wallet writes its own
+  acceptance, the one change an invited wallet may make, and is a member from there. Both
+  signatures are in the lineage, on two cells.
+- Removal: each vote is the voter's own change. The state holds the votes that stand; when more
+  than half of the other members have voted, the member is out at once.
+
+Validity still comes from the parent state, the catalogue and the parcel alone, because the
+invitation and the votes are in the state. The price is that the committed state holds who is
+invited and which votes stand, and that an invited wallet, like a member, can spend a cell with a
+change that counts for nothing (7.5); any member can withdraw the invitation.
 
 ## 4. Finding a member's contributions to a structure without a first commitment
 

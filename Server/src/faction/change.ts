@@ -2,12 +2,13 @@
 // signs and writes at the successor cell. A change names its faction_id and
 // the state R_n it was made against (spec 6.3).
 //
-// Joining and removal are not here. Spec 7.2 has both carry more than one
-// signature in the change, and a cell's payload (16,384 bytes) is smaller than
-// one signature (49,856 bytes): see docs/dsm-gaps.md.
+// Joining and removal take more than one person's signature (spec 7.2), and a
+// cell's write carries one. So each person's part is their own change: a
+// member's invitation and the invited wallet's acceptance; each member's vote
+// to remove another.
 
 import { canonical, isHex, type Canonical } from "./canonical.js";
-import type { Rotation } from "./state.js";
+import { checkMember, type Member, type Rotation } from "./state.js";
 
 export type Change =
   | {
@@ -23,7 +24,17 @@ export type Change =
   | { kind: "dismantle"; instanceId: string }
   /** Rebuild a plan that was destroyed in battle, as it is (spec 7.6). */
   | { kind: "confirm"; instanceId: string }
-  | { kind: "leave" };
+  | { kind: "leave" }
+  /** A member invites someone to join: the first of the two signatures a join takes. */
+  | { kind: "invite"; member: Member }
+  /** A member withdraws an invitation nobody has accepted. */
+  | { kind: "uninvite"; signingKey: string }
+  /** The invited wallet accepts: the joiner's own signature. They are a member from here. */
+  | { kind: "accept" }
+  /** A member votes to remove another member. */
+  | { kind: "vote"; signingKey: string }
+  /** A member takes their vote back. */
+  | { kind: "unvote"; signingKey: string };
 
 /** A change as it is written: against one state of one faction. */
 export interface SignedOver {
@@ -54,7 +65,14 @@ function changeValue(c: Change): Canonical {
     case "confirm":
       return { instanceId: c.instanceId, kind: c.kind };
     case "leave":
+    case "accept":
       return { kind: c.kind };
+    case "invite":
+      return { kind: c.kind, member: { deviceId: c.member.deviceId, genesis: c.member.genesis, signingKey: c.member.signingKey } };
+    case "uninvite":
+    case "vote":
+    case "unvote":
+      return { kind: c.kind, signingKey: c.signingKey };
   }
 }
 
@@ -121,6 +139,27 @@ function changeOf(raw: Record<string, unknown>): Change | string {
     }
     case "leave":
       return { kind: "leave" };
+    case "accept":
+      return { kind: "accept" };
+    case "invite": {
+      const m = raw.member as Record<string, unknown> | undefined;
+      if (typeof m !== "object" || m === null) return "it names nobody to invite";
+      if (typeof m.genesis !== "string" || typeof m.deviceId !== "string" || typeof m.signingKey !== "string") {
+        return "the invited is not a genesis, a device id and a signing key";
+      }
+      const member: Member = { genesis: m.genesis, deviceId: m.deviceId, signingKey: m.signingKey };
+      try {
+        checkMember(member);
+      } catch (e) {
+        return e instanceof Error ? e.message : "the invited is malformed";
+      }
+      return { kind: "invite", member };
+    }
+    case "uninvite":
+    case "vote":
+    case "unvote":
+      if (!isHex(raw.signingKey) || raw.signingKey.length > 128) return "it names no signing key";
+      return { kind: raw.kind, signingKey: raw.signingKey };
     default:
       return "it is not a kind of change";
   }

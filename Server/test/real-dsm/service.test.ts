@@ -187,6 +187,39 @@ describe("the game's side of the publisher's server", () => {
     expect((await theBase()).structures).toMatchObject([{ instanceId: tower, standing: true }]);
   });
 
+  it("a member invites a connected wallet, it joins by its own acceptance, and a vote removes it", async () => {
+    const bob = await a.wallets.bob!.wallet.id();
+    const alice = await a.wallets.alice!.wallet.id();
+
+    // Bob is connected and in no faction: Alice's game lists him; he cannot change anything yet.
+    expect((await call("GET", "/players/free", game.alice)).body.players.map((p: Json) => p.wallet)).toContain(bob);
+    expect((await call("POST", `/factions/${game.faction}/changes`, game.bob, { change: { kind: "accept" } })).status).toBe(403);
+    expect((await call("POST", `/factions/${game.faction}/invitations`, game.bob, { wallet: bob })).status).toBe(403);
+
+    expect(await settled(game.alice!, `/factions/${game.faction}/invitations`, { wallet: bob })).toMatchObject({ ok: true });
+    expect((await call("GET", "/players/me", game.bob)).body.invitations).toEqual([{ factionId: game.faction, parcelId: PARCEL }]);
+    const invited = await theBase(game.bob);
+    expect(invited).toMatchObject({ member: false, invited: true });
+    expect(invited.people).toBeUndefined();
+    // Invited is not a member: nothing but his own acceptance is taken from him.
+    expect((await call("POST", `/factions/${game.faction}/changes`, game.bob, { change: { kind: "dismantle", instanceId: tower } })).status).toBe(403);
+
+    expect(await settled(game.bob!, `/factions/${game.faction}/changes`, { change: { kind: "accept" } })).toMatchObject({ ok: true });
+    const joined = await theBase(game.bob);
+    expect(joined).toMatchObject({ member: true, members: 2 });
+    expect(joined.people.members.map((p: Json) => [p.wallet, p.you])).toEqual([
+      [alice, false],
+      [bob, true],
+    ]);
+    expect((await call("GET", "/players/me", game.bob)).body).toMatchObject({ faction: { factionId: game.faction }, invitations: [] });
+
+    // In a faction of two, the other member alone is the majority: Alice's vote removes Bob at once.
+    const bobsKey = joined.people.members[1].signingKey as string;
+    expect(await settled(game.alice!, `/factions/${game.faction}/changes`, { change: { kind: "vote", signingKey: bobsKey } })).toMatchObject({ ok: true });
+    expect(await theBase(game.alice)).toMatchObject({ members: 1 });
+    expect(await theBase(game.bob)).toMatchObject({ member: false, invited: false });
+  });
+
   it("a withdrawal goes back to the wallet; the structure stands and shows its shortfall", async () => {
     expect(await settled(game.alice!, `/factions/${game.faction}/withdrawals`, { instanceId: tower })).toMatchObject({ ok: true });
     expect(await holds(a.wallets.alice!.wallet, "STEEL")).toEqual({ available: 300n, locked: 0n });

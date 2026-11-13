@@ -405,6 +405,16 @@ export class Publisher {
     return undefined;
   }
 
+  /** The factions that list `signingKey` as invited now. */
+  async invitationsOf(signingKey: string): Promise<{ factionId: string; parcelId: string }[]> {
+    const invitations = [];
+    for (const [factionId, record] of Object.entries(this.options.store.data.factions)) {
+      const { mirror } = await this.follow(factionId);
+      if (mirror.state.invited.some((m) => m.signingKey === signingKey)) invitations.push({ factionId, parcelId: record.parcelId });
+    }
+    return invitations;
+  }
+
   /** The faction_id assigned to a parcel, from the server's record; undefined while it is unassigned. */
   factionOn(parcelId: string): string | undefined {
     return Object.entries(this.options.store.data.factions).find(([, r]) => r.parcelId === parcelId)?.[0];

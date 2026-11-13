@@ -2,6 +2,11 @@
 // and catalogue version the base belongs to, which storage set it lives on,
 // and what is placed where. Funding, contributions, recipes, the host and
 // anything real-time are not state (spec 5.2, 5.3).
+//
+// Joining and removal each take more than one person (spec 7.2). Each person's
+// part is their own signed change in the lineage: a member invites and the
+// invited wallet accepts; each vote to remove is the voter's own. So the state
+// also holds who is invited and which votes stand, until they are used.
 
 import { canonical, digest, hex, isHex, unhex, type Canonical } from "./canonical.js";
 
@@ -51,9 +56,24 @@ export interface FactionState {
   members: Member[];
   /** In ascending instance_id. */
   placed: Placed[];
+  /**
+   * Those a member has invited who have not accepted yet, in the order they
+   * were invited. An invited wallet may write one thing: its own acceptance.
+   */
+  invited: Member[];
+  /** The votes to remove a member that stand, in ascending order of the member voted on. */
+  votes: RemovalVote[];
 }
 
-/** The most members a faction lists: a cell's writer set holds no more keys. */
+/** The members who have voted to remove one member, each by their own signed change. */
+export interface RemovalVote {
+  /** The signing key of the member voted on. */
+  target: string;
+  /** The signing keys of the members who voted, ascending. */
+  voters: string[];
+}
+
+/** The most members and invited a faction lists together: a cell's writer set holds no more keys. */
 export const MAX_MEMBERS = 64;
 
 function memberValue(m: Member): Canonical {
@@ -143,6 +163,8 @@ export function firstState(f: Founding, assignment: string): FactionState {
     catalogue: f.catalogue,
     members: f.members.map((m) => ({ ...m })),
     placed: [],
+    invited: [],
+    votes: [],
   };
 }
 
@@ -151,6 +173,7 @@ function stateValue(s: FactionState): Canonical {
     assignment: s.assignment,
     catalogue: s.catalogue,
     factionId: s.factionId,
+    invited: s.invited.map(memberValue),
     members: s.members.map(memberValue),
     parcelId: s.parcelId,
     placed: s.placed.map((p) => ({
@@ -162,6 +185,7 @@ function stateValue(s: FactionState): Canonical {
       y: p.y,
     })),
     storageSet: s.storageSet,
+    votes: s.votes.map((v) => ({ target: v.target, voters: v.voters })),
   };
 }
 
@@ -203,11 +227,18 @@ export function successorCellName(factionIdHex: string, commitment: string): Uin
   return name;
 }
 
-/** The successor cell's writers: the signing keys of the members R_n lists (spec 6.3). */
+/**
+ * The successor cell's writers: the signing keys of the members R_n lists
+ * (spec 6.3), and of those it lists as invited, who may write their acceptance.
+ */
 export function writerKeys(s: FactionState): Uint8Array[] {
-  return s.members.map((m) => unhex(m.signingKey, "a member's signing key"));
+  return [...s.members, ...s.invited].map((m) => unhex(m.signingKey, "a signing key"));
 }
 
 export function memberBySigningKey(s: FactionState, signingKey: string): Member | undefined {
   return s.members.find((m) => m.signingKey === signingKey);
+}
+
+export function invitedBySigningKey(s: FactionState, signingKey: string): Member | undefined {
+  return s.invited.find((m) => m.signingKey === signingKey);
 }
