@@ -57,21 +57,32 @@ export interface FactionRecord {
   play: Record<string, Play>;
 }
 
+/** A player of the game, as the server knows one: by the offer their wallet connects from. */
+export interface PlayerRecord {
+  /** The digest of the offer this player's connect code names (lowercase hex). */
+  offer: string;
+}
+
 export interface StoreData {
   /** cell (its name and writer set, as `cellRecordKey` gives it) -> the writes asked there, in the order asked */
   asked: Record<string, AskedWrite[]>;
   /** faction_id -> the server's record of it */
   factions: Record<string, FactionRecord>;
+  /**
+   * The game's own token for a player -> that player. The token only resumes a
+   * player's place in the game; it is never DSM authority.
+   */
+  players: Record<string, PlayerRecord>;
 }
 
-const empty = (): StoreData => ({ asked: {}, factions: {} });
+const empty = (): StoreData => ({ asked: {}, factions: {}, players: {} });
 
 export class Store {
   readonly data: StoreData;
 
   /** A store kept in `file`, or in memory when no file is named. */
   constructor(private readonly file?: string) {
-    this.data = file !== undefined && existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as StoreData) : empty();
+    this.data = file !== undefined && existsSync(file) ? { ...empty(), ...(JSON.parse(readFileSync(file, "utf8")) as StoreData) } : empty();
   }
 
   /** Write the record to its file: a whole new file, renamed into place. */

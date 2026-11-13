@@ -101,7 +101,7 @@ describe("contributions", () => {
   it("A places a watchtower with nothing committed: it needs resources and is only a plan", async () => {
     const members = ["alice", "bob", "carol"].map((n) => player(s, n).member);
     factionId = (await s.publisher.assign(s.publisher.founding(PARCEL, members, hex(randomBytes(16))))).factionId;
-    const place: Change = { kind: "place", instanceId: tower, prefabId: "watchtower", x: 14880, y: 480, rotation: 0, config: {} };
+    const place: Change = { kind: "place", instanceId: tower, prefabId: "watchtower", x: -8160 + 480, y: 3360 + 480, rotation: 0, config: {} };
     expect((await s.publisher.change(factionId, player(s, "alice").connection, place)).taken).toBe(true);
 
     const planned = await theTower();

@@ -30,6 +30,8 @@ export interface Contribution {
   /** The resource's symbol; empty when the vault holds something that is not a resource. */
   resource: string;
   amount: number;
+  /** Whether the vault is Active: its units are in it. */
+  active: boolean;
   /** Whether it meets all four conditions of spec 8.3. */
   counts: boolean;
   /** Whether it counts only because its owner left by their own change and the 48-hour notice has not run. */
@@ -146,7 +148,12 @@ export class Contributions {
           leaving = !listed && leavers.some(isOwner);
           if (!listed && !leaving) why = "its owner is not a member of the faction";
         }
-        contributions.push({ vault: hex(vault.vaultId), owner, resource, amount: Number(vault.amount), counts: why === "", leaving, why });
+        contributions.push({ vault: hex(vault.vaultId), owner, resource, amount: Number(vault.amount),
+          active: vault.status === pb.SofiVaultStatus.ACTIVE,
+          counts: why === "",
+          leaving,
+          why,
+        });
       }
     }
     return { contributions, notEstablished };
@@ -173,11 +180,15 @@ export class Contributions {
     return out;
   }
 
-  /** The Active contributions of one owner across a faction's structures, dismantled ones included. */
-  async activeVaultsOf(factionId: string, owner: string, publisher: Party): Promise<Uint8Array[]> {
+  /**
+   * The Active contributions of one owner across a faction's structures,
+   * dismantled ones included; or on one structure, when `instanceId` names it.
+   */
+  async activeVaultsOf(factionId: string, owner: string, publisher: Party, instanceId?: string): Promise<Uint8Array[]> {
     const record = this.store.faction(factionId);
     const cells = new Set<string>();
-    for (const list of Object.values(record.contributions)) {
+    for (const [instance, list] of Object.entries(record.contributions)) {
+      if (instanceId !== undefined && instance !== instanceId) continue;
       for (const c of list) if (c.owner === owner) cells.add(c.cell);
     }
     const vaults: Uint8Array[] = [];

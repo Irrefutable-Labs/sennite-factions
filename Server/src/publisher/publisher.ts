@@ -145,7 +145,7 @@ export class Publisher {
 
   parcel(parcelId: string): Parcel {
     const found = this.options.parcels.get(parcelId);
-    if (found === undefined) throw new Error(`the registry has no parcel ${parcelId}`);
+    if (found === undefined) throw new Refused(`the registry has no parcel ${parcelId}`);
     return found;
   }
 
@@ -197,14 +197,14 @@ export class Publisher {
     this.parcel(founding.parcelId);
     if (founding.catalogue !== this.options.catalogue.version) throw new Error("the founding names another catalogue version");
     if ((await this.assignment(founding.parcelId)) !== undefined) {
-      throw new Error(`parcel ${founding.parcelId} is already assigned`);
+      throw new Refused(`parcel ${founding.parcelId} is already assigned`);
     }
     const factionId = factionIdOf(founding);
     const payload: Canonical = { factionId, founding: foundingValue(founding), parcelId: founding.parcelId, v: 1 };
     await publishAuthored(this.options.app, Publisher.assignmentTopic(founding.parcelId), canonical(payload));
     const held = await this.assignment(founding.parcelId);
     if (held === undefined || held.factionId !== factionId) {
-      throw new Error(`parcel ${founding.parcelId} was assigned to another faction first`);
+      throw new Refused(`parcel ${founding.parcelId} is already assigned: another faction was first`);
     }
     this.options.store.data.factions[factionId] ??= { parcelId: founding.parcelId, notices: {}, contributions: {}, play: {} };
     this.options.store.save();
@@ -359,6 +359,37 @@ export class Publisher {
   /** Ask the wallet on `connection` to take contributions back (spec 8.4: withdraw, or release after a dismantle). */
   async takeBack(connection: Connection, vaults: Uint8Array[]): Promise<Result> {
     return this.options.app.wait(await this.options.app.request(connection, ask.contribution.takeBack(vaults)));
+  }
+
+  /**
+   * Ask the wallet on `connection` to take back everything it still has
+   * committed to one structure. Undefined when it has nothing there.
+   */
+  async withdraw(factionId: string, connection: Connection, instanceId: string): Promise<Result | undefined> {
+    const owner = hex(connection.opponent.signingKey);
+    const vaults = await this.contributions.activeVaultsOf(factionId, owner, await this.party(), instanceId);
+    if (vaults.length === 0) return undefined;
+    // A request names at most eight contributions.
+    let last: Result | undefined;
+    for (let i = 0; i < vaults.length; i += 8) {
+      last = await this.takeBack(connection, vaults.slice(i, i + 8));
+      if (last.fact !== "taken_back") return last;
+    }
+    return last;
+  }
+
+  /** The faction that lists `signingKey` as a member now, among those the server has assigned parcels to. */
+  async factionOf(signingKey: string): Promise<{ factionId: string; parcelId: string } | undefined> {
+    for (const [factionId, record] of Object.entries(this.options.store.data.factions)) {
+      const { mirror } = await this.follow(factionId);
+      if (mirror.state.members.some((m) => m.signingKey === signingKey)) return { factionId, parcelId: record.parcelId };
+    }
+    return undefined;
+  }
+
+  /** The faction_id assigned to a parcel, from the server's record; undefined while it is unassigned. */
+  factionOn(parcelId: string): string | undefined {
+    return Object.entries(this.options.store.data.factions).find(([, r]) => r.parcelId === parcelId)?.[0];
   }
 
   /** The funding of every placed structure of a faction, read now (spec 8.3). */

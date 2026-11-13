@@ -25,25 +25,32 @@ function verdict(mirror: Mirror, signerKey: string, change: Change) {
   return judge(mirror.state, mirror.commitment, catalogue, land, signerKey, payload(mirror, change));
 }
 
+/** The parcel's first corner: every position below is given from it. */
+const [OX, OY] = land.boundary[0] as [number, number];
+
 const tower = (n: number, x: number, y: number): Change => ({
   kind: "place",
   instanceId: instance(n),
   prefabId: "watchtower",
-  x,
-  y,
+  x: OX + x,
+  y: OY + y,
   rotation: 0,
   config: {},
 });
 
 describe("the parcel boundary", () => {
   it("counts its own edge as inside and the notch as outside", () => {
-    expect(inside(land.boundary, [0, 0])).toBe(true);
-    expect(inside(land.boundary, [4800, 4800])).toBe(true);
-    expect(inside(land.boundary, [7200, 7200])).toBe(false);
-    expect(contains(land.boundary, { minX: 0, minY: 0, maxX: 960, maxY: 960 })).toBe(true);
-    // Every corner of this rectangle is on the boundary or inside, but it covers the notch's corner.
-    expect(contains(land.boundary, { minX: 3840, minY: 3840, maxX: 5760, maxY: 5760 })).toBe(false);
-    expect(contains(land.boundary, { minX: -480, minY: 0, maxX: 480, maxY: 960 })).toBe(false);
+    const at = (x: number, y: number): [number, number] => [OX + x, OY + y];
+    const rect = (minX: number, minY: number, maxX: number, maxY: number) => ({ minX: OX + minX, minY: OY + minY, maxX: OX + maxX, maxY: OY + maxY });
+    expect(inside(land.boundary, at(0, 0))).toBe(true);
+    expect(inside(land.boundary, at(2400, 2400))).toBe(true);
+    expect(inside(land.boundary, at(3600, 3600))).toBe(false);
+    expect(contains(land.boundary, rect(0, 0, 960, 960))).toBe(true);
+    // Three corners of this rectangle are inside; it covers the notch's corner and reaches into the notch.
+    expect(contains(land.boundary, rect(1920, 1920, 2880, 2880))).toBe(false);
+    // Every corner of this one is on the boundary, and it lies across the notch.
+    expect(contains(land.boundary, rect(2400, 0, 4800, 4800))).toBe(false);
+    expect(contains(land.boundary, rect(-480, 0, 480, 960))).toBe(false);
   });
 });
 
@@ -61,7 +68,7 @@ describe("placing a prefab", () => {
 
   it("is invalid outside the parcel boundary, and in the notch the boundary cuts out", () => {
     expect(verdict(fresh(), a.signingKey, tower(1, 0, 480))).toMatchObject({ valid: false, why: "the placement is not inside the parcel boundary" });
-    expect(verdict(fresh(), a.signingKey, tower(1, 7200, 7200))).toMatchObject({ valid: false, why: "the placement is not inside the parcel boundary" });
+    expect(verdict(fresh(), a.signingKey, tower(1, 3840, 3840))).toMatchObject({ valid: false, why: "the placement is not inside the parcel boundary" });
   });
 
   it("is invalid off the catalogue's grid", () => {
@@ -86,8 +93,8 @@ describe("placing a prefab", () => {
       kind: "place",
       instanceId: instance(5),
       prefabId: "wall",
-      x: 240,
-      y: 240,
+      x: OX + 240,
+      y: OY + 240,
       rotation: 0,
       config,
     });
@@ -103,8 +110,8 @@ describe("placing a prefab", () => {
       kind: "place",
       instanceId: instance(6),
       prefabId: "workshop",
-      x: rotation === 0 ? 720 : 480,
-      y: rotation === 0 ? 480 : 720,
+      x: OX + (rotation === 0 ? 720 : 480),
+      y: OY + (rotation === 0 ? 480 : 720),
       rotation,
       config: {},
     });
@@ -123,7 +130,7 @@ describe("replacing, dismantling and confirming", () => {
   it("replaces a prefab in place: the instance_id stays, the prefab_id changes", () => {
     const v = verdict(withTower(), c.signingKey, { kind: "replace", instanceId: instance(1), prefabId: "lookout", config: {} });
     expect(v.valid).toBe(true);
-    if (v.valid) expect(v.next.placed).toMatchObject([{ instanceId: instance(1), prefabId: "lookout", x: 480, y: 480 }]);
+    if (v.valid) expect(v.next.placed).toMatchObject([{ instanceId: instance(1), prefabId: "lookout", x: OX + 480, y: OY + 480 }]);
   });
 
   it("refuses a replacement that does not fit where the instance stands", () => {

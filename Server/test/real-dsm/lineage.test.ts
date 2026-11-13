@@ -19,12 +19,15 @@ import { player, stage, type Stage } from "./stage.js";
 const PARCEL = "north-bluff";
 const instance = (): string => hex(randomBytes(16));
 
+/** North Bluff's first corner: every position below is given from it. */
+const [OX, OY] = [-8160, -8160];
+
 const tower = (instanceId: string, x: number, y: number): Change => ({
   kind: "place",
   instanceId,
   prefabId: "watchtower",
-  x,
-  y,
+  x: OX + x,
+  y: OY + y,
   rotation: 0,
   config: {},
 });
@@ -69,7 +72,7 @@ describe("one faction, one mirrored base", () => {
     const { mirror } = await s.publisher.follow(factionId);
     expect(mirror.height).toBe(1);
     expect(mirror.commitment).not.toBe(before);
-    expect(mirror.state.placed).toMatchObject([{ instanceId: a, prefabId: "watchtower", x: 480, y: 480 }]);
+    expect(mirror.state.placed).toMatchObject([{ instanceId: a, prefabId: "watchtower", x: OX + 480, y: OY + 480 }]);
     expect(mirror.lineage[0]).toMatchObject({ valid: true, signerKey: player(s, "alice").member.signingKey, parent: before });
 
     // A second mirror, started from the assignment in storage, reads the same cell and holds the same state.
@@ -91,7 +94,7 @@ describe("one faction, one mirrored base", () => {
 
     const { mirror } = await s.publisher.follow(factionId);
     expect(mirror.height).toBe(2);
-    const there = mirror.state.placed.filter((p) => p.x === 1440 && p.y === 480);
+    const there = mirror.state.placed.filter((p) => p.x === OX + 1440 && p.y === OY + 480);
     expect(there).toHaveLength(1);
     expect(there[0]?.instanceId).toBe(pa.taken ? ia : ib);
 
@@ -134,7 +137,7 @@ describe("one faction, one mirrored base", () => {
     const before = { commitment: mirror.commitment, height: mirror.height, placed: [...mirror.state.placed] };
     const { name, writers } = mirror.successorCell();
     // Outside the parcel boundary. The server would refuse to propose it; this is a member's wallet signing it anyway.
-    const invalid = encodeChange({ factionId, parent: mirror.commitment, change: tower(instance(), 0, 480) });
+    const invalid = encodeChange({ factionId, parent: mirror.commitment, change: tower(instance(), -480, 480) });
     const ref = await s.publisher.cells.ask(player(s, "bob").connection, name, writers, invalid);
     expect((await s.app.wait(ref)).fact).toBe("written");
 

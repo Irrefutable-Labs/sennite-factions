@@ -37,7 +37,27 @@ export interface Stage {
   stop: () => Promise<void>;
 }
 
-export async function stage(run: string, names: string[]): Promise<Stage> {
+/** The accounts a suite runs on, before any wallet is connected to the game. */
+export interface Accounts {
+  dir: string;
+  world: World;
+  storeFile: string;
+  publisherHost: Host;
+  app: AppAccount;
+  publisher: Publisher;
+  /** The record `publisher` keeps. */
+  store: Store;
+  /** Each player's host and wallet, by name. */
+  wallets: Record<string, { host: Host; wallet: WalletAccount }>;
+  clock: Stage["clock"];
+  restarted: () => Publisher;
+  /** What the grant lets the game commit of each resource. */
+  caps: { symbol: string; perRequest: string; total: string }[];
+  stop: () => Promise<void>;
+}
+
+/** Start the publisher's account and each player's wallet, fund them, and issue the publisher's resources. */
+export async function accounts(run: string, names: string[]): Promise<Accounts> {
   const dir = runDir(run);
   const world = loadWorld();
   const storeFile = join(dir, "publisher.json");
@@ -47,36 +67,29 @@ export async function stage(run: string, names: string[]): Promise<Stage> {
   const [publisherHost, ...hosts] = await Promise.all(["publisher", ...names].map((n) => Host.start(n, dir)));
   if (publisherHost === undefined) throw new Error("no publisher host");
   const app = await publisherHost.app();
-  const make = (): Publisher =>
+  const make = (store: Store = new Store(storeFile)): Publisher =>
     new Publisher({
       app,
-      store: new Store(storeFile),
+      store,
       catalogue: world.catalogue,
       parcels: world.parcels,
       storageSet: storageSetOf(required("DSM_ENV_CONFIG")),
       name: GAME,
       now: clock.now,
     });
-  const publisher = make();
+  const store = new Store(storeFile);
+  const publisher = make(store);
 
-  const wallets = await Promise.all(hosts.map((h) => h.wallet()));
-  await Promise.all([funded("publisher", app), ...wallets.map((w, i) => funded(names[i] as string, w))]);
+  const made = await Promise.all(hosts.map((h) => h.wallet()));
+  await Promise.all([funded("publisher", app), ...made.map((w, i) => funded(names[i] as string, w))]);
   await publisher.issueResources(world.economy);
   const caps = world.economy.resources.map((r) => ({
     symbol: r.symbol,
     perRequest: world.economy.grant.perRequest,
     total: world.economy.grant.total,
   }));
-
-  const players: Record<string, Player> = {};
-  for (const [i, name] of names.entries()) {
-    const host = hosts[i] as Host;
-    const wallet = wallets[i] as WalletAccount;
-    // An offer connects one wallet: each player reads a connect code of their own.
-    const offer = await publisher.offer(caps);
-    const connection = await connect(app, wallet, offer.code, GAME);
-    players[name] = { name, host, wallet, connection, member: publisher.member(connection) };
-  }
+  const wallets: Accounts["wallets"] = {};
+  for (const [i, name] of names.entries()) wallets[name] = { host: hosts[i] as Host, wallet: made[i] as WalletAccount };
 
   return {
     dir,
@@ -85,12 +98,39 @@ export async function stage(run: string, names: string[]): Promise<Stage> {
     publisherHost,
     app,
     publisher,
-    players,
+    store,
+    wallets,
     clock,
-    restarted: make,
+    restarted: () => make(),
+    caps,
     stop: async () => {
       await Promise.all([publisherHost, ...hosts].map((h) => h.stop()));
     },
+  };
+}
+
+/** The accounts, with every player's wallet connected to the game by a connect code of its own. */
+export async function stage(run: string, names: string[]): Promise<Stage> {
+  const a = await accounts(run, names);
+  const players: Record<string, Player> = {};
+  for (const name of names) {
+    const { host, wallet } = a.wallets[name] as { host: Host; wallet: WalletAccount };
+    // An offer connects one wallet: each player reads a connect code of their own.
+    const offer = await a.publisher.offer(a.caps);
+    const connection = await connect(a.app, wallet, offer.code, GAME);
+    players[name] = { name, host, wallet, connection, member: a.publisher.member(connection) };
+  }
+  return {
+    dir: a.dir,
+    world: a.world,
+    storeFile: a.storeFile,
+    publisherHost: a.publisherHost,
+    app: a.app,
+    publisher: a.publisher,
+    players,
+    clock: a.clock,
+    restarted: a.restarted,
+    stop: a.stop,
   };
 }
 
