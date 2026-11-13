@@ -19,6 +19,8 @@ ASenniteSpectator::ASenniteSpectator()
 	// a spectator flies, and is in nobody's way: players walk and bullets pass through where it is
 	GetCharacterMovement()->DefaultLandMovementMode = MOVE_Flying;
 	GetCharacterMovement()->BrakingDecelerationFlying = 2048.0f;
+	// "Spectator" is the engine's own profile (BaseEngine.ini): stopped by the world, ignored by
+	// players, bullets, aim and cameras
 	GetCapsuleComponent()->SetCollisionProfileName(TEXT("Spectator"));
 	GetCapsuleComponent()->SetGenerateOverlapEvents(false);
 }

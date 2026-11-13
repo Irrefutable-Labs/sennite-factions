@@ -22,6 +22,7 @@
 #include "SennitePlayerState.h"
 #include "SenniteSpectator.h"
 #include "SenniteWeapons.h"
+#include "Components/CapsuleComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/GameModeBase.h"
@@ -339,6 +340,16 @@ namespace
 				Test->TestEqual(TEXT("The host is credited with one kill"), State->KillCount, 1);
 				Test->TestEqual(TEXT("One hero is left on the server"), HeroCount(World), 1);
 				Test->TestTrue(TEXT("The fallen player is a spectator on the server"), TheirState != nullptr && TheirState->IsSpectator());
+				int32 Watchers = 0;
+				bool bOutOfTheWay = true;
+				for (TActorIterator<ASenniteSpectator> It(World); It; ++It) {
+					++Watchers;
+					const UCapsuleComponent* Body = It->GetCapsuleComponent();
+					bOutOfTheWay &= Body->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Ignore && Body->GetCollisionResponseToChannel(ECC_WorldDynamic) == ECR_Ignore
+						&& Body->GetCollisionResponseToChannel(ECC_Visibility) == ECR_Ignore && !Body->GetGenerateOverlapEvents();
+				}
+				Test->TestEqual(TEXT("The fallen player has one spectator on the server"), Watchers, 1);
+				Test->TestTrue(TEXT("The spectator is in nobody's way: players, bullets and aim pass through it"), bOutOfTheWay);
 				Test->TestTrue(TEXT("The host's HUD showed a hit marker"), bSawHitMarker);
 				Test->TestTrue(TEXT("The host's HUD shows the kill"), Hud->LastDrawn.Contains(TEXT("kills=1 KILLS")));
 				Test->TestTrue(TEXT("The host's HUD shows one player left"), Hud->LastDrawn.Contains(TEXT("alive=1 ALIVE")));

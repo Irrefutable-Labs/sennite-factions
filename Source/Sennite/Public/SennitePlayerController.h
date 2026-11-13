@@ -23,8 +23,11 @@ public:
 
 	virtual void Tick(float DeltaTime) override;
 
-	UFUNCTION(Server, Reliable, WithValidation)
-	void ServerSwitchToSpectatorMode();
+	/**
+	 * On the server only: this player stops playing and watches. The server calls it from its own
+	 * rules (a death, or a player who joins to watch). It is not a call a player's machine can send.
+	 */
+	void BecomeSpectator();
 
 	/** Where a player starts to watch from when they become a spectator. */
 	FVector SpectatorStart() const;

@@ -2032,7 +2032,7 @@ void ASenniteCharacter::Die(ASenniteCharacter* Killer) {
 	}
 	// the player goes on watching from where they fell
 	if (ASennitePlayerController* SennitePlayerController = Cast<ASennitePlayerController>(GetController())) {
-		SennitePlayerController->ServerSwitchToSpectatorMode();
+		SennitePlayerController->BecomeSpectator();
 	}
 	Destroy();
 }

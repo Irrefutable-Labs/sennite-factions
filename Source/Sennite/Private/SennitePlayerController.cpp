@@ -48,15 +48,9 @@ FVector ASennitePlayerController::SpectatorStart() const {
 
 void ASennitePlayerController::Tick(float DeltaTime) {
 	Super::Tick(DeltaTime);
-	if (HasAuthority()) {
-		if (SpawnAsSpectator && PlayerState && !PlayerState->IsSpectator()) {
-			ChangeState(NAME_Spectating);
-			ClientGotoState(NAME_Spectating);
-			APawn* PlayerPawn = Cast<APawn>(GetWorld()->SpawnActor<ASenniteSpectator>(PlayerSpectatorClass, SpectatorStart(), FRotator(0.0, GetControlRotation().Yaw, 0.0)));
-			//SetSpectatorPawn(Pawn);
-			Possess(PlayerPawn);
-			Cast<ASennitePlayerState>(PlayerState)->SetIsSpectator(true); // ORDER MATTERS HERE, HAS TO BE SET AFTER POSSESSING A PAWN
-		}
+	// a player the server has marked to join as a watcher
+	if (HasAuthority() && SpawnAsSpectator) {
+		BecomeSpectator();
 	}
 }
 
@@ -68,33 +62,23 @@ void ASennitePlayerController::GetLifetimeReplicatedProps(TArray< FLifetimePrope
 	DOREPLIFETIME(ASennitePlayerController, SpectatorCount);
 }
 
-void ASennitePlayerController::ServerSwitchToSpectatorMode_Implementation() {
-	if (PlayerState) {
-		//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString("Player state is not null"));
-		//Cast<ASennitePlayerState>(PlayerState)->SetIsSpectator(true);
-		ChangeState(NAME_Spectating);
-		ClientGotoState(NAME_Spectating);
-		APawn* PlayerPawn = Cast<APawn>(GetWorld()->SpawnActor<ASenniteSpectator>(PlayerSpectatorClass, SpectatorStart(), FRotator(0.0, GetControlRotation().Yaw, 0.0)));
-		//SetSpectatorPawn(Pawn);
-		Possess(PlayerPawn);
-		Cast<ASennitePlayerState>(PlayerState)->SetIsSpectator(true); // ORDER MATTERS HERE, HAS TO BE SET AFTER POSSESSING A PAWN
-		/*FString LogMsg = FString("switch to spectator mode ") + FString::FromInt(GetNetMode());
-		UE_LOG(LogMyGame, Warning, TEXT("%s"), *LogMsg);
-		LogMsg = FString("test ") + FString::FromInt(GetNetMode());
-		UE_LOG(LogMyGame, Warning, TEXT("%s"), *LogMsg);*/
-		if (Cast<ASennitePlayerState>(PlayerState)->IsSpectator()) {
-			/*LogMsg = FString("What a spectator");
-			UE_LOG(LogMyGame, Warning, TEXT("%s"), *LogMsg);*/
-		}
-		else {
-			/*LogMsg = FString("What not a spectator");
-			UE_LOG(LogMyGame, Warning, TEXT("%s"), *LogMsg);*/
-		}
+void ASennitePlayerController::BecomeSpectator() {
+	if (!HasAuthority() || PlayerState == nullptr || PlayerState->IsSpectator()) {
+		return;
 	}
-}
-
-bool ASennitePlayerController::ServerSwitchToSpectatorMode_Validate() {
-	return true;
+	// where to watch from is read while the player still has their hero
+	const FVector Where = SpectatorStart();
+	FActorSpawnParameters Spawn;
+	Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ASenniteSpectator* Watcher = GetWorld()->SpawnActor<ASenniteSpectator>(PlayerSpectatorClass, Where, FRotator(0.0, GetControlRotation().Yaw, 0.0), Spawn);
+	if (Watcher == nullptr) {
+		UE_LOG(LogTemp, Error, TEXT("No spectator could be made for %s; the player keeps what they had"), *GetName());
+		return;
+	}
+	ChangeState(NAME_Spectating);
+	ClientGotoState(NAME_Spectating);
+	Possess(Watcher);
+	PlayerState->SetIsSpectator(true); // has to be set after possessing a pawn
 }
 
 void ASennitePlayerController::ServerGetNumPlayers_Implementation() {
