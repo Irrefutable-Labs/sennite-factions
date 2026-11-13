@@ -2,13 +2,46 @@
 
 #include "WeaponActor.h"
 #include "Net/UnrealNetwork.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 
 // Sets default values
 AWeaponActor::AWeaponActor()
 {
  	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
+	bReplicates = true;
 
+	// Lying in the world a weapon is picked up by walking over it, and bullets pass through it:
+	// it overlaps everything and blocks nothing, and neither aim traces nor the camera see it.
+	WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Weapon"));
+	RootComponent = WeaponMesh;
+	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	WeaponMesh->SetCollisionObjectType(ECC_WorldDynamic);
+	WeaponMesh->SetCollisionResponseToAllChannels(ECR_Overlap);
+	WeaponMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+	WeaponMesh->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+	WeaponMesh->SetGenerateOverlapEvents(true);
+	WeaponMesh->SetCanEverAffectNavigation(false);
+}
+
+void AWeaponActor::PreInitializeComponents()
+{
+	Super::PreInitializeComponents();
+	if (MeshAsset.IsNull()) {
+		return;
+	}
+	if (UStaticMesh* Mesh = Cast<UStaticMesh>(MeshAsset.TryLoad())) {
+		WeaponMesh->SetStaticMesh(Mesh);
+	}
+	else {
+		UE_LOG(LogTemp, Error, TEXT("Weapon mesh '%s' did not load for %s"), *MeshAsset.ToString(), *GetClass()->GetName());
+	}
+}
+
+FVector AWeaponActor::GetMuzzleLocation() const
+{
+	return WeaponMesh->GetComponentTransform().TransformPosition(MuzzleOffset);
 }
 
 // Called when the game starts or when spawned

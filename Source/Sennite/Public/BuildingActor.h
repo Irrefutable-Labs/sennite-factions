@@ -6,7 +6,9 @@
 #include "GameFramework/Actor.h"
 #include "BuildingActor.generated.h"
 
-UCLASS()
+class UStaticMeshComponent;
+
+UCLASS(config=Game)
 class SENNITE_API ABuildingActor : public AActor
 {
 	GENERATED_BODY()
@@ -29,6 +31,42 @@ public:
 
 	UPROPERTY()
 	int Id;
+
+	/** The piece's body: a slab one build cell across. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh")
+	UStaticMeshComponent* PieceMesh;
+
+	/** The unit cube every piece is shaped from. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Mesh")
+	FSoftObjectPath PieceShape;
+
+	/** What walls and ramps of each material (0, 1, 2) are faced with. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Mesh")
+	TArray<FSoftObjectPath> TierMaterials;
+
+	/** What floors are faced with. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Mesh")
+	FSoftObjectPath FloorMaterial;
+
+	/** What a preview of a piece is drawn with. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Mesh")
+	FSoftObjectPath PreviewMaterial;
+
+	/** How much damage a piece of each material (0, 1, 2) takes before it falls. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Health")
+	TArray<float> TierHealth;
+
+	/** One side of a build cell; a piece is this wide and, for a wall or ramp, this high. */
+	static constexpr float Cell = 480.0f;
+
+	/** How thick a piece is. */
+	static constexpr float Thickness = 20.0f;
+
+	virtual void PreInitializeComponents() override;
+
+protected:
+	/** Called by each piece class's constructor: what it is, what it is made of, and whether it is only a preview. */
+	void SetPiece(const TCHAR* Kind, int32 Material, bool bPreview);
 
 
 protected:

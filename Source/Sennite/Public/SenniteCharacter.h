@@ -77,6 +77,47 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
 	TSubclassOf<UThirdPersonAnimInstance> AnimInstanceClass;
 
+	/** The hero this character is: the skeletal mesh, with the materials it ships with. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FSoftObjectPath HeroMesh;
+
+	/** The hero's animation Blueprint class. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FSoftClassPath HeroAnimClass;
+
+	/** The bone of the hero's skeleton a held weapon is fixed to. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FName HeroWeaponBone;
+
+	/** How a held weapon is turned against that bone: its muzzle end (+X) and its top (+Z), in the bone's space. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FRotator HeroGripRotation;
+
+	/** Where the hero's palm is from that bone, in the bone's space; a weapon's grip point sits here. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FVector HeroPalmOffset;
+
+	/** The bones of the weapon that is part of the hero's own mesh; hidden while the hero holds a game weapon. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	TArray<FName> HeroBuiltInWeaponBones;
+
+	/** The bone a held healing item is fixed to, and where the palm is from it, in the bone's space. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FName HeroItemBone;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FVector HeroItemPalmOffset;
+
+	/** The hero's own firing animation, played for every shot. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FSoftObjectPath HeroFireMontage;
+
+	/** Fix a weapon to the hero's weapon bone, at the weapon's own grip. */
+	void AttachWeaponToHand(AWeaponActor* Weapon);
+
+	/** Whether the hero's built-in weapon is hidden right now. */
+	bool bBuiltInWeaponHidden = false;
+
 	UPROPERTY(EditDefaultsOnly, Category = "State")
 	TSubclassOf<ASennitePlayerState> PlayerStateClass;
 
@@ -131,6 +172,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Health")
 	float GetShield();
+
+	/** The building material in use: 0, 1 or 2, weakest first. */
+	int GetCurrentBuildingMaterial() const { return CurrentBuildingMaterial; }
 
 	UFUNCTION(BlueprintPure, Category = "Material")
 	int GetWoodMaterialCount();
@@ -362,6 +406,9 @@ public:
 	// Override playanimmontage to use pawn mesh
 	virtual float PlayAnimMontage(class UAnimMontage* AnimMontage, float InPlayRate = 1.f, FName StartSectionName = NAME_None) override;
 
+	/** Gives the mesh component its hero before the components start up. */
+	virtual void PreInitializeComponents() override;
+
 	virtual void PostInitializeComponents() override;
 
 	virtual bool ReplicateSubobjects(class UActorChannel *Channel, class FOutBunch *Bunch, FReplicationFlags *RepFlags) override;
@@ -502,6 +549,17 @@ public:
 
 	/** The material a piece of this character's own lists is built from and its kind ("Wall", "Ramp", "Floor"), or INDEX_NONE for any other class. */
 	int32 BuildingMaterialOf(TSubclassOf<ABuildingActor> StructureClass, FString& OutPieceKind) const;
+
+	/** Where a piece of this kind ("Wall", "Ramp", "Floor") goes for where the player stands and looks: one rule for the preview and the build. */
+	void BuildPlacement(const FString& PieceKind, FVector& OutLocation, FRotator& OutRotation) const;
+
+	/** The piece classes of a kind: built pieces, or their previews. Null for a kind there is none of. */
+	const TArray<TSubclassOf<ABuildingActor>>* BuildingClassesOf(const FString& PieceKind, bool bPreview) const;
+
+	/** The last build this player asked for, so holding the button does not ask for the same piece every frame. */
+	FVector LastBuildLocation = FVector(TNumericLimits<double>::Max());
+	FString LastBuildKind;
+	double LastBuildTime = 0.0;
 
 	/** Whether a transform is a place the build grid has. */
 	bool IsOnBuildGrid(const FVector& Location, const FRotator& Rotation) const;

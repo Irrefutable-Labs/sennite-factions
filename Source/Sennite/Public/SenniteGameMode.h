@@ -40,6 +40,18 @@ public:
 
 	virtual void GenericPlayerInitialization(AController* NewPlayer) override;
 
+	/** How many of each building material a player starts a match with. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Materials")
+	int32 StartingMaterialCount = 0;
+
+	/** How many players must be in the match before its storm starts. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Storm")
+	int32 PlayersToStartStorm = 2;
+
+	/** How long after that the storm starts its stages. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Storm")
+	float StormStartDelay = 30.0f;
+
 	UFUNCTION(NetMulticast, Reliable)
 	void NetMulticastSpawnStorm();
 
