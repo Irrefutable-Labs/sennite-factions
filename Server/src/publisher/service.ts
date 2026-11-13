@@ -46,6 +46,12 @@ class HttpError extends Error {
 }
 
 const MAX_BODY_BYTES = 64 * 1024;
+/** The most players the server keeps a record of at all. */
+const MAX_PLAYERS = 10_000;
+/** How long a player's token lasts with no game using it. The wallet then connects again by a new code. */
+const IDLE_MS = 30 * 24 * 60 * 60 * 1000;
+/** How often a token's last use is written to the record. */
+const SEEN_EVERY_MS = 60 * 60 * 1000;
 /** The most players the server keeps a record of whose connect code no wallet has approved yet. */
 const MAX_UNAPPROVED = 1_000;
 /** How many connect codes one address may ask for in a minute. */
@@ -120,7 +126,20 @@ export class Service {
   /** The player a request comes from, by the token the server gave their game. */
   private player(req: IncomingMessage): string {
     const token = this.bearer(req);
-    if (token === "" || !Object.hasOwn(this.options.store.data.players, token)) throw new HttpError(401, "the game is not known to the server");
+    const players = this.options.store.data.players;
+    const record = token !== "" && Object.hasOwn(players, token) ? players[token] : undefined;
+    if (record === undefined) throw new HttpError(401, "the game is not known to the server");
+    const now = Date.now();
+    if (now - (record.lastSeen ?? record.since) > IDLE_MS) {
+      // unused for too long: the token is over, and the game starts again as a new player
+      delete players[token];
+      this.options.store.save();
+      throw new HttpError(401, "the game is not known to the server");
+    }
+    if (now - (record.lastSeen ?? 0) > SEEN_EVERY_MS) {
+      record.lastSeen = now;
+      this.options.store.save();
+    }
     return token;
   }
 
@@ -137,16 +156,23 @@ export class Service {
   }
 
   /**
-   * Drop the players whose connect code no wallet approved within the hour.
-   * A player whose wallet approved once is kept, connected now or not: the
-   * account lists every wallet that ever connected, and the record remembers.
+   * Drop the players whose connect code no wallet approved within the hour,
+   * and those whose token no game has used for a month. A player whose wallet
+   * approved once is kept through a disconnect: the account lists every
+   * wallet that ever connected, and the record remembers.
    */
   private async forgetUnapproved(): Promise<void> {
     const players = this.options.store.data.players;
     const offers = new Set((await this.options.publisher.app.connections()).map((c) => hex(c.raw.offerDigest)));
     let changed = false;
     for (const [token, p] of Object.entries(players)) {
-      if (p.approved === true) continue;
+      if (p.approved === true) {
+        if (!(Date.now() - (p.lastSeen ?? p.since) <= IDLE_MS)) {
+          delete players[token];
+          changed = true;
+        }
+        continue;
+      }
       if (offers.has(p.offer)) {
         p.approved = true;
         changed = true;
@@ -250,7 +276,9 @@ export class Service {
     if (is("POST", "players")) {
       if (!this.mayAsk(req.socket.remoteAddress ?? "")) throw new HttpError(429, "too many connect codes asked for: wait a minute");
       await this.forgetUnapproved();
-      if (Object.values(store.data.players).filter((p) => p.approved !== true).length >= MAX_UNAPPROVED) {
+      const kept = Object.values(store.data.players);
+      if (kept.length >= MAX_PLAYERS) throw new HttpError(429, "the server has no room for another player now");
+      if (kept.filter((p) => p.approved !== true).length >= MAX_UNAPPROVED) {
         throw new HttpError(429, "too many connect codes are waiting for a wallet: try again later");
       }
       const grant = world.economy.grant;

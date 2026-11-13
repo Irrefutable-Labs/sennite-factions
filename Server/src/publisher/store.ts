@@ -65,6 +65,8 @@ export interface PlayerRecord {
   since: number;
   /** Whether a wallet ever approved the offer. Set once, and never taken back when the wallet disconnects. */
   approved?: boolean;
+  /** When the player's game last asked anything with its token, to the hour (milliseconds). */
+  lastSeen?: number;
 }
 
 export interface StoreData {
