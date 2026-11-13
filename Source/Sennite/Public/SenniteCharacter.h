@@ -178,6 +178,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Health")
 	float GetShield();
 
+	/** On the server: this character is hit for Damage by Shooter (none for the storm). Shield goes first, then health; with no health left the character dies. */
+	void TakeHit(float Damage, ASenniteCharacter* Shooter);
+
+	/** On the server: this character dies. What it holds goes, its player becomes a spectator, and Killer, if there is one, is credited. */
+	void Die(ASenniteCharacter* Killer);
+
 	/** The building material in use: 0, 1 or 2, weakest first. */
 	int GetCurrentBuildingMaterial() const { return CurrentBuildingMaterial; }
 

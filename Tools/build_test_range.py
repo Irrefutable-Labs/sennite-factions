@@ -148,6 +148,7 @@ ppv.set_editor_property("settings", s)
 # weapons to pick up, to the right of the start, lying at knee height
 spawn(unreal.SenniteRifle, "rifle_pickup", unreal.Vector(0, 250, 60), unreal.Rotator(0, 0, 0), "pickups")
 spawn(unreal.SenniteShotgun, "shotgun_pickup", unreal.Vector(0, 450, 60), unreal.Rotator(0, 0, 0), "pickups")
+spawn(unreal.SenniteRifle, "rifle_pickup_2", unreal.Vector(0, -2 * CELL - 250, 60), unreal.Rotator(0, 0, 0), "pickups")   # to the left of the second start
 
 # healing items to pick up, behind the start
 spawn(unreal.SenniteBandage, "bandage_pickup", unreal.Vector(-300, 0, 40), folder="pickups")

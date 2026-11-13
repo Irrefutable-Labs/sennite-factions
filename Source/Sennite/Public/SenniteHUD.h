@@ -29,6 +29,7 @@ struct FSenniteHudReadout
 	bool bHoldingItem = false;
 	int32 ItemType = -1;
 	int32 ItemCount = 0;
+	bool bSpectating = false;
 	bool bInStorm = false;
 	float StormDamage = 0.0f;
 };
@@ -77,6 +78,10 @@ private:
 	void Bar(float X, float Y, float Width, float Height, float Fraction, const FLinearColor& Colour);
 
 	TArray<FString> Drawing;
+
+	/** Until when, by the world's clock, the hit marker and the hurt flash are drawn. */
+	double HitMarkerUntil = 0.0;
+	double HurtUntil = 0.0;
 
 	UPROPERTY(EditAnywhere, Category = "Health")
 	TSubclassOf<UUserWidget> HealthWidgetClass;

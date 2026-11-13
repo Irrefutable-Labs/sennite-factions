@@ -1976,28 +1976,65 @@ void ASenniteCharacter::HealingItemTimeOut(int HealingItemType) {
 
 void ASenniteCharacter::ServerApplyStormDamage_Implementation() {
 	if (CurrentStorm != nullptr && InStorm) {
-		//get storm actor and get its damage component and apply the damage to the player's health
+		// the storm takes health directly, past any shield
 		Health -= CurrentStorm->Damage;
 		if (Health <= 0) {
-			if (BuildingPreview != nullptr) {
-				BuildingPreview->Destroy();
-				BuildingPreview = nullptr;
-			}
-			if (CurrentWeapon) {
-				CurrentWeapon->Destroy();
-			}
-			if (CurrentHealingItem) {
-				CurrentHealingItem->Destroy();
-			}
-			if (GetController()) {
-				ASennitePlayerController* SennitePlayerController = Cast<ASennitePlayerController>(GetController());
-				if (SennitePlayerController) {
-					SennitePlayerController->ServerSwitchToSpectatorMode();
-				}
-			}
-			Destroy();
+			Die(nullptr);
 		}
 	}
+}
+
+void ASenniteCharacter::TakeHit(float Damage, ASenniteCharacter* Shooter) {
+	if (!HasAuthority() || Health <= 0 || IsActorBeingDestroyed()) {
+		return;
+	}
+	ClientDrawBloodEffect();
+	if (Shield > 0) {
+		if (Shield - Damage < 0) {
+			Health -= Damage - Shield;
+			Shield = 0;
+		}
+		else {
+			Shield -= Damage;
+		}
+	}
+	else {
+		Health -= Damage;
+	}
+	if (Shooter != nullptr) {
+		Shooter->ClientDrawHitMarker();
+	}
+	if (Health <= 0) {
+		Die(Shooter);
+	}
+}
+
+void ASenniteCharacter::Die(ASenniteCharacter* Killer) {
+	if (!HasAuthority() || IsActorBeingDestroyed()) {
+		return;
+	}
+	if (BuildingPreview != nullptr) {
+		BuildingPreview->Destroy();
+		BuildingPreview = nullptr;
+	}
+	if (CurrentWeapon != nullptr) {
+		CurrentWeapon->Destroy();
+		CurrentWeapon = nullptr;
+	}
+	if (CurrentHealingItem != nullptr) {
+		CurrentHealingItem->Destroy();
+		CurrentHealingItem = nullptr;
+	}
+	if (Killer != nullptr && Killer != this && Killer->GetController() != nullptr) {
+		if (ASennitePlayerState* KillerState = Cast<ASennitePlayerState>(Killer->GetController()->PlayerState)) {
+			KillerState->KillCount++;
+		}
+	}
+	// the player goes on watching from where they fell
+	if (ASennitePlayerController* SennitePlayerController = Cast<ASennitePlayerController>(GetController())) {
+		SennitePlayerController->ServerSwitchToSpectatorMode();
+	}
+	Destroy();
 }
 
 bool ASenniteCharacter::ServerApplyStormDamage_Validate() {

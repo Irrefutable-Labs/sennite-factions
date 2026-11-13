@@ -3,6 +3,8 @@
 #include "SenniteSpectator.h"
 #include "SenniteCharacter.h"
 #include "Engine/Engine.h"
+#include "Components/CapsuleComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 // Sets default values
 ASenniteSpectator::ASenniteSpectator()
@@ -13,6 +15,12 @@ ASenniteSpectator::ASenniteSpectator()
 	//GetCharacterMovement()->bForceMaxAccel = true;
 
 	BaseTurnRate = 45.f;
+
+	// a spectator flies, and is in nobody's way: players walk and bullets pass through where it is
+	GetCharacterMovement()->DefaultLandMovementMode = MOVE_Flying;
+	GetCharacterMovement()->BrakingDecelerationFlying = 2048.0f;
+	GetCapsuleComponent()->SetCollisionProfileName(TEXT("Spectator"));
+	GetCapsuleComponent()->SetGenerateOverlapEvents(false);
 }
 
 // Called when the game starts or when spawned
@@ -84,6 +92,9 @@ void ASenniteSpectator::MoveRight(float Value) {
 void ASenniteSpectator::MoveUp(float Value) {
 	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString("Move up ") + FString::SanitizeFloat(Value));
 	APlayerController* LocalController = Cast<APlayerController>(GetController());
+	if (LocalController == nullptr) {
+		return;
+	}
 	bool IsShiftDown = LocalController->IsInputKeyDown(EKeys::LeftShift);
 
 	if ((Controller != nullptr) && (Value != 0.0f))

@@ -26,6 +26,9 @@ public:
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerSwitchToSpectatorMode();
 
+	/** Where a player starts to watch from when they become a spectator. */
+	FVector SpectatorStart() const;
+
 	bool Initialized;
 
 	FString PlayerSessionId;

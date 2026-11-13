@@ -82,6 +82,25 @@ namespace GameCheck
 		double Sign = 1.0;
 	};
 
+	/**
+	 * One step of turning the camera with the mouse, sideways and up or down, until a shot leaving
+	 * Muzzle along the way the camera faces passes through Target. True once it does, to within
+	 * Tolerance degrees.
+	 */
+	inline bool AimStep(APlayerController* Controller, const FVector& Muzzle, const FVector& Target, double Tolerance = 0.2)
+	{
+		const FRotator Want = (Target - Muzzle).Rotation();
+		const FRotator Have = Controller->GetControlRotation();
+		const double Yaw = FMath::FindDeltaAngleDegrees(Have.Yaw, Want.Yaw);
+		const double Pitch = FMath::FindDeltaAngleDegrees(Have.Pitch, Want.Pitch);
+		if (FMath::Abs(Yaw) < Tolerance && FMath::Abs(Pitch) < Tolerance) {
+			return true;
+		}
+		Mouse(Controller, EKeys::MouseX, FMath::Clamp(Yaw / 0.25, -40.0, 40.0));
+		Mouse(Controller, EKeys::MouseY, FMath::Clamp(Pitch / 0.25, -40.0, 40.0));
+		return false;
+	}
+
 	/** Save what the player sees, HUD included, to Saved/<Folder>/<Name>. Does nothing in a run that cannot draw. */
 	inline void Shot(const TCHAR* Folder, const TCHAR* Name)
 	{

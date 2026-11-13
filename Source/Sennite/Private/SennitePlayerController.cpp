@@ -35,13 +35,24 @@ void ASennitePlayerController::BeginPlay() {
 	}
 }
 
+FVector ASennitePlayerController::SpectatorStart() const {
+	// a little above where the player's hero is, or was
+	if (const APawn* Body = GetPawn()) {
+		return Body->GetActorLocation() + FVector(0.0, 0.0, 300.0);
+	}
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+	return ViewLocation;
+}
+
 void ASennitePlayerController::Tick(float DeltaTime) {
 	Super::Tick(DeltaTime);
 	if (HasAuthority()) {
 		if (SpawnAsSpectator && PlayerState && !PlayerState->IsSpectator()) {
 			ChangeState(NAME_Spectating);
 			ClientGotoState(NAME_Spectating);
-			APawn* PlayerPawn = Cast<APawn>(GetWorld()->SpawnActor<ASenniteSpectator>(PlayerSpectatorClass, FVector(-900, 350.0, 31812), FRotator::ZeroRotator));
+			APawn* PlayerPawn = Cast<APawn>(GetWorld()->SpawnActor<ASenniteSpectator>(PlayerSpectatorClass, SpectatorStart(), FRotator(0.0, GetControlRotation().Yaw, 0.0)));
 			//SetSpectatorPawn(Pawn);
 			Possess(PlayerPawn);
 			Cast<ASennitePlayerState>(PlayerState)->SetIsSpectator(true); // ORDER MATTERS HERE, HAS TO BE SET AFTER POSSESSING A PAWN
@@ -63,7 +74,7 @@ void ASennitePlayerController::ServerSwitchToSpectatorMode_Implementation() {
 		//Cast<ASennitePlayerState>(PlayerState)->SetIsSpectator(true);
 		ChangeState(NAME_Spectating);
 		ClientGotoState(NAME_Spectating);
-		APawn* PlayerPawn = Cast<APawn>(GetWorld()->SpawnActor<ASenniteSpectator>(PlayerSpectatorClass, FVector(-900, 350.0, 31812), FRotator::ZeroRotator));
+		APawn* PlayerPawn = Cast<APawn>(GetWorld()->SpawnActor<ASenniteSpectator>(PlayerSpectatorClass, SpectatorStart(), FRotator(0.0, GetControlRotation().Yaw, 0.0)));
 		//SetSpectatorPawn(Pawn);
 		Possess(PlayerPawn);
 		Cast<ASennitePlayerState>(PlayerState)->SetIsSpectator(true); // ORDER MATTERS HERE, HAS TO BE SET AFTER POSSESSING A PAWN

@@ -58,6 +58,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Damage")
 	int ProjectileType; // 0 for pickaxe, 1 for assault rifle, 2 for shotgun, will be used for determining the lifespan of the projectile
 
+	/** Set once the bullet has landed on something; it lands only once. */
+	bool bSpent = false;
+
 	UFUNCTION()
 	void SelfDestruct();
 };

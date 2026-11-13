@@ -58,239 +58,69 @@ void AProjectileActor::Tick(float DeltaTime)
 }
 
 void AProjectileActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult) {
-	if (HasAuthority()) {
-		if (OtherActor != nullptr) {
-			//bullet should only destroy itself once it overlaps with an actor other than itself, the weapon it came from, and the holder of that weapon
-			if ((Weapon && OtherActor == (AActor*)Weapon) || (WeaponHolder && OtherActor == (AActor*)WeaponHolder) || OtherActor == this) {
-				return;
-			}
-			else {
-				//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString("NetMode: ") + FString::FromInt(GetNetMode()) + FString(" Collided Actor: ") + OtherActor->GetName());
-				if (OtherActor->IsA(AWeaponActor::StaticClass())) {
-					//if the weapon has no holder, then let the bullet keep going
-					AWeaponActor* WeaponActor = Cast<AWeaponActor>(OtherActor);
-					if (WeaponActor) {
-						if (WeaponActor->Holder == nullptr) {
-							return;
-						}
-						else {
-							ASenniteCharacter* SenniteCharacter = Cast<ASenniteCharacter>(WeaponActor->Holder);
-							if (SenniteCharacter) {
-								SenniteCharacter->ClientDrawBloodEffect();
-								if (SenniteCharacter->Shield > 0) {
-									if (SenniteCharacter->Shield - Damage < 0) {
-										int LeftoverDamage = Damage - SenniteCharacter->Shield;
-										SenniteCharacter->Shield = 0;
-										SenniteCharacter->Health -= LeftoverDamage;
-									}
-									else {
-										SenniteCharacter->Shield -= Damage;
-									}
-								}
-								else {
-									SenniteCharacter->Health -= Damage;
-								}
-								if (WeaponHolder) {
-									// draw hitmarker
-									WeaponHolder->ClientDrawHitMarker();
-								}
-								if (SenniteCharacter->Health <= 0) {
-									if (WeaponActor) {
-										WeaponActor->Destroy();
-									}
-									if (SenniteCharacter) {
-										if (SenniteCharacter->BuildingPreview) {
-											SenniteCharacter->BuildingPreview->Destroy();
-										}
-										if (SenniteCharacter->CurrentHealingItem) {
-											SenniteCharacter->CurrentHealingItem->Destroy();
-										}
-										ASennitePlayerController* SennitePlayerController = Cast<ASennitePlayerController>(SenniteCharacter->GetController());
-										if (SennitePlayerController) {
-											SennitePlayerController->ServerSwitchToSpectatorMode();
-										}
-										SenniteCharacter->Destroy();
-									}
-									SenniteCharacter = Cast<ASenniteCharacter>(WeaponHolder);
-									if (SenniteCharacter) {
-										if (SenniteCharacter->GetController() && SenniteCharacter->GetController()->PlayerState) {
-											ASennitePlayerState* State = Cast<ASennitePlayerState>(SenniteCharacter->GetController()->PlayerState);
-											if (State) {
-												State->KillCount++;
-											}
-										}
-									}
-								}
-							}
-							Destroy();
-						}
-					}
-				}
-				else if (OtherActor->IsA(AHealingActor::StaticClass())) {
-					//if the healing item has no holder, then let the bullet keep going
-					AHealingActor* HealingActor = Cast<AHealingActor>(OtherActor);
-					if (HealingActor) {
-						if (HealingActor->Holder == nullptr) {
-							return;
-						}
-						else {
-							ASenniteCharacter* SenniteCharacter = Cast<ASenniteCharacter>(HealingActor->Holder);
-							if (SenniteCharacter) {
-								SenniteCharacter->ClientDrawBloodEffect();
-								if (SenniteCharacter->Shield > 0) {
-									if (SenniteCharacter->Shield - Damage < 0) {
-										int LeftoverDamage = Damage - SenniteCharacter->Shield;
-										SenniteCharacter->Shield = 0;
-										SenniteCharacter->Health -= LeftoverDamage;
-									}
-									else {
-										SenniteCharacter->Shield -= Damage;
-									}
-								}
-								else {
-									SenniteCharacter->Health -= Damage;
-								}
-								if (WeaponHolder) {
-									// draw hitmarker
-									WeaponHolder->ClientDrawHitMarker();
-								}
-								if (SenniteCharacter->Health <= 0) {
-									if (HealingActor) {
-										HealingActor->Destroy();
-									}
-									if (SenniteCharacter) {
-										if (SenniteCharacter->BuildingPreview) {
-											SenniteCharacter->BuildingPreview->Destroy();
-										}
-										if (SenniteCharacter->CurrentWeapon) {
-											SenniteCharacter->CurrentHealingItem->Destroy();
-										}
-										ASennitePlayerController* SennitePlayerController = Cast<ASennitePlayerController>(SenniteCharacter->GetController());
-										if (SennitePlayerController) {
-											SennitePlayerController->ServerSwitchToSpectatorMode();
-										}
-										SenniteCharacter->Destroy();
-									}
-									SenniteCharacter = Cast<ASenniteCharacter>(WeaponHolder);
-									if (SenniteCharacter) {
-										if (SenniteCharacter->GetController() && SenniteCharacter->GetController()->PlayerState) {
-											ASennitePlayerState* State = Cast<ASennitePlayerState>(SenniteCharacter->GetController()->PlayerState);
-											if (State) {
-												State->KillCount++;
-											}
-										}
-									}
-								}
-							}
-							Destroy();
-						}
-					}
-				}
-				else if (OtherActor->IsA(ABuildingActor::StaticClass())) {
-					//make sure the buildingactor is not a preview, if it is a preview then let the bullet keep going
-					ABuildingActor* BuildingActor = Cast<ABuildingActor>(OtherActor);
-					if (BuildingActor) {
-						if (BuildingActor->IsPreview) {
-							return;
-						}
-						else {
-							BuildingActor->Health -= Damage;
-							if (BuildingActor->Health <= 0) {
-								BuildingActor->Destroy();
-							}
-							Destroy();
-						}
-					}
-				}
-				else if (OtherActor->IsA(ASenniteCharacter::StaticClass())) {
-					ASenniteCharacter* SenniteCharacter = Cast<ASenniteCharacter>(OtherActor);
-					if (SenniteCharacter) {
-						SenniteCharacter->ClientDrawBloodEffect();
-						if (SenniteCharacter->Shield > 0) {
-							if (SenniteCharacter->Shield - Damage < 0) {
-								int LeftoverDamage = Damage - SenniteCharacter->Shield;
-								SenniteCharacter->Shield = 0;
-								SenniteCharacter->Health -= LeftoverDamage;
-							}
-							else {
-								SenniteCharacter->Shield -= Damage;
-							}
-						}
-						else {
-							SenniteCharacter->Health -= Damage;
-						}
-						if (WeaponHolder) {
-							// draw hitmarker
-							WeaponHolder->ClientDrawHitMarker();
-						}
-						if (SenniteCharacter->Health <= 0) {
-							if (SenniteCharacter && SenniteCharacter->CurrentWeapon) {
-								SenniteCharacter->CurrentWeapon->Destroy();
-							}
-							if (SenniteCharacter && SenniteCharacter->CurrentHealingItem) {
-								SenniteCharacter->CurrentHealingItem->Destroy();
-							}
-							if (SenniteCharacter && SenniteCharacter->BuildingPreview) {
-								SenniteCharacter->BuildingPreview->Destroy();
-							}
-							if (SenniteCharacter) {
-								ASennitePlayerController* SennitePlayerController = Cast<ASennitePlayerController>(SenniteCharacter->GetController());
-								if (SennitePlayerController) {
-									SennitePlayerController->ServerSwitchToSpectatorMode();
-								}
-								SenniteCharacter->Destroy();
-							}
-							SenniteCharacter = Cast<ASenniteCharacter>(WeaponHolder);
-							if (SenniteCharacter) {
-								if (SenniteCharacter->GetController() && SenniteCharacter->GetController()->PlayerState) {
-									ASennitePlayerState* State = Cast<ASennitePlayerState>(SenniteCharacter->GetController()->PlayerState);
-									if (State) {
-										State->KillCount++;
-									}
-								}
-							}
-						}
-						Destroy();
-					}
-				}
-				else if (OtherActor->IsA(AProjectileActor::StaticClass())) {
-					//let the bullet keep going if it collides with other bullets
-					return;
-				}
-				else if (OtherActor->IsA(AStormActor::StaticClass())) {
-					//let the bullet keep going if it collides with the storm
-					return;
-				}
-				else if (OtherActor->IsA(AMaterialActor::StaticClass())) {
-					AMaterialActor* MaterialActor = Cast<AMaterialActor>(OtherActor);
-					if (MaterialActor) {
-						MaterialActor->Health -= Damage;
-						if (ProjectileType == 0) {
-							//increase the counts of the owner of the weapon that shot the projectile
-							if (WeaponHolder) {
-								ASenniteCharacter* SenniteCharacter = Cast<ASenniteCharacter>(WeaponHolder);
-								if (SenniteCharacter && SenniteCharacter->GetController() && SenniteCharacter->GetController()->PlayerState) {
-									ASennitePlayerState* State = Cast<ASennitePlayerState>(SenniteCharacter->GetController()->PlayerState);
-									if (State) {
-										State->MaterialCounts[MaterialActor->MaterialType] += MaterialActor->MaterialCount;
-									}
-								}
-							}
-						}
-						if (MaterialActor->Health <= 0) {
-							MaterialActor->Destroy();
-						}
-						Destroy();
-					}
-				}
-				else {
-					Destroy();
-				}
+	// A bullet lands once. A player is several bodies (capsule, trigger, mesh, what they hold), and
+	// each one the bullet touches calls this.
+	if (!HasAuthority() || OtherActor == nullptr || bSpent) {
+		return;
+	}
+	// the bullet passes its own weapon, the player who fired it, other bullets and the storm's wall
+	if ((Weapon && OtherActor == (AActor*)Weapon) || (WeaponHolder && OtherActor == (AActor*)WeaponHolder) || OtherActor == this
+		|| OtherActor->IsA(AProjectileActor::StaticClass()) || OtherActor->IsA(AStormActor::StaticClass())) {
+		return;
+	}
+	ASenniteCharacter* Shooter = Cast<ASenniteCharacter>(WeaponHolder);
+	ASenniteCharacter* Victim = Cast<ASenniteCharacter>(OtherActor);
+	if (AWeaponActor* HitWeapon = Cast<AWeaponActor>(OtherActor)) {
+		// a weapon on the ground lets the bullet by; one in a player's hands is a hit on that player
+		if (HitWeapon->Holder == nullptr) {
+			return;
+		}
+		Victim = HitWeapon->Holder;
+	}
+	else if (AHealingActor* HitItem = Cast<AHealingActor>(OtherActor)) {
+		if (HitItem->Holder == nullptr) {
+			return;
+		}
+		Victim = HitItem->Holder;
+	}
+	if (Victim != nullptr) {
+		if (Victim == Shooter) {
+			return;
+		}
+		bSpent = true;
+		Victim->TakeHit(Damage, Shooter);
+		Destroy();
+		return;
+	}
+	if (ABuildingActor* Piece = Cast<ABuildingActor>(OtherActor)) {
+		// a preview is not there to be hit
+		if (Piece->IsPreview) {
+			return;
+		}
+		bSpent = true;
+		Piece->Health -= Damage;
+		if (Piece->Health <= 0) {
+			Piece->Destroy();
+		}
+		Destroy();
+		return;
+	}
+	bSpent = true;
+	if (AMaterialActor* Node = Cast<AMaterialActor>(OtherActor)) {
+		Node->Health -= Damage;
+		if (ProjectileType == 0 && Shooter != nullptr && Shooter->GetController() != nullptr) {
+			// the pickaxe harvests: its holder gains the node's material
+			ASennitePlayerState* State = Cast<ASennitePlayerState>(Shooter->GetController()->PlayerState);
+			if (State != nullptr && State->MaterialCounts.IsValidIndex(Node->MaterialType)) {
+				State->MaterialCounts[Node->MaterialType] += Node->MaterialCount;
 			}
 		}
+		if (Node->Health <= 0) {
+			Node->Destroy();
+		}
 	}
-	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, OtherActor->GetName());
-	//GetWorld()->DestroyActor(this);
+	// anything else stops the bullet
+	Destroy();
 }
 
 void AProjectileActor::SelfDestruct() {
