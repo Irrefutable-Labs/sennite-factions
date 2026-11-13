@@ -46,8 +46,10 @@ class HttpError extends Error {
 }
 
 const MAX_BODY_BYTES = 64 * 1024;
-/** The most players the server keeps a record of. */
-const MAX_PLAYERS = 10_000;
+/** The most players the server keeps a record of whose connect code no wallet has approved yet. */
+const MAX_UNAPPROVED = 1_000;
+/** How many connect codes one address may ask for in a minute. */
+const CODES_A_MINUTE = 10;
 /** How long a player whose wallet never connected is kept. */
 const UNCONNECTED_MS = 60 * 60 * 1000;
 /** How long a base read is served again before it is read anew. */
@@ -79,6 +81,8 @@ function text(value: unknown, what: string): string {
 
 export class Service {
   readonly #jobs = new Map<string, Job>();
+  /** When each address last asked for connect codes. */
+  readonly #asked = new Map<string, number[]>();
   readonly #bases = new Map<string, { at: number; base: Awaited<ReturnType<Publisher["base"]>> }>();
 
   constructor(private readonly options: ServiceOptions) {}
@@ -122,19 +126,52 @@ export class Service {
 
   /** The wallet connected for a player, or undefined while none is. */
   private async connection(player: string): Promise<Connection | undefined> {
-    const offer = this.options.store.data.players[player]?.offer;
-    if (offer === undefined) return undefined;
-    return (await this.options.publisher.app.connections()).find((c) => c.connected && hex(c.raw.offerDigest) === offer);
+    const record = this.options.store.data.players[player];
+    if (record === undefined) return undefined;
+    const found = (await this.options.publisher.app.connections()).find((c) => c.connected && hex(c.raw.offerDigest) === record.offer);
+    if (found !== undefined && record.approved !== true) {
+      record.approved = true;
+      this.options.store.save();
+    }
+    return found;
   }
 
-  /** Drop the players whose connect code no wallet approved within the hour. */
-  private async forgetUnconnected(): Promise<void> {
+  /**
+   * Drop the players whose connect code no wallet approved within the hour.
+   * A player whose wallet approved once is kept, connected now or not: the
+   * account lists every wallet that ever connected, and the record remembers.
+   */
+  private async forgetUnapproved(): Promise<void> {
     const players = this.options.store.data.players;
-    const stale = Object.entries(players).filter(([, p]) => Date.now() - p.since > UNCONNECTED_MS);
-    if (stale.length === 0) return;
     const offers = new Set((await this.options.publisher.app.connections()).map((c) => hex(c.raw.offerDigest)));
-    for (const [token, p] of stale) if (!offers.has(p.offer)) delete players[token];
-    this.options.store.save();
+    let changed = false;
+    for (const [token, p] of Object.entries(players)) {
+      if (p.approved === true) continue;
+      if (offers.has(p.offer)) {
+        p.approved = true;
+        changed = true;
+      } else if (!(Date.now() - p.since <= UNCONNECTED_MS)) {
+        // older than the hour, or a record with no time on it
+        delete players[token];
+        changed = true;
+      }
+    }
+    if (changed) this.options.store.save();
+  }
+
+  /** Whether `address` may be given another connect code now: a few a minute, each address on its own count. */
+  private mayAsk(address: string): boolean {
+    const now = Date.now();
+    const recent = (this.#asked.get(address) ?? []).filter((at) => now - at < 60_000);
+    if (recent.length >= CODES_A_MINUTE) {
+      this.#asked.set(address, recent);
+      return false;
+    }
+    recent.push(now);
+    this.#asked.set(address, recent);
+    // addresses that asked nothing for a minute are forgotten
+    for (const [other, times] of this.#asked) if (times.every((at) => now - at >= 60_000)) this.#asked.delete(other);
+    return true;
   }
 
   private async connected(player: string): Promise<Connection> {
@@ -211,8 +248,11 @@ export class Service {
 
     // A new player: a token for their game, and a connect code for their wallet.
     if (is("POST", "players")) {
-      await this.forgetUnconnected();
-      if (Object.keys(store.data.players).length >= MAX_PLAYERS) throw new HttpError(429, "the server has no room for another player now");
+      if (!this.mayAsk(req.socket.remoteAddress ?? "")) throw new HttpError(429, "too many connect codes asked for: wait a minute");
+      await this.forgetUnapproved();
+      if (Object.values(store.data.players).filter((p) => p.approved !== true).length >= MAX_UNAPPROVED) {
+        throw new HttpError(429, "too many connect codes are waiting for a wallet: try again later");
+      }
       const grant = world.economy.grant;
       const offer = await publisher.offer(world.economy.resources.map((r) => ({ symbol: r.symbol, ...grant })));
       const player = hex(randomBytes(32));

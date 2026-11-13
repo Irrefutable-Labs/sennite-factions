@@ -93,6 +93,12 @@ describe("the game's side of the publisher's server", () => {
     await enter("alice");
     await enter("bob");
     expect((await call("GET", "/players/me", "not-a-token")).status).toBe(401);
+
+    // One address is given only a few connect codes a minute.
+    const asked = [];
+    for (let i = 0; i < 12; i++) asked.push((await call("POST", "/players")).status);
+    expect(asked.filter((status) => status === 201)).toHaveLength(8);
+    expect(asked.filter((status) => status === 429)).toHaveLength(4);
   });
 
   it("founds a faction for a connected wallet on an unassigned parcel, once", async () => {
@@ -140,7 +146,12 @@ describe("the game's side of the publisher's server", () => {
 
   it("the commit button drives the wallet; the fully funded plan stands in play for everyone", async () => {
     const alice = a.wallets.alice!.wallet;
-    await a.app.give(await alice.id(), "STEEL", "300");
+    // The publisher can send once the wallet's side of their relationship is in place, which follows the connect.
+    const id = await alice.id();
+    await until("the publisher gives alice 300 steel", 240_000, async () => {
+      await a.app.give(id, "STEEL", "300");
+      return true;
+    });
     await until("alice's wallet takes in 300 steel", 240_000, async () => ((await holds(alice, "STEEL")).available === 300n ? true : null));
 
     // The game shows what the wallet holds only from a proof the publisher's account checked.

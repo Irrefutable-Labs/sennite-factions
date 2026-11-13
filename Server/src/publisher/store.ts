@@ -63,6 +63,8 @@ export interface PlayerRecord {
   offer: string;
   /** When the server made the record, on its clock (milliseconds). */
   since: number;
+  /** Whether a wallet ever approved the offer. Set once, and never taken back when the wallet disconnects. */
+  approved?: boolean;
 }
 
 export interface StoreData {
