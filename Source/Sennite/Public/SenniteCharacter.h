@@ -500,8 +500,21 @@ public:
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerBuildStructure(TSubclassOf<ABuildingActor> StructureClass, FVector SpawnLocationFRotator, FRotator SpawnRotation, int StructureId);
 
-	/** The material a piece of this character's own lists is built from, or INDEX_NONE for any other class. */
-	int32 BuildingMaterialOf(TSubclassOf<ABuildingActor> StructureClass) const;
+	/** The material a piece of this character's own lists is built from and its kind ("Wall", "Ramp", "Floor"), or INDEX_NONE for any other class. */
+	int32 BuildingMaterialOf(TSubclassOf<ABuildingActor> StructureClass, FString& OutPieceKind) const;
+
+	/** Whether a transform is a place the build grid has. */
+	bool IsOnBuildGrid(const FVector& Location, const FRotator& Rotation) const;
+
+	/** Whether a spawned piece overlaps a player or a piece of its kind already standing there. */
+	bool IsBuildingPieceBlocked(const ABuildingActor* Piece) const;
+
+	/** The side of one build grid cell. */
+	UPROPERTY(EditDefaultsOnly, Category = "Building")
+	float BuildGridCell = 480.0f;
+
+	/** Set by the server when it accepts a trigger pull; the one projectile of that shot clears it. Server only. */
+	bool bShotAuthorized = false;
 
 	/** What one piece costs of its material. */
 	UPROPERTY(EditDefaultsOnly, Category = "Building")

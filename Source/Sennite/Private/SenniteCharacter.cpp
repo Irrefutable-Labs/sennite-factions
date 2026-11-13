@@ -1289,32 +1289,75 @@ bool ASenniteCharacter::ServerResetMovingRight_Validate() {
 }
 
 void ASenniteCharacter::ServerBuildStructure_Implementation(TSubclassOf<ABuildingActor> StructureClass, FVector SpawnLocation, FRotator SpawnRotation, int StructureId) {
-	// The server builds only a piece of its own lists, within reach of this
-	// character, paid for from the count the server holds. The client's own
-	// copy of the piece is removed either way.
-	const int32 MaterialType = BuildingMaterialOf(StructureClass);
+	// The server builds only a piece of its own lists, of the kind this player
+	// is in build mode for, on the build grid, within reach, clear of players
+	// and of a piece already there, and paid for from the count the server
+	// holds. The client's own copy of the piece is removed either way.
+	FString PieceKind;
+	const int32 MaterialType = BuildingMaterialOf(StructureClass, PieceKind);
 	ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
 	if (MaterialType != INDEX_NONE && State != nullptr
+		&& State->InBuildMode && State->BuildMode == PieceKind
 		&& State->MaterialCounts.IsValidIndex(MaterialType)
 		&& State->MaterialCounts[MaterialType] >= BuildingPieceCost
+		&& IsOnBuildGrid(SpawnLocation, SpawnRotation)
 		&& FVector::Dist(SpawnLocation, GetActorLocation()) <= MaxBuildReach) {
-		State->MaterialCounts[MaterialType] -= BuildingPieceCost;
-		GetWorld()->SpawnActor<ABuildingActor>(StructureClass, SpawnLocation, SpawnRotation);
+		ABuildingActor* Piece = GetWorld()->SpawnActor<ABuildingActor>(StructureClass, SpawnLocation, SpawnRotation);
+		if (Piece != nullptr) {
+			if (IsBuildingPieceBlocked(Piece)) {
+				Piece->Destroy();
+			}
+			else {
+				State->MaterialCounts[MaterialType] -= BuildingPieceCost;
+			}
+		}
 	}
 	ClientDestroyStructure(StructureId);
 }
 
-int32 ASenniteCharacter::BuildingMaterialOf(TSubclassOf<ABuildingActor> StructureClass) const {
+int32 ASenniteCharacter::BuildingMaterialOf(TSubclassOf<ABuildingActor> StructureClass, FString& OutPieceKind) const {
 	if (StructureClass == nullptr) {
 		return INDEX_NONE;
 	}
-	for (const TArray<TSubclassOf<ABuildingActor>>* Pieces : { &WallClasses, &RampClasses, &FloorClasses }) {
-		const int32 Found = Pieces->Find(StructureClass);
+	const TPair<const TArray<TSubclassOf<ABuildingActor>>*, const TCHAR*> Lists[] = {
+		{ &WallClasses, TEXT("Wall") }, { &RampClasses, TEXT("Ramp") }, { &FloorClasses, TEXT("Floor") } };
+	for (const auto& List : Lists) {
+		const int32 Found = List.Key->Find(StructureClass);
 		if (Found != INDEX_NONE) {
+			OutPieceKind = List.Value;
 			return Found;
 		}
 	}
 	return INDEX_NONE;
+}
+
+bool ASenniteCharacter::IsOnBuildGrid(const FVector& Location, const FRotator& Rotation) const {
+	// every piece sits on a multiple of half a grid cell, turned in quarter turns, and upright
+	const auto IsMultipleOf = [](double Value, double Step) {
+		return FMath::Abs(Value - FMath::RoundHalfFromZero(Value / Step) * Step) <= 0.5;
+	};
+	const double HalfCell = BuildGridCell * 0.5;
+	return IsMultipleOf(Location.X, HalfCell) && IsMultipleOf(Location.Y, HalfCell) && IsMultipleOf(Location.Z, HalfCell)
+		&& IsMultipleOf(Rotation.Yaw, 90.0) && FMath::Abs(Rotation.Pitch) <= 0.5 && FMath::Abs(Rotation.Roll) <= 0.5;
+}
+
+bool ASenniteCharacter::IsBuildingPieceBlocked(const ABuildingActor* Piece) const {
+	TArray<AActor*> OverlappingActors;
+	Piece->GetOverlappingActors(OverlappingActors);
+	for (const AActor* Other : OverlappingActors) {
+		if (Other == nullptr) {
+			continue;
+		}
+		if (Other->IsA(ASenniteCharacter::StaticClass())) {
+			return true;
+		}
+		const ABuildingActor* Structure = Cast<ABuildingActor>(Other);
+		if (Structure != nullptr && !Structure->IsPreview && Structure->StructureType.Equals(Piece->StructureType)
+			&& FVector::Dist(Structure->GetActorLocation(), Piece->GetActorLocation()) < 1.0) {
+			return true;
+		}
+	}
+	return false;
 }
 
 bool ASenniteCharacter::ServerBuildStructure_Validate(TSubclassOf<ABuildingActor> StructureClass, FVector SpawnLocation, FRotator SpawnRotation, int StructureId) {
@@ -1533,6 +1576,7 @@ void ASenniteCharacter::ServerFireWeapon_Implementation() {
 							}
 							NetMulticastPlayShootRifleIronsightsAnimation();
 							CurrentWeapon->CurrentBulletCount--;
+							bShotAuthorized = true;
 							State->EquippedWeaponsClips[CurrentWeaponType]--;
 							State->JustShotRifle = true;
 							FTimerHandle RifleTimerHandle;
@@ -1544,6 +1588,7 @@ void ASenniteCharacter::ServerFireWeapon_Implementation() {
 							}
 							NetMulticastPlayShootShotgunIronsightsAnimation();
 							CurrentWeapon->CurrentBulletCount--;
+							bShotAuthorized = true;
 							State->EquippedWeaponsClips[CurrentWeaponType]--;
 							State->JustShotShotgun = true;
 							FTimerHandle ShotgunTimerHandle;
@@ -1567,6 +1612,7 @@ void ASenniteCharacter::ServerFireWeapon_Implementation() {
 							}
 							NetMulticastPlayShootRifleAnimation();
 							CurrentWeapon->CurrentBulletCount--;
+							bShotAuthorized = true;
 							State->EquippedWeaponsClips[CurrentWeaponType]--;
 							State->JustShotRifle = true;
 							FTimerHandle RifleTimerHandle;
@@ -1578,6 +1624,7 @@ void ASenniteCharacter::ServerFireWeapon_Implementation() {
 							}
 							NetMulticastPlayShootShotgunAnimation();
 							CurrentWeapon->CurrentBulletCount--;
+							bShotAuthorized = true;
 							State->EquippedWeaponsClips[CurrentWeaponType]--;
 							State->JustShotShotgun = true;
 							FTimerHandle ShotgunTimerHandle;
@@ -2122,7 +2169,11 @@ bool ASenniteCharacter::ServerShotgunReloadTimeOut_Validate() {
 }
 
 void ASenniteCharacter::ServerSpawnProjectile_Implementation(FTransform SpawnTransform) { // to do add current weapon null check
-	if (CurrentWeapon != nullptr && FVector::Dist(SpawnTransform.GetLocation(), GetActorLocation()) <= MaxMuzzleDistance) {
+	// A projectile spawns only for a shot ServerFireWeapon accepted (weapon held,
+	// ammunition, cooldowns), once, and only from close to the shooter.
+	const bool bAuthorized = bShotAuthorized;
+	bShotAuthorized = false;
+	if (bAuthorized && CurrentWeapon != nullptr && FVector::Dist(SpawnTransform.GetLocation(), GetActorLocation()) <= MaxMuzzleDistance) {
 		auto Bullet = Cast<AProjectileActor>(UGameplayStatics::BeginDeferredActorSpawnFromClass(this, CurrentWeapon->BulletClass, SpawnTransform, ESpawnActorCollisionHandlingMethod::AlwaysSpawn));
 		if (Bullet != nullptr)
 		{
