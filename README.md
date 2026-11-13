@@ -76,7 +76,13 @@ Tools/check_combat.sh
 
 is the same two games, fighting: the joining player shoots the host twice, for 25 each; the host shoots the joining player until they fall, in four shots, and is credited with the kill; the fallen player becomes a spectator. Health, rounds, the hit marker, the red flash when hurt, kills and players left are checked on both sides. Logs and screenshots in `Saved/Combat/`.
 
-`Tools/check_all.sh` runs all eight.
+```bash
+Tools/check_arena.sh
+```
+
+starts the arena map once for each kind of connector. Each run holds the seeding to its promises on plans for 300 seeds and every number of bases (the same seed gives the same arena; every seed a different one; connectors that meet at a base are never the same kind; every jump is inside a walking jump's reach), then has the hero cross that connector to the far base with the real keys and mouse, jumping where it is a jump and waiting for a gap where craft cross. Pictures of each kind in `Saved/Arena/`.
+
+`Tools/check_all.sh` runs all nine.
 
 ## State
 
@@ -91,6 +97,7 @@ is the same two games, fighting: the joining player shoots the host twice, for 2
 - Storm: `AStormActor` is a safe circle with a see-through violet wall. A storm placed in a map carries its starting radius and whether its centre is random; `[/Script/Sennite.StormActor]` in `Config/DefaultGame.ini` holds the stage length (30 s; it holds for four stages and shrinks for three), how much of its radius it keeps for each second it shrinks, and how often its damage rises. A player is in the storm when farther from the circle's centre than its radius, and then loses the storm's damage every second. The game mode starts the storm once `PlayersToStartStorm` players (2) are in, after `StormStartDelay` (30 s). The test range has one, centred ahead of the start.
 - Two players: a second player can join a hosted match and play in it (`Tools/check_two_players.sh`). To host by hand, start the game with `/Game/Maps/TestRange?listen`; to join, start it with the host's address in place of a map. The lobby and main menu still have no maps or widgets, so a match cannot yet be started from inside the game. The hero is loaded when the game starts (`USenniteGameInstance`), not when the first hero appears.
 - Combat: a hit and a death each have one place, `ASenniteCharacter::TakeHit` and `Die`; a bullet lands once. A player who falls becomes a spectator a little above where they fell, flying and in nobody's way. The HUD shows a hit marker when a shot lands, flashes red at the edges when the player is hurt, and for a spectator says so and shows who is left.
+- The match arena (`Source/Sennite/Public/SenniteArena.h`, map `Content/Maps/Arena`, made by `Tools/build_arena.py`): the bases are round platforms floating on a ring, joined by connectors chosen and shaped from a seed. Every machine in a match is sent the seed and builds the same arena; nothing of it outlasts the match. Six kinds of connector: floating pieces to jump between, a tree-top boardwalk between huts, a canyon with rims to hold from above, a deck that hovering craft cross, a tunnel through a solid mass, and bridges over the drop. The seed puts the six in an order and connectors take them in turn, so neighbours always differ. Falling off is a death. The shapes are plain blocks, coloured by kind, until each kind has scenery. To look at one: start the game with `/Game/Maps/Arena?Seed=7?Bases=4`, or add `?Connector=Canyon` to make every connector one kind. The bases are bare: a faction's own structures are not read from anywhere yet.
 - Healing: `ASenniteBandage` (a pack of 5; each gives back 15 health) and `ASennitePotion` (2; each adds 20 shield), in `Source/Sennite/Public/SenniteHealing.h`. Walk over one to pick it up, 4 and 5 bring them to hand, the left mouse button uses one, which takes a little over three seconds. They have no models yet: a plain box and a plain cylinder stand in, named per item class in `Config/DefaultGame.ini`, and there is no animation for using one.
 
 Third-party notices: `ThirdParty/NOTICE.md`.

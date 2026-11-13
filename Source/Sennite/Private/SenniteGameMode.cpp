@@ -11,6 +11,7 @@
 #include "StormActor.h"
 #include "GameFramework/GameState.h"
 #include "GameFramework/PlayerStart.h"
+#include "SenniteArena.h"
 #include "EngineUtils.h"
 
 DEFINE_LOG_CATEGORY(LogMyServerGame);
@@ -112,13 +113,21 @@ void ASenniteGameMode::GenericPlayerInitialization(AController* NewPlayer) {
 
 AActor* ASenniteGameMode::ChoosePlayerStart_Implementation(AController* Player) {
 	TArray<APlayerStart*> Starts;
-	for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It) {
-		Starts.Add(*It);
+	// in an arena the start points are the bases', in the order of the bases
+	for (TActorIterator<ASenniteArena> It(GetWorld()); It; ++It) {
+		for (APlayerStart* Start : It->GetStarts()) {
+			Starts.Add(Start);
+		}
+	}
+	if (Starts.Num() == 0) {
+		for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It) {
+			Starts.Add(*It);
+		}
+		Starts.Sort([](const APlayerStart& A, const APlayerStart& B) { return A.GetName() < B.GetName(); });
 	}
 	if (Starts.Num() == 0) {
 		return Super::ChoosePlayerStart_Implementation(Player);
 	}
-	Starts.Sort([](const APlayerStart& A, const APlayerStart& B) { return A.GetName() < B.GetName(); });
 	for (APlayerStart* Start : Starts) {
 		bool bTaken = false;
 		for (TActorIterator<APawn> It(GetWorld()); It; ++It) {

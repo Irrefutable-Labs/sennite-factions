@@ -1,5 +1,6 @@
 #!/bin/zsh
-# Starts the game on the test range without a window and runs one in-game check.
+# Starts the game without a window and runs one in-game check. The map is the test range, or
+# SENNITE_MAP (a map's address, options and all).
 #   Tools/run_game_check.sh <test filter> <test name> <folder under Saved/> [more arguments for the game]
 # The check's screenshots and log (check.log) land in Saved/<folder>/; only screenshots this run
 # wrote are listed. Exit status 0 only if the check ran to its end and passed.
@@ -15,7 +16,7 @@ OUT="$PWD/Saved/$FOLDER"
 mkdir -p "$OUT"
 touch "$OUT/.started"
 
-"$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/Sennite.uproject" /Game/Maps/TestRange -game \
+"$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/Sennite.uproject" "${SENNITE_MAP:-/Game/Maps/TestRange}" -game \
   -windowed -ResX=1280 -ResY=720 -RenderOffscreen -unattended -nosplash -nosound -notexturestreaming -stdout \
   -ExecCmds="Automation RunTests $FILTER; Quit" -TestExit="Automation Test Queue Empty" "$@" \
   > "$OUT/check.log" 2>&1
