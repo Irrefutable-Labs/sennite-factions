@@ -9,7 +9,7 @@ import type { Member } from "../../src/faction/state.js";
 import { Publisher } from "../../src/publisher/publisher.js";
 import { Store } from "../../src/publisher/store.js";
 import { loadWorld, storageSetOf, type World } from "../../src/publisher/world.js";
-import { connect, funded, Host, required, runDir } from "./hosts.js";
+import { connect, funded, Host, required, runDir, until } from "./hosts.js";
 
 export const GAME = "Sennite: Factions";
 
@@ -91,7 +91,11 @@ export async function accounts(run: string, names: string[]): Promise<Accounts> 
   try {
     const made = await Promise.all(hosts.map((h) => h.wallet()));
     await Promise.all([funded("publisher", app), ...made.map((w, i) => funded(names[i] as string, w))]);
-    await publisher.issueResources(world.economy);
+    // An issue the set has not made final yet is held by the account and resumed by asking again.
+    await until("the publisher's account issues its resources", 600_000, async () => {
+      await publisher.issueResources(world.economy);
+      return true;
+    });
     caps = world.economy.resources.map((r) => ({
       symbol: r.symbol,
       perRequest: world.economy.grant.perRequest,

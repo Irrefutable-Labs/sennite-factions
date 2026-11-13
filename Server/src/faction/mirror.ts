@@ -24,8 +24,12 @@ export type CellReading =
   | { cell: "open" }
   /** A recognized write holds the cell and is final: the cell's occupant. */
   | { cell: "held"; signerKey: string; payload: Uint8Array; step: Uint8Array }
-  /** Not established either way yet. Never treated as open, and never as invalid (spec 7.4). */
-  | { cell: "not_established"; why: string }
+  /**
+   * Not established either way yet. Never treated as open, and never as invalid (spec 7.4).
+   * `waits` says what the reader is waiting for, when it knows: the cell's leader seat, which it
+   * could not read, or the occupant, which holds the cell but which the reader cannot name.
+   */
+  | { cell: "not_established"; why: string; waits?: "leader" | "occupant" }
   /** The reader has no way to read this cell: it has nothing to go on there. */
   | { cell: "unread" };
 
@@ -56,7 +60,7 @@ export type WalkEnd =
   /** The successor cell is open: the mirror holds the latest state. */
   | { at: "open" }
   /** The successor cell's occupant is not established: the mirror waits here. */
-  | { at: "not_established"; why: string }
+  | { at: "not_established"; why: string; waits?: "leader" | "occupant" }
   /** The reader could not read the successor cell at all: as far as it can see, the mirror holds the latest state. */
   | { at: "unread" }
   /** The state lists no member: it has no successor cell. */
@@ -148,7 +152,9 @@ export class Mirror {
       const reading = await reader.read(name, writers);
       if (reading.cell === "open") return { at: "open" };
       if (reading.cell === "unread") return { at: "unread" };
-      if (reading.cell === "not_established") return { at: "not_established", why: reading.why };
+      if (reading.cell === "not_established") {
+        return reading.waits === undefined ? { at: "not_established", why: reading.why } : { at: "not_established", why: reading.why, waits: reading.waits };
+      }
       this.accept(reading);
     }
   }

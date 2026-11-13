@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Service } from "../../src/publisher/service.js";
-import { until } from "../real-dsm/hosts.js";
+import { GaveUp, until } from "../real-dsm/hosts.js";
 import { accounts, GAME, type Accounts } from "../real-dsm/stage.js";
 import { becomeContacts, send, spendable, takeUp } from "../real-dsm/wallets.js";
 
@@ -80,7 +80,7 @@ describe("the shop in the game", () => {
     const exited = new Promise<number | null>((resolve) => game.once("exit", (code) => resolve((exitCode = code))));
     const running = <T>(what: string, probe: () => Promise<T | null | undefined>): Promise<T> =>
       until(what, 600_000, async () => {
-        if (exitCode !== undefined) throw new Error(`the game ended before ${what}:\n${output}`);
+        if (exitCode !== undefined) throw new GaveUp(`the game ended before ${what}:\n${output}`);
         return probe();
       });
 

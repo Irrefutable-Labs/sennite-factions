@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Service } from "../../src/publisher/service.js";
-import { until } from "../real-dsm/hosts.js";
+import { GaveUp, until } from "../real-dsm/hosts.js";
 import { accounts, GAME, type Accounts } from "../real-dsm/stage.js";
 import { holds } from "../real-dsm/wallets.js";
 
@@ -55,7 +55,7 @@ describe("the base editor in the game", () => {
     try {
       // As a player does: read the connect code off the game's screen and approve it in the wallet.
       const code = await until("the game shows a connect code", 600_000, async () => {
-        if (exitCode !== undefined) throw new Error(`the game ended before it showed a connect code:\n${output}`);
+        if (exitCode !== undefined) throw new GaveUp(`the game ended before it showed a connect code:\n${output}`);
         return existsSync(CODE_FILE) ? readFileSync(CODE_FILE, "utf8").trim() || null : null;
       });
       const preview = await wallet.preview(code);

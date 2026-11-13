@@ -15,7 +15,7 @@ import { hex, unhex } from "../faction/canonical.js";
 import { decodeChange, encodeChange, type Change } from "../faction/change.js";
 import type { Funding } from "../dsm/contributions.js";
 import type { Member } from "../faction/state.js";
-import { Publisher, Refused, type Structure } from "./publisher.js";
+import { buildingAt, Publisher, Refused, type Structure } from "./publisher.js";
 import type { Store } from "./store.js";
 import type { World } from "./world.js";
 
@@ -401,7 +401,7 @@ export class Service {
       if (factionId === undefined) return { status: 200, body: { parcelId: b, assigned: false } };
       const token = this.bearer(req);
       const connection = token !== "" && Object.hasOwn(store.data.players, token) ? await this.connection(token) : undefined;
-      const { mirror } = await publisher.follow(factionId);
+      const { mirror, end } = await publisher.follow(factionId);
       const key = connection === undefined ? "" : hex(connection.opponent.signingKey);
       const member = mirror.state.members.some((m) => m.signingKey === key);
       const invited = mirror.state.invited.some((m) => m.signingKey === key);
@@ -438,6 +438,8 @@ export class Service {
           member,
           invited,
           people,
+          // Whether a member can build now, and the plain message when not (spec 11). Members only.
+          building: member ? buildingAt(end) : undefined,
           members: mirror.state.members.length,
           structures: base.structures.filter((s) => member || s.standing).map(shown),
         },

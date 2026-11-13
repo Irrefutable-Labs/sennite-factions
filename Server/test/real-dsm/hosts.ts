@@ -47,6 +47,9 @@ async function freePort(): Promise<number> {
 /** One run's directory: every account's data, secret and log. */
 export const runDir = (name: string): string => mkdtempSync(join(tmpdir(), `sennite-${name}-`));
 
+/** Thrown by a probe when what it waits for can no longer happen: `until` stops at once instead of waiting out its time. */
+export class GaveUp extends Error {}
+
 /** `probe` until it holds, or fail naming `what` and the last reason it did not. */
 export async function until<T>(what: string, ms: number, probe: () => Promise<T | null | undefined>): Promise<T> {
   const deadline = Date.now() + ms;
@@ -56,6 +59,7 @@ export async function until<T>(what: string, ms: number, probe: () => Promise<T 
       const got = await probe();
       if (got !== null && got !== undefined) return got;
     } catch (e) {
+      if (e instanceof GaveUp) throw e;
       why = e instanceof Error ? e.message : String(e);
     }
     if (Date.now() > deadline) throw new Error(`${what}: not within ${ms / 1000} s (${why})`);

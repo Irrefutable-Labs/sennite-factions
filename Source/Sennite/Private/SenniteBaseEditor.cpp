@@ -840,7 +840,21 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 	struct FPanelLine { FString Text; int32 Points; FLinearColor Colour; };
 	TArray<FPanelLine> Lines;
 	auto Line = [&](const TCHAR* Name, const FString& Text, int32 Points, const FLinearColor& Colour) {
-		Lines.Add({ Text, Points, Colour });
+		// a sentence longer than the panel is wide goes on as many rows as it needs, broken at spaces
+		const int32 Wide = 90;
+		FString Rest = Text;
+		while (Rest.Len() > Wide) {
+			int32 At = Wide;
+			while (At > 0 && Rest[At] != TEXT(' ')) {
+				--At;
+			}
+			if (At == 0) {
+				At = Wide;
+			}
+			Lines.Add({ Rest.Left(At), Points, Colour });
+			Rest = Rest.Mid(At).TrimStart();
+		}
+		Lines.Add({ Rest, Points, Colour });
 		Editor->LastDrawn.Add(FString::Printf(TEXT("%s=%s"), Name, *Text));
 	};
 	auto Draw = [&]() {
@@ -870,6 +884,11 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 		Line(TEXT("server"), Server->Message.IsEmpty() ? FString(TEXT("reaching the publisher's server...")) : Server->Message, 11, Short);
 		Draw();
 		return;
+	}
+
+	// the base on screen is the one last read; whether a session is running is said apart from it
+	if (!Server->Reachable()) {
+		Line(TEXT("session"), TEXT("There is no live session: the publisher's server cannot be reached. The base is shown as it was last read. It is kept in storage, not in the session; building resumes when a session does."), 11, Short);
 	}
 
 	if (!Server->bConnected) {
@@ -910,6 +929,10 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 	else if (View->bMember) {
 		Line(TEXT("faction"), FString::Printf(TEXT("YOUR FACTION   %d member%s   %d change%s"), View->Members, View->Members == 1 ? TEXT("") : TEXT("s"),
 			View->Height, View->Height == 1 ? TEXT("") : TEXT("s")), 11, Good);
+		// the base is shown as it is; why nothing can be built now is said plainly
+		if (!View->Building.IsEmpty()) {
+			Line(TEXT("building"), View->Building, 11, Short);
+		}
 	}
 	else if (View->bInvited) {
 		Line(TEXT("faction"), TEXT("YOU ARE INVITED   J: join"), 11, Good);
@@ -1042,7 +1065,8 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 		Line(TEXT("keys"), View != nullptr && View->bMember ? TEXT("F: place   Q E: prefab   R: turn   W A S D: move   P: people   H: shop   I: inventory") : TEXT("W A S D: move   TAB: next parcel   H: shop   I: inventory"), 10, Dim);
 	}
 
-	if (!Server->Message.IsEmpty()) {
+	// what the last request came to; not said twice when it is what the panel already says about building
+	if (!Server->Message.IsEmpty() && !(View != nullptr && Server->Message == View->Building)) {
 		Line(TEXT("message"), Server->Message, 11, Server->bBusy ? Dim : Server->bLastOk ? Good : Short);
 	}
 	Draw();

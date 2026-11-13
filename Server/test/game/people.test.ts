@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { hex } from "../../src/faction/canonical.js";
 import { Service } from "../../src/publisher/service.js";
-import { until } from "../real-dsm/hosts.js";
+import { GaveUp, until } from "../real-dsm/hosts.js";
 import { accounts, GAME, type Accounts } from "../real-dsm/stage.js";
 
 const REPO = fileURLToPath(new URL("../../..", import.meta.url));
@@ -83,7 +83,7 @@ describe("the people of a faction in the game", () => {
     try {
       // The game's player reads the connect code off the screen and approves it in their wallet.
       const code = await until("the game shows a connect code", 600_000, async () => {
-        if (exitCode !== undefined) throw new Error(`the game ended before it showed a connect code:\n${output}`);
+        if (exitCode !== undefined) throw new GaveUp(`the game ended before it showed a connect code:\n${output}`);
         return existsSync(CODE_FILE) ? readFileSync(CODE_FILE, "utf8").trim() || null : null;
       });
       const preview = await bob.preview(code);

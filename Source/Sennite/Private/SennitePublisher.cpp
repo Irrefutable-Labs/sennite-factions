@@ -97,10 +97,16 @@ void USennitePublisher::Send(const TCHAR* Verb, const FString& Path, const TShar
 		Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 		Request->SetContentAsString(Text);
 	}
-	Request->OnProcessRequestComplete().BindWeakLambda(this, [Done = MoveTemp(Done)](FHttpRequestPtr, FHttpResponsePtr Response, bool bReached) {
+	Request->OnProcessRequestComplete().BindWeakLambda(this, [this, Done = MoveTemp(Done)](FHttpRequestPtr, FHttpResponsePtr Response, bool bReached) {
 		TSharedPtr<FJsonObject> Json;
 		int32 Status = 0;
-		if (bReached && Response.IsValid()) {
+		const bool bWas = bReachable;
+		bReachable = bReached && Response.IsValid();
+		// the server answers again: what was said about not reaching it is no longer so
+		if (bReachable && !bWas && !bBusy && Message == ErrorOf(0, nullptr)) {
+			Message.Reset();
+		}
+		if (bReachable) {
 			Status = Response->GetResponseCode();
 			FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Response->GetContentAsString()), Json);
 		}
@@ -343,6 +349,7 @@ void USennitePublisher::AskBases()
 void USennitePublisher::ReadBase(const FString& InParcelId, const FJsonObject& Json)
 {
 	FSenniteBaseView Base;
+	++BasesRead;
 	Base.bKnown = true;
 	Base.bAssigned = Json.GetBoolField(TEXT("assigned"));
 	if (Base.bAssigned) {
@@ -371,6 +378,10 @@ void USennitePublisher::ReadBase(const FString& InParcelId, const FJsonObject& J
 			}
 		}
 		Base.Height = Json.GetIntegerField(TEXT("height"));
+		const TSharedPtr<FJsonObject>* Building = nullptr;
+		if (Json.TryGetObjectField(TEXT("building"), Building) && !(*Building)->GetBoolField(TEXT("open"))) {
+			Base.Building = (*Building)->GetStringField(TEXT("message"));
+		}
 		for (const TSharedPtr<FJsonValue>& Value : Json.GetArrayField(TEXT("structures"))) {
 			const TSharedPtr<FJsonObject> Entry = Value->AsObject();
 			FSenniteStructureView View;

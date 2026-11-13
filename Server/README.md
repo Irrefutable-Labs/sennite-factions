@@ -34,13 +34,38 @@ DSM_APP_HOST_BIN=<dsm checkout>/target/release/dsm-app-host DSM_ENV_CONFIG=<dsm 
 In a DSM checkout, `cargo build --release --locked -p dsm-app-host` builds the host and
 `make nodes-up` starts five local storage nodes on PostgreSQL and writes that env config.
 
+Among them, `host-change.test.ts` runs the server as processes of its own (it builds `dist/` first):
+one is stopped and another takes over, one is killed with a member's change in flight, two run at
+once, and an old one comes back and writes. `conservation.test.ts` counts every unit after each of
+24 drawn acts (contribute, withdraw, leave, replace, dismantle); `SENNITE_SEED` draws another
+sequence.
+
+The runs that take storage seats offline (spec Stage 4: the leader seat). They stop and start the
+set's own `storage_node` processes, so they run only on a developer's own set on this machine
+(`make nodes-up`), never on a hosted one, and need the node binary as well:
+
+```bash
+DSM_APP_HOST_BIN=<...> DSM_ENV_CONFIG=<...> DSM_STORAGE_NODE_BIN=<dsm checkout>/target/release/storage_node npm run test:seats
+```
+
+Every seat is serving again when they end, whatever happened.
+
 The game itself, with the same two settings and Unreal Engine on this machine. It runs the Unreal
-game headless on the test range against this server, three times, with real wallets answering: the
-base editor (plan, commit, built in play), the faction's people (join, vote, invite), and the shop
-(D-bucks, a skin bought, worn and sold on):
+game headless on the test range against this server, four times, with real wallets answering: the
+base editor (plan, commit, built in play), the faction's people (join, vote, invite), the shop
+(D-bucks, a skin bought, worn and sold on), and the server killed while a player plans (the game
+shows the base, says there is no live session, and builds on the same base when a server is back):
 
 ```bash
 DSM_APP_HOST_BIN=<...> DSM_ENV_CONFIG=<...> ../Tools/check_base_editor.sh
+```
+
+And the game with a seat taken offline, on a developer's own set: the player builds, the leader seat
+of the next change is stopped, the game goes on showing the base and says building is paused, and
+it builds again when the seat returns:
+
+```bash
+DSM_APP_HOST_BIN=<...> DSM_ENV_CONFIG=<...> DSM_STORAGE_NODE_BIN=<...> ../Tools/check_building_paused.sh
 ```
 
 ## Running it for the game

@@ -22,7 +22,7 @@ import {
   type Member,
 } from "../faction/state.js";
 import { judge } from "../faction/validity.js";
-import { AccountCells } from "../dsm/cells.js";
+import { AccountCells, leaderUnread } from "../dsm/cells.js";
 import { Contributions, type Funding } from "../dsm/contributions.js";
 import { party, publishAuthored, readAuthored, type Party } from "../dsm/routes.js";
 import { Refused } from "./refused.js";
@@ -37,6 +37,10 @@ const PROOF_SETTLE_MS = 2_000;
 
 /** How long a leaver's materials stay committed after they go (spec 3): 48 hours. */
 export const NOTICE_MS = 48 * 60 * 60 * 1000;
+
+/** What a player is told when a change waits on the successor cell's leader seat (spec 11). */
+export const PAUSED =
+  "Building is paused: the storage seat that leads the next change cannot be reached. The base is unchanged; building resumes when the seat returns.";
 
 export interface PublisherOptions {
   /** The publisher's account, through its dsm-app-host's ingress. */
@@ -63,12 +67,29 @@ export interface Assignment {
   founding: Founding;
 }
 
+/** What a player is told at a server that met a change it did not carry (docs/dsm-gaps.md, 1). */
+export const BEHIND =
+  "This server has not read the newest state of the base: a change it did not carry holds the next cell. Nothing can be built through it until it has.";
+
+/** Whether a member can build now, as far as the server's reading of the successor cell goes, and what to tell them if not. */
+export function buildingAt(end: WalkEnd): { open: boolean; message: string } {
+  if (end.at !== "not_established") return { open: true, message: "" };
+  if (end.waits === "leader") return { open: false, message: PAUSED };
+  if (end.waits === "occupant") return { open: false, message: BEHIND };
+  // what the account said stays in the server's own log: it names cells, and is no player's business
+  return { open: false, message: "Building waits: the base's next state is not established yet." };
+}
+
 /** What became of a proposed change. */
 export type Proposed =
   /** It holds the successor cell and was applied. */
   | { taken: true; commitment: string }
-  /** Another change holds the cell, or the wallet did not write. The mirror is at `commitment`. */
-  | { taken: false; why: string; commitment: string };
+  /**
+   * Another change holds the cell, or the wallet did not write. The mirror is at `commitment`.
+   * `paused` when nothing holds the cell because its leader seat could not be reached: the same
+   * change can be asked again once the seat returns (spec 6.7, 11).
+   */
+  | { taken: false; why: string; commitment: string; paused?: true };
 
 /** A structure as the game shows it (spec 7.6, with the owner's ruling that a built structure stands through a withdrawal). */
 export interface Structure {
@@ -293,7 +314,9 @@ export class Publisher {
    * anything is written, and no cell is occupied.
    */
   async propose(factionId: string, connection: Connection, change: Change): Promise<RequestRef> {
-    const { mirror } = await this.follow(factionId);
+    const { mirror, end } = await this.follow(factionId);
+    // A change this server did not carry holds the next cell: a write asked there would count for nothing.
+    if (end.at === "not_established" && end.waits === "occupant") throw new Refused(BEHIND);
     const payload = encodeChange({ factionId, parent: mirror.commitment, change });
     const signerKey = hex(connection.opponent.signingKey);
     const verdict = judge(mirror.state, mirror.commitment, mirror.catalogue, mirror.parcel, signerKey, payload);
@@ -318,6 +341,10 @@ export class Publisher {
     }
     const { mirror } = await this.follow(factionId);
     if (result.fact === "written") return { taken: true, commitment: mirror.commitment };
+    // The account's own reading of the cell, not the wallet's word, says the leader was not read.
+    if (result.state?.step === undefined && leaderUnread(result.detail)) {
+      return { taken: false, paused: true, why: PAUSED, commitment: mirror.commitment };
+    }
     const why =
       result.state?.step !== undefined
         ? "another change holds the cell"

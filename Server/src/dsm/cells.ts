@@ -20,6 +20,15 @@ import type { AskedWrite, Store } from "../publisher/store.js";
 const OPEN = "no recognized write holds the cell";
 
 /**
+ * Whether the account's reading of a cell says its leader seat was not read. No other seat stands
+ * in for a cell's leader, so the cell is undecided until it answers. The account says so only in
+ * the words of its detail (docs/dsm-gaps.md, 1).
+ */
+export function leaderUnread(detail: string): boolean {
+  return detail.includes("LeaderUnread");
+}
+
+/**
  * The server's own key for a cell in its record: the name and the writer
  * set, whatever order the writers are given in. The same name under another
  * writer set is another cell.
@@ -73,6 +82,7 @@ export class AccountCells implements CellReader {
     let heldByAnother = false;
     let open = false;
     let why = "";
+    let leader = false;
     for (const one of asked) {
       const r = await this.result(one);
       if (r.fact === "written") {
@@ -81,14 +91,19 @@ export class AccountCells implements CellReader {
       }
       if (r.state?.step !== undefined) heldByAnother = true;
       else if (r.detail.startsWith(OPEN)) open = true;
-      else why = r.detail || r.reason || `the request is ${r.outcome}`;
+      else {
+        why = r.detail || r.reason || `the request is ${r.outcome}`;
+        if (leaderUnread(r.detail)) leader = true;
+      }
     }
     if (heldByAnother) {
       return {
         cell: "not_established",
+        waits: "occupant",
         why: "a write this server did not ask for holds the cell, final; the publisher's account has no call that reads a cell's occupant",
       };
     }
+    if (leader) return { cell: "not_established", waits: "leader", why };
     if (why !== "") return { cell: "not_established", why };
     return open ? { cell: "open" } : { cell: "not_established", why: "the account established nothing about the cell" };
   }

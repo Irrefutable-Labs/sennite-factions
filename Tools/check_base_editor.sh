@@ -5,9 +5,12 @@
 # from the wallet, and the tower stands in play. Then, in a second run, a player invited by another
 # joins from the game, votes that member out, invites them back and withdraws the invitation. In a
 # third, a player trades ERA for D-bucks through the publisher's vault, buys a skin and wears it,
-# then sells it to another player from their own wallet, and it comes off the hero. The publisher's
+# then sells it to another player from their own wallet, and it comes off the hero. In a fourth,
+# the publisher's server is killed while a player plans: the game goes on showing the base, says
+# there is no live session, and builds on the same base when a server is started again. The publisher's
 # account and every wallet are real dsm-app-host accounts on a storage set; nothing stands in for
-# DSM. Screenshots and logs in Saved/BaseEditor/, Saved/BasePeople/ and Saved/BaseShop/.
+# DSM. Screenshots and logs in Saved/BaseEditor/, Saved/BasePeople/, Saved/BaseShop/ and
+# Saved/BaseSession/.
 #
 # Needs, as the suites on DSM do (Server/README.md):
 #   DSM_APP_HOST_BIN   the dsm-app-host binary

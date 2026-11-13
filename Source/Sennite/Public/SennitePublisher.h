@@ -120,6 +120,8 @@ struct FSenniteBaseView
 	TArray<FSennitePerson> Invited;
 	/** How many changes the faction's state has taken. */
 	int32 Height = 0;
+	/** Why nothing can be built now, in the server's words; empty while building is open. */
+	FString Building;
 	TArray<FSenniteStructureView> Structures;
 };
 
@@ -141,6 +143,12 @@ public:
 
 	/** Whether the server has answered with its world. */
 	bool HasWorld() const { return bWorld; }
+
+	/** Whether the last thing asked of the server reached it. While it does not, there is no live session. */
+	bool Reachable() const { return bReachable; }
+
+	/** How many times a base has been read from the server. */
+	int32 BasesRead = 0;
 
 	int32 Grid = 480;
 	TArray<FString> Resources;
@@ -248,6 +256,7 @@ private:
 
 	FTSTicker::FDelegateHandle TickHandle;
 	bool bWorld = false;
+	bool bReachable = true;
 	bool bWorldAsked = false;
 	bool bPlayerAsked = false;
 	bool bMeAsked = false;

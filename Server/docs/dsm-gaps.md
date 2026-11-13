@@ -32,7 +32,41 @@ it asked there. That is a real reading by the account, taken again every time. I
   gives the step, but not the occupant. The mirror waits there, and nothing the server can call ends
   the wait.
 - "Open", "held but not final" and "could not be read" are told apart only by the words of
-  `fact_detail`.
+  `fact_detail`. That the cell's leader seat was not read (6.7, 11: "the cell waits", building is
+  paused) is the word `LeaderUnread` in it; the server pauses building on that word
+  (`leaderUnread` in `src/dsm/cells.ts`).
+
+**What it means for hosting (9.3, 9.4, 11).** The server's record of the writes it asked is the only
+way it can name a cell's occupant, so:
+
+- *Handoff.* 9.4 says a new host "starts a session from the last Final state". A new server does,
+  but only when it is handed the old server's record. Without it, it reads nothing past R_0.
+- *Two servers at once.* One lineage results, as 6.5 says. But the server whose member lost a cell
+  cannot read the change that won it: it shows the state it held, says it is behind, and refuses to
+  ask for more changes until it is handed the other server's record (`BEHIND` in
+  `src/publisher/publisher.ts`). With a call that reads a cell's occupant it would simply follow.
+- *A server killed between asking a write and recording that it asked.* The request is then in the
+  account and not in the record, and the account has no call that lists the requests it made with
+  what they asked. If that write takes the cell, a server started again meets a change it cannot
+  read, as above. The suites kill the server after the record is written; this window is not shown.
+- *An old or altered record.* A server started on an old record holds a true earlier state and
+  learns that it is behind at its first write. A record whose asked payload was altered would be
+  applied as written: the account compares the cell's occupant with the payload *it* was asked
+  with, and the server cannot fetch that payload or the occupant's bytes back to compare. The record
+  is the publisher's own file, not something a member or a game can offer; nothing takes a snapshot
+  from outside.
+
+- *A server started while a seat is offline.* A running server keeps the base it has read, so the
+  base stays visible through an outage. A server started during one reads each past cell again, and
+  the account's reading of a cell that is already final waits not only on that cell's leader but
+  on the seats its completion names (seen in a run on 13 November 2026: `SeatUnread { position: 1 }`
+  for a final cell while that seat was stopped). By the server's code, such a server shows the base
+  as far as it could read and says building waits until the seat returns; that case was not run.
+
+**Not available, and not shown:** 9.4, "a change that reached the leader but whose chain is
+incomplete can be continued by any party". Nothing on the application account's surface continues
+another writer's chain. From reading DSM's write path, the writing wallet's own write of the same
+bytes, asked again, would continue it; that was not run here.
 
 ## 2. A member's machine reading for itself
 
