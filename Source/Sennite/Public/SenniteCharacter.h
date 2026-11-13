@@ -166,6 +166,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Health")
 	float GetShield();
 
+	/** The building material in use: 0, 1 or 2, weakest first. */
+	int GetCurrentBuildingMaterial() const { return CurrentBuildingMaterial; }
+
 	UFUNCTION(BlueprintPure, Category = "Material")
 	int GetWoodMaterialCount();
 

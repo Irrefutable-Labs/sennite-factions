@@ -46,6 +46,14 @@ Tools/check_building.sh
 
 does the same for building: with the materials a player starts with, the hero previews and builds a wall, a ramp and a floor with X, C, F and the left mouse button, changing material with the right mouse button; each piece lands on the build grid, costs its price once and is solid, and she runs up the ramp she built. Screenshots in `Saved/Building/`.
 
+```bash
+Tools/check_hud.sh
+```
+
+checks that the HUD follows the game: health, shield, materials, players left and kills from the start, the piece's name in build mode, a material count that drops when a piece is built, and the held weapon's rounds, which drop when it is fired. It checks the text the HUD sends to the screen; whether that text is legible is for the eye, in the screenshots in `Saved/Hud/`.
+
+`Tools/check_all.sh` runs all four.
+
 ## State
 
 - `Source/Sennite`: gameplay code (character, building, weapons, healing, storm, lobby, match and menu game modes, HUDs). Listen-server hosting; no hosted matchmaking service.
@@ -55,6 +63,7 @@ does the same for building: with the materials a player starts with, the hero pr
 - Weapons: `ASenniteRifle` and `ASenniteShotgun` (`Source/Sennite/Public/SenniteWeapons.h`), with the M4 and shotgun models of the Fab pack "Low Poly Weapons VOL.1", brought into `Content/Weapons` by `Tools/import_weapons.py`. Each weapon names its mesh, grip point and muzzle in `Config/DefaultGame.ini`; the hero names the bone that holds a weapon, how the hand grips it, the bones of its own built-in weapon (hidden while a game weapon is held) and its firing animation. The guns are plain gunmetal until the pack's `Textures_Guns.png` is downloaded and the import is run again. There is no pickaxe model, and no hero has a two-handed hold or a reload animation.
 - Building: a wall, a ramp and a floor in each of the three materials, with a see-through preview of each (`Source/Sennite/Public/SenniteBuildings.h`). Every piece is a slab one 480 cm build cell across, faced with one panel of the Fab pack "+10 2K PBR SciFi textures 4-FREE" (`Content/Building`, made by `Tools/import_building.py` at 1024 px). Which panel shows each material, and how much damage each takes, is in `Config/DefaultGame.ini` under `[/Script/Sennite.BuildingActor]`. One rule, `ASenniteCharacter::BuildPlacement`, places both the preview and the piece: along the quarter turn the camera faces, a wall on the far edge of the player's cell, a floor or ramp in the next cell, one level up when looking well above the horizon.
 - Materials: there is no pickaxe yet, so nothing can be harvested; `StartingMaterialCount` under `[/Script/Sennite.SenniteGameMode]` gives every player 100 of each to build with.
-- Not made yet: healing items, the storm and the HUD widgets. Their classes are in the code and still need meshes and layouts.
+- HUD: `ASenniteHUD::DrawStatus` draws health and shield, the held weapon's rounds, the three building materials (the one in use marked while building), players left and kills straight onto the canvas, sized to the screen, with no widget assets. The hit marker, blood splash and settings menu still expect widget Blueprints that do not exist.
+- Not made yet: healing items and the storm. Their classes are in the code and still need meshes.
 
 Third-party notices: `ThirdParty/NOTICE.md`.
