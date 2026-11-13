@@ -24,7 +24,7 @@ copies the Fab hero pack the game uses (Paragon: Dekker) into `Content/`; the pa
 "/Users/Shared/Epic Games/UE_5.8/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor" "$PWD/Sennite.uproject" -game -windowed -ResX=1280 -ResY=720
 ```
 
-W A S D to move, Left Shift with W to run, Space to jump, the mouse to look. Walk over a weapon to pick it up; 2 and 3 switch between rifle and shotgun; left mouse button fires. X, C and F preview a wall, a ramp and a floor; left mouse button builds; right mouse button changes material; the same key again leaves build mode.
+W A S D to move, Left Shift with W to run, Space to jump, the mouse to look. Walk over a weapon to pick it up; 2 and 3 switch between rifle and shotgun; left mouse button fires. X, C and F preview a wall, a ramp and a floor; left mouse button builds; right mouse button changes material; the same key again leaves build mode. 4 and 5 hold bandages and potions; left mouse button uses one.
 
 ## Check
 
@@ -58,7 +58,13 @@ Tools/check_storm.sh
 
 checks the storm: the safe circle holds, shrinks by the clock and holds again; the hero takes no damage inside it, loses health every second outside it while the HUD warns her, and stops losing it once back inside. For this run only, the game is started with the storm beginning with one player and running a stage a second. Screenshots in `Saved/Storm/`.
 
-`Tools/check_all.sh` runs all five.
+```bash
+Tools/check_healing.sh
+```
+
+checks healing: the hero picks up bandages and potions, loses health outside the storm's circle, then drinks a potion (20 shield) and uses a bandage (15 health) with the real keys; counts, the item in her hand and the HUD follow. Screenshots in `Saved/Healing/`.
+
+`Tools/check_all.sh` runs all six.
 
 ## State
 
@@ -71,6 +77,6 @@ checks the storm: the safe circle holds, shrinks by the clock and holds again; t
 - Materials: there is no pickaxe yet, so nothing can be harvested; `StartingMaterialCount` under `[/Script/Sennite.SenniteGameMode]` gives every player 100 of each to build with.
 - HUD: `ASenniteHUD::DrawStatus` draws health and shield, the held weapon's rounds, the three building materials (the one in use marked while building), players left and kills straight onto the canvas, sized to the screen, with no widget assets. The hit marker, blood splash and settings menu still expect widget Blueprints that do not exist.
 - Storm: `AStormActor` is a safe circle with a see-through violet wall. A storm placed in a map carries its starting radius and whether its centre is random; `[/Script/Sennite.StormActor]` in `Config/DefaultGame.ini` holds the stage length (30 s; it holds for four stages and shrinks for three), how much of its radius it keeps for each second it shrinks, and how often its damage rises. A player is in the storm when farther from the circle's centre than its radius, and then loses the storm's damage every second. The game mode starts the storm once `PlayersToStartStorm` players (2) are in, after `StormStartDelay` (30 s). The test range has one, centred ahead of the start.
-- Not made yet: healing items. Their class is in the code and still needs meshes.
+- Healing: `ASenniteBandage` (a pack of 5; each gives back 15 health) and `ASennitePotion` (2; each adds 20 shield), in `Source/Sennite/Public/SenniteHealing.h`. Walk over one to pick it up, 4 and 5 bring them to hand, the left mouse button uses one, which takes a little over three seconds. They have no models yet: a plain box and a plain cylinder stand in, named per item class in `Config/DefaultGame.ini`, and there is no animation for using one.
 
 Third-party notices: `ThirdParty/NOTICE.md`.

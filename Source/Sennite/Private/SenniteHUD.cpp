@@ -10,6 +10,7 @@
 #include "SenniteCharacter.h"
 #include "SennitePlayerState.h"
 #include "Engine/Font.h"
+#include "HealingActor.h"
 #include "StormActor.h"
 #include "WeaponActor.h"
 
@@ -46,6 +47,11 @@ FSenniteHudReadout ASenniteHUD::ReadState() const
 		Readout.WeaponType = Weapon->WeaponType;
 		Readout.Clip = Weapon->CurrentBulletCount;
 		Readout.Reserve = State->EquippedWeaponsAmmunition.IsValidIndex(Weapon->WeaponType) ? State->EquippedWeaponsAmmunition[Weapon->WeaponType] : 0;
+	}
+	if (const AHealingActor* Item = Hero->CurrentHealingItem) {
+		Readout.bHoldingItem = true;
+		Readout.ItemType = Item->HealingType;
+		Readout.ItemCount = State->HealingItemCounts.IsValidIndex(Item->HealingType) ? State->HealingItemCounts[Item->HealingType] : 0;
 	}
 	Readout.Kills = State->KillCount;
 	if (const AStormActor* Storm = Hero->CurrentStorm) {
@@ -120,6 +126,15 @@ void ASenniteHUD::DrawStatus()
 			Label(TEXT("ammo"), FString::FromInt(Now.Clip), AmmoX, H - 86.0f * S, 34, White);
 			Label(TEXT("reserve"), FString::FromInt(Now.Reserve), AmmoX + 84.0f * S, H - 66.0f * S, 16, Dim);
 		}
+	}
+
+	// bottom right, in the weapon's place: the healing item in hand and how many are left
+	if (Now.bHoldingItem) {
+		const TCHAR* Names[] = { TEXT("BANDAGE"), TEXT("POTION") };
+		const float ItemX = W - 210.0f * S;
+		DrawRect(Plate, ItemX - 12.0f * S, H - 110.0f * S, 150.0f * S, 86.0f * S);
+		Label(TEXT("item"), Now.ItemType >= 0 && Now.ItemType < 2 ? Names[Now.ItemType] : TEXT("ITEM"), ItemX, H - 104.0f * S, 12, Dim);
+		Label(TEXT("itemcount"), FString::FromInt(Now.ItemCount), ItemX, H - 86.0f * S, 34, White);
 	}
 
 	// right: the three building materials, weakest first, the one in use marked while building

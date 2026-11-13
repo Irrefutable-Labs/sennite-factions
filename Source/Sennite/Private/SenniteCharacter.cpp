@@ -10,6 +10,7 @@
 #include "WeaponActor.h"
 #include "SenniteWeapons.h"
 #include "SenniteBuildings.h"
+#include "SenniteHealing.h"
 #include "Animation/AnimMontage.h"
 #include "EngineUtils.h"
 #include "BuildingActor.h"
@@ -131,6 +132,9 @@ ASenniteCharacter::ASenniteCharacter()
 	WeaponClasses.SetNum(3);
 	WeaponClasses[1] = ASenniteRifle::StaticClass();
 	WeaponClasses[2] = ASenniteShotgun::StaticClass();
+
+	// healing items: 0 the bandage, 1 the potion
+	HealingItemClasses = { ASenniteBandage::StaticClass(), ASennitePotion::StaticClass() };
 
 	// building pieces by material: 0, 1, 2, weakest first
 	WallClasses = { ASenniteWoodWall::StaticClass(), ASenniteStoneWall::StaticClass(), ASenniteSteelWall::StaticClass() };
@@ -1809,6 +1813,9 @@ void ASenniteCharacter::ServerSwitchToHealingItem_Implementation(int HealingItem
 			if (State->CurrentHealingItem == HealingItemType && !State->InBuildMode) {
 				return; // already holding healing items while not in build mode
 			}
+			if (!State->HealingItemCounts.IsValidIndex(HealingItemType) || State->HealingItemCounts[HealingItemType] < 1) {
+				return; // has none of it to hold
+			}
 			else {
 				if (State->InBuildMode) {
 					State->InBuildMode = false;
@@ -2084,30 +2091,21 @@ void ASenniteCharacter::ServerSpawnAndAttachHealingItem_Implementation(int Heali
 		if (State) {
 			CurrentWeaponType = -1;
 			CurrentHealingItemType = HealingItemType;
-			FName HealingItemSocketName = TEXT("hand_left_socket_bandage");
-			FAttachmentTransformRules AttachmentRules(EAttachmentRule::SnapToTarget, EAttachmentRule::KeepRelative, EAttachmentRule::SnapToTarget, true);
-
-			if (CurrentHealingItemType == 1) {
-				HealingItemSocketName = TEXT("hand_left_socket_potion");
-				AttachmentRules = FAttachmentTransformRules(EAttachmentRule::SnapToTarget, EAttachmentRule::KeepRelative, EAttachmentRule::KeepWorld, true);
-			}
-
-			auto HealingItem = Cast<AHealingActor>(UGameplayStatics::BeginDeferredActorSpawnFromClass(this, HealingItemClasses[CurrentHealingItemType], SpawnTransform));
+			auto HealingItem = HealingItemClasses.IsValidIndex(CurrentHealingItemType) && HealingItemClasses[CurrentHealingItemType] != nullptr
+				? Cast<AHealingActor>(UGameplayStatics::BeginDeferredActorSpawnFromClass(this, HealingItemClasses[CurrentHealingItemType], SpawnTransform))
+				: nullptr;
 			if (HealingItem != nullptr)
 			{
 				CurrentHealingItem = HealingItem;
-				//spawnactor has no way of passing parameters so need to use begindeferredactorspawn and finishspawningactor
 				CurrentHealingItem->Holder = this;
 
 				UGameplayStatics::FinishSpawningActor(CurrentHealingItem, SpawnTransform);
-				
-				FVector OldScale = CurrentHealingItem->GetActorScale3D();
-				CurrentHealingItem->SetActorScale3D(FVector(OldScale.X * 0.5, OldScale.Y * 0.5, OldScale.Z * 0.5)); // make the potion specifically smaller to fit hand
 
-				UStaticMeshComponent* HealingItemStaticMeshComponent = Cast<UStaticMeshComponent>(CurrentHealingItem->GetComponentByClass(UStaticMeshComponent::StaticClass()));
-				HealingItemStaticMeshComponent->AttachToComponent(this->GetMesh(), AttachmentRules, HealingItemSocketName);
+				// half its size on the ground, in the palm of the hand the hero names
+				CurrentHealingItem->SetActorScale3D(CurrentHealingItem->GetActorScale3D() * 0.5);
+				CurrentHealingItem->ItemMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules(EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::KeepWorld, true), HeroItemBone);
+				CurrentHealingItem->ItemMesh->SetRelativeLocation(HeroItemPalmOffset);
 
-				//animinstance properties
 				HoldingWeapon = false;
 				AimedIn = false;
 				HoldingWeaponType = 0;

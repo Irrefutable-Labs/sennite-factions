@@ -149,6 +149,10 @@ ppv.set_editor_property("settings", s)
 spawn(unreal.SenniteRifle, "rifle_pickup", unreal.Vector(0, 250, 60), unreal.Rotator(0, 0, 0), "pickups")
 spawn(unreal.SenniteShotgun, "shotgun_pickup", unreal.Vector(0, 450, 60), unreal.Rotator(0, 0, 0), "pickups")
 
+# healing items to pick up, behind the start
+spawn(unreal.SenniteBandage, "bandage_pickup", unreal.Vector(-300, 0, 40), folder="pickups")
+spawn(unreal.SennitePotion, "potion_pickup", unreal.Vector(-500, 0, 40), folder="pickups")
+
 # the storm: its safe circle is centred ahead of the start, so the start is well inside it and its
 # wall crosses the range 2,500 behind the start
 storm = spawn(unreal.StormActor, "storm", unreal.Vector(2500, 0, 0), folder="range")

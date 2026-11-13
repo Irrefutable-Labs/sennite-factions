@@ -101,6 +101,13 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
 	TArray<FName> HeroBuiltInWeaponBones;
 
+	/** The bone a held healing item is fixed to, and where the palm is from it, in the bone's space. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FName HeroItemBone;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	FVector HeroItemPalmOffset;
+
 	/** The hero's own firing animation, played for every shot. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
 	FSoftObjectPath HeroFireMontage;

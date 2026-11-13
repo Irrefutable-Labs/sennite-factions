@@ -26,6 +26,9 @@ struct FSenniteHudReadout
 	int32 Reserve = 0;
 	int32 Kills = 0;
 	int32 Alive = 0;
+	bool bHoldingItem = false;
+	int32 ItemType = -1;
+	int32 ItemCount = 0;
 	bool bInStorm = false;
 	float StormDamage = 0.0f;
 };
