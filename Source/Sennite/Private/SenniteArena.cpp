@@ -51,6 +51,14 @@ namespace
 			const FVector Middle((X0 + X1) * 0.5f, Y, (Z0 + Z1) * 0.5f);
 			Box(Middle - Tilt.RotateVector(FVector::UpVector) * (Thick * 0.5f), FVector(FMath::Sqrt(Run * Run + Rise * Rise), Wide, Thick), Tint, Tilt);
 		}
+		/** A piece of scenery, placed like a block. */
+		void Prop(EArenaScenery Scenery, const FVector& Location, const FRotator& Rotation, const FVector& Scale)
+		{
+			FArenaProp Piece;
+			Piece.Scenery = Scenery;
+			Piece.Transform = FTransform(Connector.Frame.GetRotation() * Rotation.Quaternion(), Connector.Frame.TransformPosition(Location), Scale);
+			Plan.Props.Add(Piece);
+		}
 		/** The next point of the way across. */
 		void Step(const FVector& Point, bool bJump = false, int32 Lane = INDEX_NONE)
 		{
@@ -162,7 +170,8 @@ namespace
 		Step(FVector(Length + 100.0f, FarY, 0.0f));
 	}
 
-	// A winding floor between two rims; a ramp at each end of each rim lets it be held from above.
+	// A winding floor between two cliffs; a ramp at each end of each lets it be held from above.
+	// The cliffs are scenery over hidden blocks: the blocks are the walls and the ground on top.
 	void FBuilder::Canyon()
 	{
 		Slab(-400.0f, Length + 400.0f, -Width * 0.5f, Width * 0.5f, FloorTop, 100.0f, EArenaTint::Rock);
@@ -172,22 +181,38 @@ namespace
 			const float Y = Rim * (Width * 0.5f - 260.0f);
 			Ramp(40.0f, 0.0f, Mouth, RimTop, Y, 420.0f, EArenaTint::Rock);
 			Ramp(Length - Mouth, RimTop, Length - 40.0f, 0.0f, Y, 420.0f, EArenaTint::Rock);
+			// The cliff is 60.6 m long, 23.7 m deep and 17.5 m high as it comes. Here it runs the length of
+			// the rim, from past the outer edge in to the nearest the floor comes, a little higher than
+			// the ground on top; the two sides show different faces of it.
+			const float Inner = 400.0f;
+			const float Outer = Width * 0.5f + 120.0f;
+			Prop(EArenaScenery::Cliff, FVector(Length * 0.5f, Rim * (Inner + Outer) * 0.5f, FloorTop), FRotator(0.0f, Rim > 0.0f ? 180.0f : 0.0f, 0.0f),
+				FVector((Length - 2.0f * Mouth + 500.0f) / 6057.0f, (Outer - Inner) / 2367.0f, (RimTop + 130.0f) / 1718.0f));
 		}
 		Step(FVector(-100.0f, 0.0f, 0.0f));
 		const int32 Reaches = 4;
 		const float Reach = (Length - 2.0f * Mouth) / Reaches;
-		float Middle = R(-300.0f, 300.0f);
-		for (int32 Index = 0; Index < Reaches; ++Index) {
-			// the floor shifts no more from one reach to the next than leaves a way through
-			Middle = FMath::Clamp(Middle + R(-300.0f, 300.0f), -380.0f, 380.0f);
-			const float Half = R(330.0f, 520.0f);
-			const float X0 = Mouth + Index * Reach;
+		float Middle = R(-80.0f, 80.0f);
+		for (int32 Each = 0; Each < Reaches; ++Each) {
+			// the floor shifts a little from one reach to the next, always leaving a way through
+			Middle = FMath::Clamp(Middle + R(-90.0f, 90.0f), -110.0f, 110.0f);
+			const float Half = R(330.0f, 420.0f);
+			const float X0 = Mouth + Each * Reach;
 			const float X1 = X0 + Reach;
-			Slab(X0, X1, -Width * 0.5f, Middle - Half, RimTop, RimTop - FloorTop, EArenaTint::Rock);
-			Slab(X0, X1, Middle + Half, Width * 0.5f, RimTop, RimTop - FloorTop, EArenaTint::Rock);
+			Slab(X0, X1, -Width * 0.5f, Middle - Half, RimTop, RimTop - FloorTop, EArenaTint::Hidden);
+			Slab(X0, X1, Middle + Half, Width * 0.5f, RimTop, RimTop - FloorTop, EArenaTint::Hidden);
 			const float Against = Side();
 			Box(FVector(R(X0 + 150.0f, X1 - 150.0f), Middle + Against * (Half - 110.0f), 80.0f), FVector(R(140.0f, 220.0f), R(140.0f, 200.0f), 160.0f), EArenaTint::Cover);
 			Step(FVector((X0 + X1) * 0.5f, Middle - Against * 90.0f, 0.0f));
+			// rocky ground along the foot of each wall
+			for (const float Wall : { -1.0f, 1.0f }) {
+				Prop(EArenaScenery::RockyGround, FVector(R(X0 + 100.0f, X1 - 100.0f), Middle + Wall * (Half - R(20.0f, 120.0f)), FloorTop), FRotator(0.0f, R(0.0f, 360.0f), 0.0f), FVector(R(1.0f, 1.6f)));
+			}
+		}
+		// and across the two mouths
+		for (int32 Each = 0; Each < 6; ++Each) {
+			const float X = Each < 3 ? R(150.0f, Mouth - 200.0f) : R(Length - Mouth + 200.0f, Length - 150.0f);
+			Prop(EArenaScenery::RockyGround, FVector(X, Side() * R(350.0f, 900.0f), FloorTop), FRotator(0.0f, R(0.0f, 360.0f), 0.0f), FVector(R(1.2f, 2.2f)));
 		}
 		Step(FVector(Length + 100.0f, 0.0f, 0.0f));
 	}
@@ -344,6 +369,11 @@ namespace
 		for (const FArenaCraft& Craft : Plan.Craft) {
 			Mix(Craft.LaneStart);
 			Mix(FVector(Craft.Speed, Craft.Offset, Craft.LaneLength));
+		}
+		for (const FArenaProp& Piece : Plan.Props) {
+			Mix(Piece.Transform.GetLocation());
+			Mix(Piece.Transform.GetScale3D() * 1000.0);
+			Hash = HashCombine(Hash, GetTypeHash(static_cast<uint8>(Piece.Scenery)));
 		}
 		return Hash;
 	}
@@ -517,6 +547,7 @@ void ASenniteArena::Build()
 		FLinearColor(0.30f, 0.25f, 0.14f),   // Bridge
 		FLinearColor(0.08f, 0.13f, 0.09f),   // Cover
 		FLinearColor(0.80f, 0.60f, 0.02f),   // Marking
+		FLinearColor(0.38f, 0.13f, 0.05f),   // Hidden: shown, as rock, only when its scenery is missing
 	};
 	const auto MakeSet = [this](UStaticMesh* Shape, UMaterialInterface* Face) {
 		UInstancedStaticMeshComponent* Set = NewObject<UInstancedStaticMeshComponent>(this);
@@ -539,6 +570,35 @@ void ASenniteArena::Build()
 	for (const FArenaBox& Block : Plan.Boxes) {
 		ByTint[static_cast<int32>(Block.Tint)]->AddInstance(FTransform(Block.Rotation, Block.Centre, Block.Size / 100.0f), true);
 	}
+
+	// The scenery: seen, and nothing else. Blocks marked hidden are the walls and ground inside it;
+	// they stay hidden only if the scenery that covers them is there to be seen.
+	bool bAllScenery = true;
+	TArray<UInstancedStaticMeshComponent*> ByScenery;
+	for (int32 Scenery = 0; Scenery < static_cast<int32>(EArenaScenery::Count); ++Scenery) {
+		UStaticMesh* Mesh = SceneryMeshes.IsValidIndex(Scenery) ? Cast<UStaticMesh>(SceneryMeshes[Scenery].TryLoad()) : nullptr;
+		UInstancedStaticMeshComponent* Set = nullptr;
+		if (Mesh != nullptr) {
+			Set = NewObject<UInstancedStaticMeshComponent>(this);
+			Set->SetStaticMesh(Mesh);
+			Set->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Set->SetCanEverAffectNavigation(false);
+			Set->SetupAttachment(RootComponent);
+			Set->RegisterComponent();
+			BlockSets.Add(Set);
+		}
+		else {
+			bAllScenery = false;
+			UE_LOG(LogTemp, Warning, TEXT("Arena scenery %d did not load; its blocks are shown plain"), Scenery);
+		}
+		ByScenery.Add(Set);
+	}
+	for (const FArenaProp& Piece : Plan.Props) {
+		if (UInstancedStaticMeshComponent* Set = ByScenery[static_cast<int32>(Piece.Scenery)]) {
+			Set->AddInstance(Piece.Transform, true);
+		}
+	}
+	ByTint[static_cast<int32>(EArenaTint::Hidden)]->SetVisibility(!bAllScenery);
 
 	// the bases: round platforms, their tops at the height everything is measured from
 	const float Thick = 200.0f;

@@ -40,7 +40,17 @@ enum class EConnectorKind : uint8
 };
 
 /** What a block is, for its colour. */
-enum class EArenaTint : uint8 { Base, Floating, Boardwalk, Trunk, Rock, Deck, Craft, TunnelRock, Bridge, Cover, Marking, Count };
+enum class EArenaTint : uint8 { Base, Floating, Boardwalk, Trunk, Rock, Deck, Craft, TunnelRock, Bridge, Cover, Marking, Hidden, Count };
+
+/** A piece of scenery: seen, never stood on or bumped into. The blocks under it are what a player meets. */
+enum class EArenaScenery : uint8 { Cliff, RockyGround, Count };
+
+/** One piece of scenery, in the world. */
+struct FArenaProp
+{
+	EArenaScenery Scenery = EArenaScenery::Cliff;
+	FTransform Transform = FTransform::Identity;
+};
 
 /** One block of the arena: a box, in the world. */
 struct FArenaBox
@@ -94,6 +104,7 @@ struct FArenaPlan
 	TArray<FArenaConnector> Connectors;
 	TArray<FArenaBox> Boxes;
 	TArray<FArenaCraft> Craft;
+	TArray<FArenaProp> Props;
 	/** A number that differs when anything in the plan differs. */
 	uint32 Hash = 0;
 
@@ -159,6 +170,10 @@ public:
 
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	FSoftObjectPath BlockMaterial;
+
+	/** The scenery meshes, in the order of EArenaScenery: the cliff, the rocky ground. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	TArray<FSoftObjectPath> SceneryMeshes;
 
 	/** What a craft takes from a player it runs into. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
