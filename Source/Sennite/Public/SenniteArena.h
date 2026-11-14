@@ -200,6 +200,10 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	FSoftObjectPath BaseGround;
 
+	/** What the traffic deck and the bridge spans are drawn with. Empty: their plain tints. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	FSoftObjectPath RoadSurface;
+
 	/** The scenery meshes, in the order of EArenaScenery: the cliff, the rocky ground, the island, six rocks. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	TArray<FSoftObjectPath> SceneryMeshes;

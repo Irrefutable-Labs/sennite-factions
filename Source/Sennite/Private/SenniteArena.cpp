@@ -624,11 +624,17 @@ void ASenniteArena::Build()
 		return;
 	}
 
-	// the ground of a base: its own material when one is set and loads, else the base's plain tint
-	UMaterialInterface* Ground = BaseGround.IsNull() ? nullptr : Cast<UMaterialInterface>(BaseGround.TryLoad());
-	if (!BaseGround.IsNull() && Ground == nullptr) {
-		UE_LOG(LogTemp, Error, TEXT("The ground of a base '%s' did not load; the bases are drawn plain"), *BaseGround.ToString());
-	}
+	// the ground of a base, and the road of a deck or a span: its own material when one is set and
+	// loads, else the plain tint of that sort of block
+	const auto Surface = [](const FSoftObjectPath& Named, const TCHAR* What) -> UMaterialInterface* {
+		UMaterialInterface* Loaded = Named.IsNull() ? nullptr : Cast<UMaterialInterface>(Named.TryLoad());
+		if (!Named.IsNull() && Loaded == nullptr) {
+			UE_LOG(LogTemp, Error, TEXT("%s '%s' did not load; it is drawn plain"), What, *Named.ToString());
+		}
+		return Loaded;
+	};
+	UMaterialInterface* Ground = Surface(BaseGround, TEXT("The ground of a base"));
+	UMaterialInterface* Road = Surface(RoadSurface, TEXT("The road of a deck or a span"));
 
 	// one colour to a sort of block, so each kind of connector reads at a glance
 	const FLinearColor Colours[static_cast<int32>(EArenaTint::Count)] = {
@@ -665,8 +671,15 @@ void ASenniteArena::Build()
 		UMaterialInstanceDynamic* Face = UMaterialInstanceDynamic::Create(Material, this);
 		Face->SetVectorParameterValue(TEXT("Tint"), Colours[Tint]);
 		Tints.Add(Face);
-		// a base's own blocks are its ground too
-		ByTint.Add(MakeSet(Cube, Tint == static_cast<int32>(EArenaTint::Base) && Ground != nullptr ? Ground : static_cast<UMaterialInterface*>(Face)));
+		// a base's own blocks are its ground too; the traffic deck and the bridge spans are road
+		UMaterialInterface* Drawn = Face;
+		if (Tint == static_cast<int32>(EArenaTint::Base) && Ground != nullptr) {
+			Drawn = Ground;
+		}
+		else if ((Tint == static_cast<int32>(EArenaTint::Deck) || Tint == static_cast<int32>(EArenaTint::Bridge)) && Road != nullptr) {
+			Drawn = Road;
+		}
+		ByTint.Add(MakeSet(Cube, Drawn));
 	}
 	for (const FArenaBox& Block : Plan.Boxes) {
 		ByTint[static_cast<int32>(Block.Tint)]->AddInstance(FTransform(Block.Rotation, Block.Centre, Block.Size / 100.0f), true);
