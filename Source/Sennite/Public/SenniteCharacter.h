@@ -115,6 +115,11 @@ public:
 	/** Fix a weapon to the hero's weapon bone, at the weapon's own grip. */
 	void AttachWeaponToHand(AWeaponActor* Weapon);
 
+	/** What this player last told the server about moving and running: -1, 0 or 1 once told. */
+	int32 LastForwardSent = MAX_int32;
+	int32 LastRightSent = MAX_int32;
+	int32 LastRunSent = MAX_int32;
+
 	/** Whether the hero's built-in weapon is hidden right now. */
 	bool bBuiltInWeaponHidden = false;
 
@@ -172,6 +177,15 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Health")
 	float GetShield();
+
+	/** On the server: this character is hit for Damage by Shooter (none for the storm). Shield goes first, then health; with no health left the character dies. */
+	void TakeHit(float Damage, ASenniteCharacter* Shooter);
+
+	/** Falling below the world's floor: on the server the character dies, as from any other cause. */
+	virtual void FellOutOfWorld(const class UDamageType& DamageType) override;
+
+	/** On the server: this character dies. What it holds goes, its player becomes a spectator, and Killer, if there is one, is credited. */
+	void Die(ASenniteCharacter* Killer);
 
 	/** The building material in use: 0, 1 or 2, weakest first. */
 	int GetCurrentBuildingMaterial() const { return CurrentBuildingMaterial; }

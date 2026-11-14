@@ -649,14 +649,19 @@ void ASenniteCharacter::MoveForward(float Value)
 		Animation->RunningY = Value * 90;
 		//Server_SetMovingVariables();
 	}*/
-	if (Value == 0) {
-		ServerResetMovingForward();
-	}
-	else if (Value > 0) {
-		ServerSetMovingForwards();
-	}
-	else {
-		ServerSetMovingBackwards();
+	// the server is told which way only when it changes, not every frame the key is held
+	const int32 Way = Value == 0 ? 0 : (Value > 0 ? 1 : -1);
+	if (Way != LastForwardSent) {
+		LastForwardSent = Way;
+		if (Way == 0) {
+			ServerResetMovingForward();
+		}
+		else if (Way > 0) {
+			ServerSetMovingForwards();
+		}
+		else {
+			ServerSetMovingBackwards();
+		}
 	}
 }
 
@@ -695,14 +700,18 @@ void ASenniteCharacter::MoveRight(float Value)
 		Animation->RunningX = Value * 90;
 		//Server_SetMovingVariables();
 	}*/
-	if (Value == 0) {
-		ServerResetMovingRight();
-	}
-	else if (Value > 0) {
-		ServerSetMovingRight();
-	}
-	else {
-		ServerSetMovingLeft();
+	const int32 Way = Value == 0 ? 0 : (Value > 0 ? 1 : -1);
+	if (Way != LastRightSent) {
+		LastRightSent = Way;
+		if (Way == 0) {
+			ServerResetMovingRight();
+		}
+		else if (Way > 0) {
+			ServerSetMovingRight();
+		}
+		else {
+			ServerSetMovingLeft();
+		}
 	}
 }
 
@@ -718,24 +727,20 @@ void ASenniteCharacter::Sprint(float Value) {
 	bool OnlyAOrDDown = !WDown && !SDown && (ADown || DDown);
 	// The character's own aim state decides this, whichever animation class the hero uses.
 	if (AimedIn) {
-		//ServerSetAimedInSpeed();
+		return;
 	}
-	else if (Value == 0) {
-		//ServerSetWalkingSpeed();
-		ServerSetIsRunningFalse();
-	}
-	else {
-		// can only sprint if the w key is held down by itself or in combination with the a or d keys
-		if (!(OnlyAOrDDown || SDown) && WDown) {
-			//ServerSetRunningSpeed();
+	// can only sprint if the w key is held down by itself or in combination with the a or d keys
+	const bool bWantRun = Value != 0 && !(OnlyAOrDDown || SDown) && WDown;
+	// the server is told only when that changes, not every frame
+	if (static_cast<int32>(bWantRun) != LastRunSent) {
+		LastRunSent = static_cast<int32>(bWantRun);
+		if (bWantRun) {
 			ServerSetIsRunningTrue();
 		}
 		else {
-			//ServerSetWalkingSpeed();
 			ServerSetIsRunningFalse();
 		}
 	}
-	//Server_SetAnimationVariables();
 }
 
 void ASenniteCharacter::StartWalking() {
@@ -1971,28 +1976,71 @@ void ASenniteCharacter::HealingItemTimeOut(int HealingItemType) {
 
 void ASenniteCharacter::ServerApplyStormDamage_Implementation() {
 	if (CurrentStorm != nullptr && InStorm) {
-		//get storm actor and get its damage component and apply the damage to the player's health
+		// the storm takes health directly, past any shield
 		Health -= CurrentStorm->Damage;
 		if (Health <= 0) {
-			if (BuildingPreview != nullptr) {
-				BuildingPreview->Destroy();
-				BuildingPreview = nullptr;
-			}
-			if (CurrentWeapon) {
-				CurrentWeapon->Destroy();
-			}
-			if (CurrentHealingItem) {
-				CurrentHealingItem->Destroy();
-			}
-			if (GetController()) {
-				ASennitePlayerController* SennitePlayerController = Cast<ASennitePlayerController>(GetController());
-				if (SennitePlayerController) {
-					SennitePlayerController->ServerSwitchToSpectatorMode();
-				}
-			}
-			Destroy();
+			Die(nullptr);
 		}
 	}
+}
+
+void ASenniteCharacter::TakeHit(float Damage, ASenniteCharacter* Shooter) {
+	if (!HasAuthority() || Health <= 0 || IsActorBeingDestroyed()) {
+		return;
+	}
+	ClientDrawBloodEffect();
+	if (Shield > 0) {
+		if (Shield - Damage < 0) {
+			Health -= Damage - Shield;
+			Shield = 0;
+		}
+		else {
+			Shield -= Damage;
+		}
+	}
+	else {
+		Health -= Damage;
+	}
+	if (Shooter != nullptr) {
+		Shooter->ClientDrawHitMarker();
+	}
+	if (Health <= 0) {
+		Die(Shooter);
+	}
+}
+
+void ASenniteCharacter::FellOutOfWorld(const UDamageType& DamageType) {
+	if (HasAuthority()) {
+		Die(nullptr);
+	}
+}
+
+void ASenniteCharacter::Die(ASenniteCharacter* Killer) {
+	if (!HasAuthority() || IsActorBeingDestroyed()) {
+		return;
+	}
+	if (BuildingPreview != nullptr) {
+		BuildingPreview->Destroy();
+		BuildingPreview = nullptr;
+	}
+	if (CurrentWeapon != nullptr) {
+		CurrentWeapon->Destroy();
+		CurrentWeapon = nullptr;
+	}
+	if (CurrentHealingItem != nullptr) {
+		CurrentHealingItem->Destroy();
+		CurrentHealingItem = nullptr;
+	}
+	if (Killer != nullptr && Killer != this && Killer->GetController() != nullptr) {
+		if (ASennitePlayerState* KillerState = Cast<ASennitePlayerState>(Killer->GetController()->PlayerState)) {
+			KillerState->KillCount++;
+		}
+	}
+	// the player goes on watching from where they fell
+	if (ASennitePlayerController* SennitePlayerController = Cast<ASennitePlayerController>(GetController())) {
+		SennitePlayerController->BecomeSpectator();
+	}
+	Destroy();
 }
 
 bool ASenniteCharacter::ServerApplyStormDamage_Validate() {
@@ -2240,12 +2288,17 @@ void ASenniteCharacter::ClientGetHealingItemTransform_Implementation(int Healing
 }
 
 void ASenniteCharacter::OnRepSetSkin() {
+	// The same rule as the server's in BeginPlay: a skin is put on only if the list has one at that
+	// place. With no skins listed the hero keeps the materials it ships with.
 	USkeletalMeshComponent* CharacterMesh = GetMesh();
-	if (MaterialOrMaterialInstance == 0) {
+	if (CharacterMesh == nullptr) {
+		return;
+	}
+	if (MaterialOrMaterialInstance == 0 && SkinMaterials.IsValidIndex(CurrentSkin)) {
 		// assign UMaterial
 		CharacterMesh->SetMaterial(0, SkinMaterials[CurrentSkin]);
 	}
-	else {
+	else if (MaterialOrMaterialInstance == 1 && SkinMaterialInstances.IsValidIndex(CurrentSkin)) {
 		// assign UMaterialInstance
 		CharacterMesh->SetMaterial(0, SkinMaterialInstances[CurrentSkin]);
 	}

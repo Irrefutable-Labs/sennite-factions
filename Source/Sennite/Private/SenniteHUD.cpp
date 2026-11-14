@@ -35,6 +35,16 @@ FSenniteHudReadout ASenniteHUD::ReadState() const
 	FSenniteHudReadout Readout;
 	const ASenniteCharacter* Hero = Cast<ASenniteCharacter>(GetOwningPawn());
 	const ASennitePlayerState* State = PlayerOwner ? Cast<ASennitePlayerState>(PlayerOwner->PlayerState) : nullptr;
+	// players left and kills are the same whether the player is alive or watching
+	if (State != nullptr) {
+		Readout.Kills = State->KillCount;
+		Readout.bSpectating = State->IsSpectator();
+	}
+	if (const AGameStateBase* Game = GetWorld()->GetGameState()) {
+		for (const APlayerState* Player : Game->PlayerArray) {
+			Readout.Alive += Player != nullptr && !Player->IsSpectator() ? 1 : 0;
+		}
+	}
 	if (Hero == nullptr || State == nullptr) {
 		return Readout;
 	}
@@ -58,15 +68,9 @@ FSenniteHudReadout ASenniteHUD::ReadState() const
 		Readout.ItemType = Item->HealingType;
 		Readout.ItemCount = State->HealingItemCounts.IsValidIndex(Item->HealingType) ? State->HealingItemCounts[Item->HealingType] : 0;
 	}
-	Readout.Kills = State->KillCount;
 	if (const AStormActor* Storm = Hero->CurrentStorm) {
 		Readout.bInStorm = Hero->InStorm;
 		Readout.StormDamage = Storm->Damage;
-	}
-	if (const AGameStateBase* Game = GetWorld()->GetGameState()) {
-		for (const APlayerState* Player : Game->PlayerArray) {
-			Readout.Alive += Player != nullptr && !Player->IsSpectator() ? 1 : 0;
-		}
 	}
 	return Readout;
 }
@@ -98,16 +102,47 @@ void ASenniteHUD::DrawStatus()
 	Drawing.Reset();
 	LastReadout = ReadState();
 	const FSenniteHudReadout& Now = LastReadout;
-	if (!Now.bValid) {
-		LastDrawn = Drawing;
-		return;
-	}
 	// every size is for a screen 720 lines high and scales with the screen, phone or desktop
 	const float S = Canvas->ClipY / 720.0f;
 	const float W = Canvas->ClipX;
 	const float H = Canvas->ClipY;
 	const FLinearColor White = FLinearColor::White;
 	const FLinearColor Dim(1.0f, 1.0f, 1.0f, 0.7f);
+	const double Clock = GetWorld()->GetTimeSeconds();
+	if (!Now.bValid) {
+		// no hero: a player who has fallen and is watching still sees who is left
+		if (Now.bSpectating) {
+			DrawRect(FLinearColor(0.0f, 0.0f, 0.0f, 0.35f), W * 0.5f - 130.0f * S, 16.0f * S, 260.0f * S, 34.0f * S);
+			Label(TEXT("spectating"), TEXT("SPECTATING"), W * 0.5f - 52.0f * S, 24.0f * S, 14, White);
+			DrawRect(FLinearColor(0.0f, 0.0f, 0.0f, 0.35f), W - 222.0f * S, 16.0f * S, 198.0f * S, 34.0f * S);
+			Label(TEXT("alive"), FString::Printf(TEXT("%d ALIVE"), Now.Alive), W - 210.0f * S, 24.0f * S, 14, White);
+			Label(TEXT("kills"), FString::Printf(TEXT("%d KILLS"), Now.Kills), W - 110.0f * S, 24.0f * S, 14, White);
+		}
+		LastDrawn = Drawing;
+		return;
+	}
+
+	// just hurt: red at the edges of the screen
+	if (Clock < HurtUntil) {
+		const FLinearColor Red(0.6f, 0.0f, 0.0f, 0.35f);
+		const float Edge = 26.0f * S;
+		DrawRect(Red, 0.0f, 0.0f, W, Edge);
+		DrawRect(Red, 0.0f, H - Edge, W, Edge);
+		DrawRect(Red, 0.0f, Edge, Edge, H - 2.0f * Edge);
+		DrawRect(Red, W - Edge, Edge, Edge, H - 2.0f * Edge);
+		Drawing.Add(TEXT("hurt=1"));
+	}
+	// just hit someone: four ticks slanting in toward the aim point
+	if (Clock < HitMarkerUntil) {
+		const float X = W * 0.5f;
+		const float Y = H * 0.5f;
+		const float In = 7.0f * S;
+		const float Out = 16.0f * S;
+		for (const FVector2D& Way : { FVector2D(1, 1), FVector2D(1, -1), FVector2D(-1, 1), FVector2D(-1, -1) }) {
+			DrawLine(X + Way.X * In, Y + Way.Y * In, X + Way.X * Out, Y + Way.Y * Out, White, 2.5f * S);
+		}
+		Drawing.Add(TEXT("hitmarker=1"));
+	}
 
 	const FLinearColor Plate(0.0f, 0.0f, 0.0f, 0.35f);
 
@@ -212,6 +247,8 @@ void ASenniteHUD::DrawCrosshair() {
 }
 
 void ASenniteHUD::DrawHitMarker() {
+	// drawn on the canvas for a quarter of a second (DrawStatus)
+	HitMarkerUntil = GetWorld()->GetTimeSeconds() + 0.25;
 	if (HitMarkerWidgetClass != nullptr)
 	{
 		CurrentWidget = CreateWidget<UUserWidget>(GetWorld(), HitMarkerWidgetClass);
@@ -226,6 +263,8 @@ void ASenniteHUD::DrawHitMarker() {
 }
 
 void ASenniteHUD::DrawBloodSplash() {
+	// drawn on the canvas for a little under half a second (DrawStatus)
+	HurtUntil = GetWorld()->GetTimeSeconds() + 0.4;
 	if (BloodEffectWidgetClass != nullptr) {
 		CurrentWidget = CreateWidget<UUserWidget>(GetWorld(), BloodEffectWidgetClass);
 		if (CurrentWidget)

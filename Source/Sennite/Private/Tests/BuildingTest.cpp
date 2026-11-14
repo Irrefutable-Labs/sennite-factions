@@ -99,7 +99,7 @@ namespace
 		FVector Origin = FVector::ZeroVector;
 		double StartZ = 0.0;
 		double TopZ = 0.0;
-		int32 TurnFrames = 0;
+		GameCheck::FMouseTurn Turn;
 	};
 
 	bool FBuildingRun::Update()
@@ -156,9 +156,7 @@ namespace
 
 		case EPhase::Turn:
 			// a quarter turn to the left with the mouse, to face -Y
-			if (TurnFrames < 20) {
-				++TurnFrames;
-				GameCheck::Mouse(Controller, EKeys::MouseX, -25.7f);
+			if (!Turn.Step(Controller, -90.0)) {
 				return false;
 			}
 			if (Elapsed(World) < 0.6) {
