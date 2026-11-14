@@ -36,7 +36,7 @@ namespace
 	private:
 		enum class EPhase { WaitForPawn, TurnRound, RunOut, Outside, RunBack, Potion, Bandage, Done };
 
-		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; Frames = 0; }
+		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; Turn.Reset(); }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
 		bool Fail(const FString& Why) { Test->AddError(Why); return true; }
 		void Tap(APlayerController* Controller, const FKey& InKey) const
@@ -62,10 +62,12 @@ namespace
 		EPhase Phase = EPhase::WaitForPawn;
 		double PhaseStart = 0.0;
 		int32 Step = 0;
-		int32 Frames = 0;
+		GameCheck::FMouseTurn Turn;
 		float HealthMark = 0.0f;
 		float ShieldMark = 0.0f;
 		int32 CountMark = 0;
+		double NearestBandage = 1.0e9;
+		double NearestPotion = 1.0e9;
 	};
 
 	bool FHealingRun::Update()
@@ -101,9 +103,7 @@ namespace
 		switch (Phase) {
 		case EPhase::TurnRound:
 			// half a turn with the mouse, to face the items and the wall behind her
-			if (Frames < 30) {
-				++Frames;
-				GameCheck::Mouse(Controller, EKeys::MouseX, 34.3f);
+			if (!Turn.Step(Controller, 180.0)) {
 				return false;
 			}
 			if (Elapsed(World) < 0.8) {
@@ -116,6 +116,13 @@ namespace
 			return false;
 
 		case EPhase::RunOut:
+			// how close she passes to each item still on the ground
+			for (TActorIterator<AHealingActor> It(World); It; ++It) {
+				if (It->Holder == nullptr) {
+					double& Nearest = It->HealingType == 0 ? NearestBandage : NearestPotion;
+					Nearest = FMath::Min(Nearest, FVector::Dist2D(It->GetActorLocation(), Hero->GetActorLocation()));
+				}
+			}
 			if (!(Hero->InStorm && FromCentre > Storm->GetRadius() + 150.0)) {
 				return Elapsed(World) > 15.0 ? Fail(TEXT("The hero never left the storm's circle")) : false;
 			}
@@ -131,6 +138,8 @@ namespace
 					Left += It->Holder == nullptr ? 1 : 0;
 				}
 				Test->TestEqual(TEXT("Both pickups are gone from the ground"), Left, 0);
+				UE_LOG(LogHealingCheck, Display, TEXT("GAMECHECK run out: passed within %.0f of the bandages and %.0f of the potions; ended at %s facing %.1f"),
+					NearestBandage, NearestPotion, *Hero->GetActorLocation().ToCompactString(), Controller->GetControlRotation().Yaw);
 			}
 			Enter(EPhase::Outside, World);
 			return false;
@@ -145,9 +154,7 @@ namespace
 			return false;
 
 		case EPhase::RunBack:
-			if (Frames < 30) {
-				++Frames;
-				GameCheck::Mouse(Controller, EKeys::MouseX, 34.3f);
+			if (!Turn.Step(Controller, 180.0)) {
 				return false;
 			}
 			if (Step == 0) {
@@ -234,9 +241,7 @@ namespace
 			if (Elapsed(World) < 0.3) {
 				return false;
 			}
-			if (Frames < 30) {
-				++Frames;
-				GameCheck::Mouse(Controller, EKeys::MouseX, 34.3f);
+			if (!Turn.Step(Controller, 180.0)) {
 				return false;
 			}
 			if (Step == 0 && Elapsed(World) > 1.5) {

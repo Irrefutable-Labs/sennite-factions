@@ -49,7 +49,7 @@ namespace
 		double ShrinkStarted = 0.0;
 		double RadiusAfter = 0.0;
 		float HealthMark = 0.0f;
-		int32 Frames = 0;
+		GameCheck::FMouseTurn Turn;
 	};
 
 	bool FStormRun::Update()
@@ -144,9 +144,7 @@ namespace
 
 		case EPhase::TurnRound:
 			// half a turn with the mouse, to face the wall behind her
-			if (Frames < 30) {
-				++Frames;
-				GameCheck::Mouse(Controller, EKeys::MouseX, 34.3f);
+			if (!Turn.Step(Controller, 180.0)) {
 				return false;
 			}
 			if (Elapsed(World) < 0.8) {
@@ -182,16 +180,14 @@ namespace
 				UE_LOG(LogStormCheck, Display, TEXT("GAMECHECK outside: health %.0f -> %.0f in %.1f s, %.0f beyond the wall"), HealthMark, Hero->Health, Elapsed(World), FromCentre(Hero, Storm) - Radius);
 			}
 			GameCheck::Shot(TEXT("Storm"), TEXT("outside.png"));
-			Frames = 0;
+			Turn.Reset();
 			Enter(EPhase::RunBack, World);
 			return false;
 
 		case EPhase::RunBack:
 			// half a turn again, then a run back through the wall and far enough inside that the
 			// circle, which goes on shrinking in this fast run, does not pass her while she stands
-			if (Frames < 30) {
-				++Frames;
-				GameCheck::Mouse(Controller, EKeys::MouseX, 34.3f);
+			if (!Turn.Step(Controller, 180.0)) {
 				return false;
 			}
 			if (Step == 0) {

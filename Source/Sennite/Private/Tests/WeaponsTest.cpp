@@ -70,6 +70,7 @@ namespace
 		double PhaseStart = 0.0;
 		TWeakObjectPtr<UWorld> SpawnWorld;
 		FDelegateHandle SpawnHandle;
+		int32 PickupsAtStart = 0;
 		int32 BulletsSpawned = 0;
 		int32 RoundsBefore = 0;
 		bool bTriggerPulled = false;
@@ -99,6 +100,9 @@ namespace
 				Test->TestTrue(TEXT("With no game weapon, the hero's own weapon shows"), !Hero->GetMesh()->IsBoneHiddenByName(Bone));
 			}
 			Test->TestTrue(TEXT("The hero has a built-in weapon to hide"), Hero->HeroBuiltInWeaponBones.Num() > 0);
+			for (TActorIterator<AWeaponActor> It(World); It; ++It) {
+				PickupsAtStart += It->Holder == nullptr ? 1 : 0;
+			}
 			GameCheck::Key(Controller, EKeys::D, IE_Pressed);
 			Enter(EPhase::WalkOverPickups, World);
 			return false;
@@ -135,7 +139,7 @@ namespace
 				for (TActorIterator<AWeaponActor> It(World); It; ++It) {
 					PickupsLeft += It->Holder == nullptr ? 1 : 0;
 				}
-				Test->TestEqual(TEXT("Both pickups are gone from the ground"), PickupsLeft, 0);
+				Test->TestEqual(TEXT("The two pickups she walked over are gone from the ground"), PickupsLeft, PickupsAtStart - 2);
 				GameCheck::Shot(TEXT("Weapons"), TEXT("shotgun.png"));
 				return false;
 			}

@@ -10,6 +10,8 @@
 #include "SenniteHUD.h"
 #include "StormActor.h"
 #include "GameFramework/GameState.h"
+#include "GameFramework/PlayerStart.h"
+#include "EngineUtils.h"
 
 DEFINE_LOG_CATEGORY(LogMyServerGame);
 
@@ -106,6 +108,31 @@ void ASenniteGameMode::GenericPlayerInitialization(AController* NewPlayer) {
 		ASennitePlayerController* SennitePlayerController = Cast<ASennitePlayerController>(NewPlayer);
 		SennitePlayerController->SpawnAsSpectator = false; // since we have switched to server travel, everyone joining the game should be a player
 	}
+}
+
+AActor* ASenniteGameMode::ChoosePlayerStart_Implementation(AController* Player) {
+	TArray<APlayerStart*> Starts;
+	for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It) {
+		Starts.Add(*It);
+	}
+	if (Starts.Num() == 0) {
+		return Super::ChoosePlayerStart_Implementation(Player);
+	}
+	Starts.Sort([](const APlayerStart& A, const APlayerStart& B) { return A.GetName() < B.GetName(); });
+	for (APlayerStart* Start : Starts) {
+		bool bTaken = false;
+		for (TActorIterator<APawn> It(GetWorld()); It; ++It) {
+			if (FVector::Dist2D(It->GetActorLocation(), Start->GetActorLocation()) < 150.0) {
+				bTaken = true;
+				break;
+			}
+		}
+		if (!bTaken) {
+			return Start;
+		}
+	}
+	// more players than start points: the first one, and the engine moves the hero clear of whoever is there
+	return Starts[0];
 }
 
 void ASenniteGameMode::NetMulticastSpawnStorm_Implementation() {
