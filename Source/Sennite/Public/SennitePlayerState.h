@@ -59,6 +59,17 @@ public:
 	UPROPERTY(Replicated)
 	int KillCount;
 
+	/** In a match: the faction this player's wallet is a member of, as the publisher's server said. Empty until it has, and outside a match. */
+	UPROPERTY(Replicated)
+	FString FactionId;
+
+	/** In a match: the wallet's DSM identity, as people read it. */
+	UPROPERTY(Replicated)
+	FString Wallet;
+
+	/** On the server: back to what a hero starts with. The weapons, rounds and healing items picked up are gone. */
+	void StartOver();
+
 	UPROPERTY(Replicated)
 	bool JustShotRifle; // used to prevent player from spamming rifle
 

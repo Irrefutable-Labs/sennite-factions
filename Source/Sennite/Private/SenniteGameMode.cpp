@@ -12,6 +12,7 @@
 #include "GameFramework/GameState.h"
 #include "GameFramework/PlayerStart.h"
 #include "SenniteArena.h"
+#include "SenniteMatch.h"
 #include "EngineUtils.h"
 
 DEFINE_LOG_CATEGORY(LogMyServerGame);
@@ -60,7 +61,35 @@ void ASenniteGameMode::PreLogin(const FString& Options, const FString& Address, 
 	Super::PreLogin(Options, Address, UniqueId, ErrorMessage);
 }
 
+void ASenniteGameMode::HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) {
+	if (ASenniteMatch::Find(GetWorld()) != nullptr) {
+		// Until the publisher's server has said who they play for they have no hero: they look down
+		// on the arena from above its middle, the bases to either side.
+		TActorIterator<ASenniteArena> It(GetWorld());
+		const TArray<FVector> Bases = It ? It->GetPlan().Bases : TArray<FVector>();
+		if (NewPlayer != nullptr && Bases.Num() >= 2) {
+			FVector Middle = FVector::ZeroVector;
+			for (const FVector& Base : Bases) {
+				Middle += Base / Bases.Num();
+			}
+			double Reach = 0.0;
+			for (const FVector& Base : Bases) {
+				Reach = FMath::Max(Reach, FVector::Dist2D(Base, Middle) + It->BaseRadius);
+			}
+			const FVector Eye = Middle + FVector(0.0, 0.0, Reach);
+			const FRotator Down(-89.0, (Bases[1] - Bases[0]).Rotation().Yaw - 90.0, 0.0);
+			NewPlayer->SetInitialLocationAndRotation(Eye, Down);
+			NewPlayer->ClientSetLocation(Eye, Down);
+		}
+		return;
+	}
+	Super::HandleStartingNewPlayer_Implementation(NewPlayer);
+}
+
 void ASenniteGameMode::Logout(AController* Exiting) {
+	if (ASenniteMatch* Match = ASenniteMatch::Find(GetWorld())) {
+		Match->Left(Exiting);
+	}
 	Super::Logout(Exiting);
 	if (Exiting != nullptr) {
 		ASennitePlayerController* SennitePlayerController = Cast<ASennitePlayerController>(Exiting);

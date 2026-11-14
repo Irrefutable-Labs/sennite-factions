@@ -11,6 +11,8 @@
 #include "SenniteWeapons.h"
 #include "SenniteBuildings.h"
 #include "SenniteHealing.h"
+#include "SenniteCrate.h"
+#include "SenniteMatch.h"
 #include "Animation/AnimMontage.h"
 #include "EngineUtils.h"
 #include "BuildingActor.h"
@@ -259,6 +261,7 @@ void ASenniteCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerI
 	PlayerInputComponent->BindAction("Ironsights", IE_Pressed, this, &ASenniteCharacter::AimGunIn);
 	PlayerInputComponent->BindAction("Ironsights", IE_Released, this, &ASenniteCharacter::AimGunOut);
 	PlayerInputComponent->BindAction("OpenSettings", IE_Pressed, this, &ASenniteCharacter::OpenSettingsMenu);
+	PlayerInputComponent->BindAction("OpenCrate", IE_Pressed, this, &ASenniteCharacter::OpenCrate);
 
 	// We have 2 versions of the rotation bindings to handle different kinds of devices differently
 	// "turn" handles devices that provide an absolute delta, such as a mouse.
@@ -1009,6 +1012,20 @@ int ASenniteCharacter::GetHealingItemCount(int HealingItemType) {
 	}
 	else {
 		return 0;
+	}
+}
+
+void ASenniteCharacter::OpenCrate() {
+	const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
+	if (ASenniteCrate::Nearest(GetWorld(), GetActorLocation(), Rules->Reach + Rules->Size.GetMax(), true) != nullptr) {
+		ServerOpenCrate();
+	}
+}
+
+void ASenniteCharacter::ServerOpenCrate_Implementation() {
+	const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
+	if (ASenniteCrate* Crate = ASenniteCrate::Nearest(GetWorld(), GetActorLocation(), Rules->Reach + Rules->Size.GetMax(), true)) {
+		Crate->Open(this);
 	}
 }
 
@@ -1988,6 +2005,15 @@ void ASenniteCharacter::TakeHit(float Damage, ASenniteCharacter* Shooter) {
 	if (!HasAuthority() || Health <= 0 || IsActorBeingDestroyed()) {
 		return;
 	}
+	if (Shooter != nullptr) {
+		if (const ASenniteMatch* Match = ASenniteMatch::Find(GetWorld())) {
+			// in a match a shot counts only across factions, and only while the match is being played
+			const ASennitePlayerState* Mine = GetPlayerState<ASennitePlayerState>();
+			if (Mine == nullptr || !Match->Harms(Shooter, Mine->FactionId)) {
+				return;
+			}
+		}
+	}
 	ClientDrawBloodEffect();
 	if (Shield > 0) {
 		if (Shield - Damage < 0) {
@@ -2034,6 +2060,13 @@ void ASenniteCharacter::Die(ASenniteCharacter* Killer) {
 	if (Killer != nullptr && Killer != this && Killer->GetController() != nullptr) {
 		if (ASennitePlayerState* KillerState = Cast<ASennitePlayerState>(Killer->GetController()->PlayerState)) {
 			KillerState->KillCount++;
+		}
+	}
+	// in a match the hero returns on its faction's base, unless its faction is out
+	if (ASenniteMatch* Match = ASenniteMatch::Find(GetWorld())) {
+		if (Match->Fell(this, Killer)) {
+			Destroy();
+			return;
 		}
 	}
 	// the player goes on watching from where they fell

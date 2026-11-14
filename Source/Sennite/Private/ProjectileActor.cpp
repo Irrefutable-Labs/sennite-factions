@@ -109,7 +109,7 @@ void AProjectileActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActo
 	bSpent = true;
 	if (ASenniteStructure* Structure = Cast<ASenniteStructure>(OtherActor)) {
 		// a faction's built structure: in a match it comes down when it has taken enough
-		Structure->TakeHit(Damage);
+		Structure->TakeHit(Damage, Shooter);
 	}
 	if (AMaterialActor* Node = Cast<AMaterialActor>(OtherActor)) {
 		Node->Health -= Damage;

@@ -101,6 +101,11 @@ export class Matches {
     return [...this.record(matchId).factions];
   }
 
+  /** A match's outcome: a faction, `void`, or empty while it is undecided. */
+  outcomeOf(matchId: string): string {
+    return this.record(matchId).outcome;
+  }
+
   /** What every vault of a match commits to: the match, by the id the match server gave it. */
   static external(matchId: string): Uint8Array {
     return new TextEncoder().encode(`sennite/match-prize/v1/${matchId}`);

@@ -9,13 +9,18 @@
 # the publisher's server is killed while a player plans: the game goes on showing the base, says
 # there is no live session, and builds on the same base when a server is started again. In a fifth,
 # the player's faction wins a match: the game says a prize is waiting and where the wallet finds it,
-# and the player collects it in their own wallet. In a sixth (MatchBasesTest.cpp), two games play a
-# match in the arena between two factions: the publisher's match server hosts it and a player joins;
-# each faction's built structures stand on its base of the arena, the same on both machines; the
-# host shoots one down, it is gone for both, and the publisher's server records it. The publisher's
-# account and every wallet are real dsm-app-host accounts on a storage set; nothing stands in for
-# DSM. Screenshots and logs in Saved/BaseEditor/, Saved/BasePeople/, Saved/BaseShop/,
-# Saved/BaseSession/, Saved/BasePrize/ and Saved/MatchBases/.
+# and the player collects it in their own wallet. In a sixth (MatchTest.cpp), a match between two
+# factions is played to its end three times in the arena, each as three games: the publisher's
+# match server, which has no player of its own, and two players' games, each let in by a ticket for
+# the faction its wallet is a member of. Each faction's built structures stand on its base, the
+# same on both machines; a player takes a rifle from a weapon crate. Once the time runs out and
+# nobody wins; once a faction is first to the kills to win, its fallen opponent returning on its own
+# base; once a faction's base is wiped and it is out. The match server tells the publisher's server
+# how each ended. A third game, whose wallet is in neither faction, joins one of them: it is given
+# no ticket and no hero, and is put out. The publisher's account and every wallet are real dsm-app-host accounts on a
+# storage set; nothing stands in for DSM. Screenshots and logs in Saved/BaseEditor/,
+# Saved/BasePeople/, Saved/BaseShop/, Saved/BaseSession/, Saved/BasePrize/ and Saved/Match_Time/,
+# Saved/Match_Kills/, Saved/Match_Wipe/.
 #
 # Needs, as the suites on DSM do (Server/README.md):
 #   DSM_APP_HOST_BIN   the dsm-app-host binary

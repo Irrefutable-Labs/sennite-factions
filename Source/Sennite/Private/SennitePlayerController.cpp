@@ -4,6 +4,7 @@
 #include "SennitePlayerState.h"
 #include "SenniteCharacter.h"
 #include "SenniteSpectator.h"
+#include "SenniteMatch.h"
 #include "Engine/Engine.h"
 #include "Net/UnrealNetwork.h"
 #include "StormActor.h"
@@ -79,6 +80,18 @@ void ASennitePlayerController::BecomeSpectator() {
 	ClientGotoState(NAME_Spectating);
 	Possess(Watcher);
 	PlayerState->SetIsSpectator(true); // has to be set after possessing a pawn
+}
+
+void ASennitePlayerController::ServerEnterMatch_Implementation(const FString& Ticket) {
+	if (ASenniteMatch* Match = ASenniteMatch::Find(GetWorld())) {
+		Match->Enter(this, Ticket.Left(128));
+	}
+}
+
+void ASennitePlayerController::ClientMatchSaid_Implementation(const FString& Said) {
+	if (ASenniteMatch* Match = ASenniteMatch::Find(GetWorld())) {
+		Match->Said = Said;
+	}
 }
 
 void ASennitePlayerController::ServerGetNumPlayers_Implementation() {

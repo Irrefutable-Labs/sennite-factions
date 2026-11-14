@@ -19,6 +19,7 @@
 #include "GameFramework/Actor.h"
 #include "SenniteMatchBases.generated.h"
 
+class ASenniteCharacter;
 class ASenniteStructure;
 struct FSenniteMatchBaseView;
 
@@ -104,8 +105,12 @@ public:
 	/** The structure this machine built for an instance, while it stands. */
 	ASenniteStructure* ActorOf(const FString& InstanceId) const;
 
-	/** A shot landed on a structure. On the match server. */
-	void Hit(const ASenniteStructure* Structure, float Damage);
+	/**
+	 * A shot by Shooter landed on a structure. On the match server. It counts only while the match is
+	 * being played and only from a hero of another faction. When the last structure of a faction's
+	 * base comes down, that faction is out of the match.
+	 */
+	void Hit(const ASenniteStructure* Structure, float Damage, const ASenniteCharacter* Shooter);
 
 	virtual void BeginPlay() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;

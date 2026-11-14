@@ -372,6 +372,13 @@ protected:
 	UFUNCTION()
 	void OpenSettingsMenu();
 
+	/** Open the weapon crate the hero is beside. */
+	UFUNCTION()
+	void OpenCrate();
+
+	UFUNCTION(Server, Reliable)
+	void ServerOpenCrate();
+
 
 	/*UFUNCTION(Server, WithValidation)
 	void ServerSetAnimInstance(UThirdPersonAnimInstance* AnimInstance);*/

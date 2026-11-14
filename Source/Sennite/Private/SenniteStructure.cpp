@@ -46,10 +46,10 @@ void ASenniteStructure::AddPanel(const FVector& Centre, const FVector& Size, UMa
 	Panels.Add(Panel);
 }
 
-void ASenniteStructure::TakeHit(float Damage)
+void ASenniteStructure::TakeHit(float Damage, const ASenniteCharacter* Shooter)
 {
 	if (ASenniteMatchBases* In = Match.Get()) {
-		In->Hit(this, Damage);
+		In->Hit(this, Damage, Shooter);
 	}
 }
 

@@ -21,6 +21,11 @@ namespace
 	/** Where the game keeps its token for the server between runs: it resumes the player's place, nothing more. */
 	FString TokenFile()
 	{
+		// -PublisherPlayerFile= names another: two games on one machine are two players
+		FString Named;
+		if (FParse::Value(FCommandLine::Get(), TEXT("PublisherPlayerFile="), Named) && !Named.IsEmpty()) {
+			return Named;
+		}
 		return FPaths::ProjectSavedDir() / TEXT("Publisher") / TEXT("player.json");
 	}
 
@@ -149,11 +154,52 @@ void USennitePublisher::ReportDestroyed(const FString& InFactionId, const FStrin
 	}, MatchSecret);
 }
 
-void USennitePublisher::Send(const TCHAR* Verb, const FString& Path, const TSharedPtr<FJsonObject>& Body, FAnswer Done, const FString& Bearer)
+void USennitePublisher::AskMatchTicket(const FString& MatchId, TFunction<void(bool, const FString&, const FString&)> Done)
+{
+	Send(TEXT("POST"), FString::Printf(TEXT("/matches/%s/tickets"), *MatchId), MakeShared<FJsonObject>(), [Done = MoveTemp(Done)](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+		FString Ticket;
+		if (Status != 201 || !Json.IsValid() || !Json->TryGetStringField(TEXT("ticket"), Ticket)) {
+			Done(false, ErrorOf(Status, Json), FString());
+			return;
+		}
+		Done(true, FString(), Ticket);
+	});
+}
+
+void USennitePublisher::EnterMatch(const FString& MatchId, const FString& Ticket, TFunction<void(bool, const FString&, const FString&, const FString&)> Done)
+{
+	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("ticket"), Ticket);
+	Send(TEXT("POST"), FString::Printf(TEXT("/matches/%s/entries"), *MatchId), Body, [Done = MoveTemp(Done)](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+		FString InFaction;
+		FString InWallet;
+		if (Status != 200 || !Json.IsValid() || !Json->TryGetStringField(TEXT("factionId"), InFaction) || !Json->TryGetStringField(TEXT("wallet"), InWallet)) {
+			Done(false, ErrorOf(Status, Json), FString(), FString());
+			return;
+		}
+		Done(true, FString(), InFaction, InWallet);
+	}, MatchSecret);
+}
+
+void USennitePublisher::ReportOutcome(const FString& MatchId, const FString& Outcome, TFunction<void(bool, const FString&)> Done)
+{
+	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("outcome"), Outcome);
+	// the publisher's key decides the prize, and the server answers once that is final: it is given time
+	Send(TEXT("POST"), FString::Printf(TEXT("/matches/%s/outcome"), *MatchId), Body, [Done = MoveTemp(Done)](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+		Done(Status == 200, Status == 200 ? FString() : ErrorOf(Status, Json));
+	}, MatchSecret, 300.0f);
+}
+
+void USennitePublisher::Send(const TCHAR* Verb, const FString& Path, const TSharedPtr<FJsonObject>& Body, FAnswer Done, const FString& Bearer, float Patience)
 {
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
 	Request->SetURL(PublisherUrl + Path);
 	Request->SetVerb(Verb);
+	if (Patience > 0.0f) {
+		Request->SetTimeout(Patience);
+		Request->SetActivityTimeout(Patience);
+	}
 	const FString& Carries = Bearer.IsEmpty() ? Token : Bearer;
 	if (!Carries.IsEmpty()) {
 		Request->SetHeader(TEXT("Authorization"), TEXT("Bearer ") + Carries);

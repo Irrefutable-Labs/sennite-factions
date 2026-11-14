@@ -61,6 +61,19 @@ const CODES_A_MINUTE = 10;
 const UNCONNECTED_MS = 60 * 60 * 1000;
 /** How long a base read is served again before it is read anew. */
 const BASE_FRESH_MS = 1000;
+/** How long a ticket into a match is good for. It is good once. */
+const TICKET_MS = 2 * 60 * 1000;
+/** The most tickets kept at once. */
+const MAX_TICKETS = 10_000;
+
+/** A wallet's way into one match: who it is and which of the match's factions it plays for. */
+interface Ticket {
+  matchId: string;
+  factionId: string;
+  signingKey: string;
+  wallet: string;
+  until: number;
+}
 
 async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
@@ -91,6 +104,8 @@ export class Service {
   /** When each address last asked for connect codes. */
   readonly #asked = new Map<string, number[]>();
   readonly #bases = new Map<string, { at: number; base: Awaited<ReturnType<Publisher["base"]>> }>();
+  /** Tickets into matches that no match server has taken yet. Kept in memory: a game asks again. */
+  readonly #tickets = new Map<string, Ticket>();
 
   constructor(private readonly options: ServiceOptions) {}
 
@@ -586,6 +601,37 @@ export class Service {
     if (is("POST", "matches", null, "outcome") && b !== undefined) {
       this.matchServer(req, "decides a match");
       return { status: 200, body: await publisher.matches.decide(b, text((await body(req)).outcome, "outcome")) };
+    }
+
+    // A player's game asks to enter a match. The server says which of the match's factions the
+    // connected wallet is a member of, as a ticket the game hands the match server: good once, for
+    // this match alone. Nothing of the player's place at this server crosses the match's own wire.
+    if (is("POST", "matches", null, "tickets") && b !== undefined) {
+      const connection = await this.connected(this.player(req));
+      const signingKey = hex(connection.opponent.signingKey);
+      if (publisher.matches.outcomeOf(b) !== "") throw new Refused(`match ${b} is over`);
+      let factionId = "";
+      for (const each of publisher.matches.factionsOf(b)) {
+        const { mirror } = await publisher.follow(each);
+        if (mirror.state.members.some((m) => m.signingKey === signingKey)) factionId = each;
+      }
+      if (factionId === "") throw new Refused(`the wallet is a member of no faction of match ${b}`);
+      const now = Date.now();
+      for (const [held, t] of this.#tickets) if (t.until < now) this.#tickets.delete(held);
+      if (this.#tickets.size >= MAX_TICKETS) throw new HttpError(429, "too many players are entering matches: try again in a moment");
+      const ticket = hex(randomBytes(16));
+      this.#tickets.set(ticket, { matchId: b, factionId, signingKey, wallet: connection.peer, until: now + TICKET_MS });
+      return { status: 201, body: { ticket } };
+    }
+
+    // The publisher's match server takes a ticket a joining game handed it: who the player is, and their faction.
+    if (is("POST", "matches", null, "entries") && b !== undefined) {
+      this.matchServer(req, "lets a player into a match");
+      const ticket = text((await body(req)).ticket, "ticket");
+      const held = this.#tickets.get(ticket);
+      if (held === undefined || held.matchId !== b || held.until < Date.now()) throw new Refused("that is no ticket into this match");
+      this.#tickets.delete(ticket);
+      return { status: 200, body: { factionId: held.factionId, wallet: held.wallet, signingKey: held.signingKey } };
     }
 
     // The publisher's match server reads what the match is assembled from: each faction's parcel and built structures (spec 10.3).

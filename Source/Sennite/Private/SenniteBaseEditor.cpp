@@ -22,7 +22,10 @@
 #include "Engine/SkeletalMesh.h"
 #include "SenniteArena.h"
 #include "SenniteCharacter.h"
+#include "SenniteCrate.h"
+#include "SenniteMatch.h"
 #include "SenniteMatchBases.h"
+#include "GameFramework/PlayerStart.h"
 #include "SennitePublisher.h"
 #include "SenniteStructure.h"
 
@@ -1104,10 +1107,24 @@ void USenniteBaseWorld::OnWorldBeginPlay(UWorld& World)
 	const USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
 	// A match is not on the persistent map: there is no base to plan in it. Its factions' bases are
 	// the match server's to set on the arena, when the map's address names the match.
-	if (TActorIterator<ASenniteArena>(&World)) {
-		if (World.GetNetMode() != NM_Client && World.URL.GetOption(TEXT("Match="), nullptr) != nullptr) {
-			World.SpawnActor<ASenniteMatchBases>();
+	if (TActorIterator<ASenniteArena> Arena(&World); Arena) {
+		if (World.GetNetMode() == NM_Client) {
+			return;
 		}
+		if (World.URL.GetOption(TEXT("Match="), nullptr) != nullptr) {
+			// the match first: the bases tell it when they are set
+			World.SpawnActor<ASenniteMatch>();
+			World.SpawnActor<ASenniteMatchBases>();
+			return;
+		}
+		// an arena with no match on it still has its weapon crates, by each base's start
+		TArray<FTransform> Starts;
+		for (const APlayerStart* Start : Arena->GetStarts()) {
+			if (Start != nullptr) {
+				Starts.Add(Start->GetActorTransform());
+			}
+		}
+		ASenniteCrate::Stock(&World, Starts, {});
 		return;
 	}
 	// with no publisher's server set, the game has no faction bases and plays as it did

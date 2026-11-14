@@ -185,6 +185,21 @@ public:
 	/** Tell the publisher's server a battle destroyed a built structure. The match server's to say. */
 	void ReportDestroyed(const FString& InFactionId, const FString& InstanceId, TFunction<void(bool /* bOk */, const FString& /* Said */)> Done);
 
+	/** Whether this game has a place at the server, which a ticket into a match is asked with. */
+	bool HasPlayer() const { return !Token.IsEmpty(); }
+
+	/**
+	 * A ticket into a match one of whose factions this player's wallet is a member of: what the game
+	 * hands the match server, good once. A player's game's to ask.
+	 */
+	void AskMatchTicket(const FString& MatchId, TFunction<void(bool /* bOk */, const FString& /* Said */, const FString& /* Ticket */)> Done);
+
+	/** Whose a ticket is and which of the match's factions they play for. The match server's to ask. */
+	void EnterMatch(const FString& MatchId, const FString& Ticket, TFunction<void(bool /* bOk */, const FString& /* Said */, const FString& /* FactionId */, const FString& /* Wallet */)> Done);
+
+	/** Tell the publisher's server how a match ended: the faction that won, or "void". The match server's to say. */
+	void ReportOutcome(const FString& MatchId, const FString& Outcome, TFunction<void(bool /* bOk */, const FString& /* Said */)> Done);
+
 	/** Whether the server has answered with its world. */
 	bool HasWorld() const { return bWorld; }
 
@@ -286,8 +301,8 @@ private:
 	using FAnswer = TFunction<void(int32 /* Status */, const TSharedPtr<FJsonObject>& /* Json */)>;
 
 	bool Tick(float DeltaTime);
-	/** Bearer, when given, is sent in place of the player's token. */
-	void Send(const TCHAR* Verb, const FString& Path, const TSharedPtr<FJsonObject>& Body, FAnswer Done, const FString& Bearer = FString());
+	/** Bearer, when given, is sent in place of the player's token. Patience, when given, is how many seconds the answer is waited for. */
+	void Send(const TCHAR* Verb, const FString& Path, const TSharedPtr<FJsonObject>& Body, FAnswer Done, const FString& Bearer = FString(), float Patience = 0.0f);
 	/** Send something the wallet has to answer; the server names a request to ask about. */
 	void Ask(const FString& Path, const TSharedPtr<FJsonObject>& Body, const TCHAR* Waiting);
 	void SendChange(const TSharedRef<FJsonObject>& Change);

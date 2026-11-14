@@ -55,6 +55,35 @@ void ASennitePlayerState::GetLifetimeReplicatedProps(TArray< FLifetimeProperty >
 	DOREPLIFETIME(ASennitePlayerState, JustReloadedRifle);
 	DOREPLIFETIME(ASennitePlayerState, JustReloadedShotgun);
 	DOREPLIFETIME(ASennitePlayerState, KillCount);
+	DOREPLIFETIME(ASennitePlayerState, FactionId);
+	DOREPLIFETIME(ASennitePlayerState, Wallet);
+}
+
+void ASennitePlayerState::StartOver() {
+	InBuildMode = false;
+	BuildMode = FString("None");
+	HoldingWeapon = true;
+	HoldingHealingItem = false;
+	AimedIn = false;
+	EquippedWeapons.Reset();
+	EquippedWeapons.Add(0);
+	for (int& Rounds : EquippedWeaponsAmmunition) {
+		Rounds = 0;
+	}
+	for (int& Rounds : EquippedWeaponsClips) {
+		Rounds = 0;
+	}
+	for (int& Count : HealingItemCounts) {
+		Count = 0;
+	}
+	CurrentWeapon = 0;
+	CurrentHealingItem = -1;
+	JustShotRifle = false;
+	JustShotShotgun = false;
+	JustSwungPickaxe = false;
+	JustUsedHealingItem = false;
+	JustReloadedRifle = false;
+	JustReloadedShotgun = false;
 }
 
 void ASennitePlayerState::Tick(float DeltaSeconds) {

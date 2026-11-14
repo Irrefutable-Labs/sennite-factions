@@ -63,6 +63,9 @@ public:
 	/** Health and shield, the held weapon's rounds, the building materials, kills and players left: drawn on the canvas, sized to the screen. */
 	void DrawStatus();
 
+	/** In a match: the time left, each faction's kills and how it ended. Beside a closed weapon crate: how to open it. */
+	void DrawMatch();
+
 	/** The player's state as the HUD shows it. */
 	FSenniteHudReadout ReadState() const;
 

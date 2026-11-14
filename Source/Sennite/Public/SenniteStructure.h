@@ -11,6 +11,7 @@
 #include "GameFramework/Actor.h"
 #include "SenniteStructure.generated.h"
 
+class ASenniteCharacter;
 class ASenniteMatchBases;
 class UStaticMeshComponent;
 
@@ -75,10 +76,10 @@ public:
 	TWeakObjectPtr<ASenniteMatchBases> Match;
 
 	/**
-	 * A shot landed on it. In a match the match server keeps the sum and it comes down for everyone;
-	 * on the persistent map a shot does nothing to it.
+	 * A shot by Shooter landed on it. In a match the match server keeps the sum and it comes down
+	 * for everyone; on the persistent map a shot does nothing to it.
 	 */
-	void TakeHit(float Damage);
+	void TakeHit(float Damage, const ASenniteCharacter* Shooter);
 
 	/** The panels it is made of. */
 	UPROPERTY()

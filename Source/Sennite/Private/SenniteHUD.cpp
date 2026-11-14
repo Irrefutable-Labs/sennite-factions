@@ -9,6 +9,8 @@
 #include "GameFramework/PlayerState.h"
 #include "SenniteBaseEditor.h"
 #include "SenniteCharacter.h"
+#include "SenniteCrate.h"
+#include "SenniteMatch.h"
 #include "SennitePlayerState.h"
 #include "Engine/Font.h"
 #include "HealingActor.h"
@@ -26,6 +28,7 @@ void ASenniteHUD::DrawHUD()
 	if (!ASenniteBaseEditor::IsPlanning(GetWorld())) {
 		DrawCrosshair();
 		DrawStatus();
+		DrawMatch();
 	}
 	ASenniteBaseEditor::DrawOn(this, Canvas);
 }
@@ -207,6 +210,68 @@ void ASenniteHUD::DrawStatus()
 		Label(TEXT("storm"), TEXT("IN THE STORM"), W * 0.5f - 62.0f * S, 24.0f * S, 14, White);
 	}
 
+	LastDrawn = Drawing;
+}
+
+void ASenniteHUD::DrawMatch()
+{
+	const float S = Canvas->ClipY / 720.0f;
+	const float W = Canvas->ClipX;
+	const float H = Canvas->ClipY;
+	const FLinearColor White = FLinearColor::White;
+	const FLinearColor Shade(0.0f, 0.0f, 0.0f, 0.35f);
+	// beside a closed weapon crate: how to open it
+	if (const ASenniteCharacter* Hero = Cast<ASenniteCharacter>(GetOwningPawn())) {
+		const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
+		if (ASenniteCrate::Nearest(GetWorld(), Hero->GetActorLocation(), Rules->Reach + Rules->Size.GetMax(), true) != nullptr) {
+			DrawRect(Shade, W * 0.5f - 110.0f * S, H * 0.62f, 220.0f * S, 34.0f * S);
+			Label(TEXT("crate"), TEXT("E   OPEN THE CRATE"), W * 0.5f - 92.0f * S, H * 0.62f + 8.0f * S, 14, White);
+		}
+	}
+	const ASenniteMatch* Match = ASenniteMatch::Find(GetWorld());
+	if (Match == nullptr) {
+		LastDrawn = Drawing;
+		return;
+	}
+	const ASennitePlayerState* State = PlayerOwner ? Cast<ASennitePlayerState>(PlayerOwner->PlayerState) : nullptr;
+	const FString Mine = State != nullptr ? State->FactionId : FString();
+	const FSenniteMatchFaction* Own = Match->FactionOf(Mine);
+	// the player's own faction first, then the others by the start of their names
+	FString Score = Own != nullptr ? FString::Printf(TEXT("YOUR FACTION %d"), Own->Kills) : FString();
+	for (const FSenniteMatchFaction& Faction : Match->Factions) {
+		if (&Faction != Own) {
+			Score += FString::Printf(TEXT("%s%s %d%s"), Score.IsEmpty() ? TEXT("") : TEXT("    "), *Faction.FactionId.Left(6).ToUpper(), Faction.Kills, Faction.bOut ? TEXT(" OUT") : TEXT(""));
+		}
+	}
+	FString Line;
+	FString Under;
+	if (Match->State == EMatchState::Failed) {
+		Line = TEXT("THIS MATCH CANNOT BE PLAYED");
+		Under = Match->Why;
+	}
+	else if (Mine.IsEmpty()) {
+		Line = TEXT("ENTERING THE MATCH");
+		Under = Match->Said;
+	}
+	else if (Match->State == EMatchState::Waiting) {
+		Line = TEXT("WAITING FOR ANOTHER FACTION'S PLAYERS");
+		Under = Score;
+	}
+	else if (Match->State == EMatchState::Playing) {
+		const int32 Left = FMath::CeilToInt32(Match->SecondsLeft());
+		Line = Match->Length > 0.0f ? FString::Printf(TEXT("%02d:%02d    %s"), Left / 60, Left % 60, *Score) : Score;
+		Under = Own != nullptr && Own->bOut ? FString(TEXT("YOUR BASE IS WIPED. YOUR FACTION IS OUT."))
+			: Match->Target > 0 ? FString::Printf(TEXT("FIRST TO %d KILLS, OR THE LAST BASE STANDING"), Match->Target) : FString(TEXT("THE LAST BASE STANDING"));
+	}
+	else {
+		Line = Match->Outcome == ASenniteMatch::Void() ? TEXT("NOBODY WON") : Match->Outcome == Mine ? TEXT("YOUR FACTION WON") : TEXT("YOUR FACTION LOST");
+		Under = FString::Printf(TEXT("%s    %s"), *Match->Why.ToUpper(), *Score);
+	}
+	DrawRect(Shade, W * 0.5f - 270.0f * S, 58.0f * S, 540.0f * S, Under.IsEmpty() ? 32.0f * S : 54.0f * S);
+	Label(TEXT("match"), Line, W * 0.5f - 258.0f * S, 64.0f * S, 14, White);
+	if (!Under.IsEmpty()) {
+		Label(TEXT("matchnote"), Under, W * 0.5f - 258.0f * S, 88.0f * S, 10, FLinearColor(1.0f, 1.0f, 1.0f, 0.8f));
+	}
 	LastDrawn = Drawing;
 }
 

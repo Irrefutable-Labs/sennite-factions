@@ -40,6 +40,9 @@ public:
 
 	virtual void GenericPlayerInitialization(AController* NewPlayer) override;
 
+	/** In a match a player has no hero until the publisher's server has said which faction they play for. */
+	virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
+
 	/** Players take the map's start points in order: each gets the first, by name, that no hero is standing on. */
 	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 

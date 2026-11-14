@@ -1,6 +1,8 @@
 #include "SenniteMatchBases.h"
 
 #include "SenniteArena.h"
+#include "SenniteCharacter.h"
+#include "SenniteMatch.h"
 #include "SennitePublisher.h"
 #include "SenniteStructure.h"
 #include "Engine/GameInstance.h"
@@ -62,6 +64,9 @@ void ASenniteMatchBases::Fail(const FString& InWhy)
 	Why = InWhy;
 	State = EMatchBasesState::Failed;
 	UE_LOG(LogSenniteMatchBases, Error, TEXT("Match %s has no bases: %s"), *MatchId, *Why);
+	if (ASenniteMatch* Match = ASenniteMatch::Find(GetWorld())) {
+		Match->Fail(Why);
+	}
 }
 
 void ASenniteMatchBases::Ask()
@@ -113,6 +118,11 @@ void ASenniteMatchBases::Place(const TArray<FSenniteMatchBaseView>& Bases)
 			Fail(FString::Printf(TEXT("parcel %s has no boundary"), *View.ParcelId));
 			return;
 		}
+		// an empty parcel does not appear in a match (spec 10.3)
+		if (View.Structures.Num() == 0) {
+			Fail(FString::Printf(TEXT("faction %s has nothing built on parcel %s"), *View.FactionId, *View.ParcelId));
+			return;
+		}
 		// the parcel is set on the base by the middle of what it spans, as it lies on the map: not turned
 		FIntPoint Min = View.Boundary[0];
 		FIntPoint Max = View.Boundary[0];
@@ -145,6 +155,18 @@ void ASenniteMatchBases::Place(const TArray<FSenniteMatchBaseView>& Bases)
 	State = EMatchBasesState::Placed;
 	UE_LOG(LogSenniteMatchBases, Display, TEXT("Match %s: %d structures of %d factions set on the arena"), *MatchId, Structures.Num(), Bases.Num());
 	Sync();
+	if (ASenniteMatch* Match = ASenniteMatch::Find(GetWorld())) {
+		TArray<FString> InOrder;
+		for (const FSenniteMatchBaseView& View : Bases) {
+			InOrder.Add(View.FactionId);
+		}
+		// what each structure takes up of its base: a circle around the ground it covers
+		TArray<TPair<FVector, float>> Built;
+		for (const FSenniteMatchStructure& Entry : Structures) {
+			Built.Emplace(Entry.Location, 0.5f * FMath::Sqrt(static_cast<float>(Entry.Width * Entry.Width + Entry.Depth * Entry.Depth)));
+		}
+		Match->BasesPlaced(InOrder, Built);
+	}
 }
 
 void ASenniteMatchBases::OnRep_Structures()
@@ -187,14 +209,19 @@ void ASenniteMatchBases::Sync()
 	}
 }
 
-void ASenniteMatchBases::Hit(const ASenniteStructure* Structure, float Damage)
+void ASenniteMatchBases::Hit(const ASenniteStructure* Structure, float Damage, const ASenniteCharacter* Shooter)
 {
 	if (!HasAuthority() || Structure == nullptr) {
 		return;
 	}
+	ASenniteMatch* Match = ASenniteMatch::Find(GetWorld());
 	FSenniteMatchStructure* Entry = Structures.FindByPredicate([Structure](const FSenniteMatchStructure& S) { return S.InstanceId == Structure->InstanceId; });
 	float* Left = Health.Find(Structure->InstanceId);
 	if (Entry == nullptr || Left == nullptr || Entry->bDestroyed) {
+		return;
+	}
+	// a shot counts only while the match is being played, and only from a hero of another faction
+	if (Match == nullptr || !Match->Harms(Shooter, Entry->FactionId)) {
 		return;
 	}
 	*Left -= Damage;
@@ -207,6 +234,11 @@ void ASenniteMatchBases::Hit(const ASenniteStructure* Structure, float Damage)
 	const FString InstanceId = Entry->InstanceId;
 	Sync();
 	Report(FactionId, InstanceId, 0);
+	// with nothing of its base left standing, the faction is out of the match
+	const bool bStands = Structures.ContainsByPredicate([&FactionId](const FSenniteMatchStructure& S) { return S.FactionId == FactionId && !S.bDestroyed; });
+	if (!bStands) {
+		Match->BaseWiped(FactionId);
+	}
 }
 
 void ASenniteMatchBases::Report(const FString& FactionId, const FString& InstanceId, int32 Tries)

@@ -67,6 +67,14 @@ public:
 	UPROPERTY(Replicated)
 	bool SpawnAsSpectator;
 
+	/** In a match: this player's game shows the match server the ticket the publisher's server gave it. */
+	UFUNCTION(Server, Reliable)
+	void ServerEnterMatch(const FString& Ticket);
+
+	/** In a match: what the match server says about this player entering; nothing once they are in. */
+	UFUNCTION(Client, Reliable)
+	void ClientMatchSaid(const FString& Said);
+
 	virtual bool IsSupportedForNetworking() const override
 	{
 		return true;
