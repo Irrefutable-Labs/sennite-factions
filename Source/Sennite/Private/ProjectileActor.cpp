@@ -8,6 +8,7 @@
 #include "MaterialActor.h"
 #include "SennitePlayerState.h"
 #include "SenniteHUD.h"
+#include "SenniteStructure.h"
 #include "StormActor.h"
 #include "SennitePlayerController.h"
 #include "GameFramework/ProjectileMovementComponent.h"
@@ -106,6 +107,10 @@ void AProjectileActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActo
 		return;
 	}
 	bSpent = true;
+	if (ASenniteStructure* Structure = Cast<ASenniteStructure>(OtherActor)) {
+		// a faction's built structure: in a match it comes down when it has taken enough
+		Structure->TakeHit(Damage);
+	}
 	if (AMaterialActor* Node = Cast<AMaterialActor>(OtherActor)) {
 		Node->Health -= Damage;
 		if (ProjectileType == 0 && Shooter != nullptr && Shooter->GetController() != nullptr) {

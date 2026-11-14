@@ -96,6 +96,11 @@ export class Matches {
     return found;
   }
 
+  /** The factions of a match the match server opened, in the order it named them. */
+  factionsOf(matchId: string): string[] {
+    return [...this.record(matchId).factions];
+  }
+
   /** What every vault of a match commits to: the match, by the id the match server gave it. */
   static external(matchId: string): Uint8Array {
     return new TextEncoder().encode(`sennite/match-prize/v1/${matchId}`);

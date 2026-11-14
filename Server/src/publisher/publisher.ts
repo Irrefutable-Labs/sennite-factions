@@ -11,7 +11,7 @@ import { canonical, digest, hex, unhex, type Canonical } from "../faction/canoni
 import type { Catalogue } from "../faction/catalogue.js";
 import { encodeChange, type Change } from "../faction/change.js";
 import { Mirror, type WalkEnd } from "../faction/mirror.js";
-import type { Parcel } from "../faction/parcel.js";
+import type { Parcel, Point } from "../faction/parcel.js";
 import {
   checkFounding,
   factionId as factionIdOf,
@@ -108,6 +108,25 @@ export interface Structure {
   /** Whether a battle destroyed it and no member has rebuilt it yet. */
   destroyed: boolean;
   funding: Funding;
+}
+
+/** A faction's base as a match takes it (spec 10.3): its parcel's boundary and what stands in play on it. */
+export interface MatchBase {
+  factionId: string;
+  parcelId: string;
+  /** The parcel's corners, in order, in map units. */
+  boundary: Point[];
+  /** The built structures: a plan, and a structure a battle destroyed, are not in a match. */
+  structures: {
+    instanceId: string;
+    prefabId: string;
+    x: number;
+    y: number;
+    rotation: number;
+    /** The ground the prefab covers before it is turned, from the catalogue. */
+    width: number;
+    depth: number;
+  }[];
 }
 
 export class Publisher {
@@ -566,6 +585,42 @@ export class Publisher {
     });
     if (changed) this.options.store.save();
     return { commitment: mirror.commitment, height: mirror.height, structures };
+  }
+
+  /**
+   * What a match is assembled from (spec 10.3): for each faction of the
+   * match, in the order the match names them, its parcel's boundary and its
+   * built structures, read from that faction's latest state. Where the parcels
+   * are laid and what joins them is the match's own, and no part of this.
+   */
+  async matchBases(matchId: string): Promise<MatchBase[]> {
+    const bases: MatchBase[] = [];
+    for (const factionId of this.matches.factionsOf(matchId)) {
+      const record = this.options.store.faction(factionId);
+      const parcel = this.parcel(record.parcelId);
+      const { structures } = await this.base(factionId);
+      bases.push({
+        factionId,
+        parcelId: parcel.id,
+        boundary: parcel.boundary,
+        structures: structures
+          .filter((s) => s.standing)
+          .map((s) => {
+            const prefab = this.options.catalogue.prefabs.get(s.prefabId);
+            if (prefab === undefined) throw new Error(`placed prefab ${s.prefabId} is not in the catalogue`);
+            return {
+              instanceId: s.instanceId,
+              prefabId: s.prefabId,
+              x: s.x,
+              y: s.y,
+              rotation: s.rotation,
+              width: prefab.footprint.width,
+              depth: prefab.footprint.depth,
+            };
+          }),
+      });
+    }
+    return bases;
   }
 
   /**

@@ -588,6 +588,12 @@ export class Service {
       return { status: 200, body: await publisher.matches.decide(b, text((await body(req)).outcome, "outcome")) };
     }
 
+    // The publisher's match server reads what the match is assembled from: each faction's parcel and built structures (spec 10.3).
+    if (is("GET", "matches", null, "bases") && b !== undefined) {
+      this.matchServer(req, "reads a match's bases");
+      return { status: 200, body: { matchId: b, bases: await publisher.matchBases(b) } };
+    }
+
     if (is("GET", "matches", null) && b !== undefined) {
       this.matchServer(req, "reads a match's prize");
       return { status: 200, body: await publisher.matches.read(b) };

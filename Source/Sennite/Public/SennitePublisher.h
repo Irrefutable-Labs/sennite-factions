@@ -55,6 +55,28 @@ struct FSennitePrize
 	int32 Amount = 0;
 };
 
+/** One built structure of a faction's base, as a match takes it. */
+struct FSenniteMatchStructureView
+{
+	FString InstanceId;
+	FString PrefabId;
+	int32 X = 0;
+	int32 Y = 0;
+	int32 Rotation = 0;
+	/** The ground its prefab covers before it is turned, in map units. */
+	int32 Width = 0;
+	int32 Depth = 0;
+};
+
+/** One faction's base, as a match takes it: its parcel's boundary and what stands in play on it. */
+struct FSenniteMatchBaseView
+{
+	FString FactionId;
+	FString ParcelId;
+	TArray<FIntPoint> Boundary;
+	TArray<FSenniteMatchStructureView> Structures;
+};
+
 /** One parcel of the publisher's registry. */
 struct FSenniteParcel
 {
@@ -150,6 +172,18 @@ public:
 
 	/** Whether a publisher's server is set at all. */
 	bool IsOn() const { return !PublisherUrl.IsEmpty(); }
+
+	/**
+	 * Whether this game is the publisher's match server: it was started with the match server's
+	 * secret (-MatchSecretFile=). A match server is no player's game: it connects no wallet.
+	 */
+	bool IsMatchServer() const { return !MatchSecret.IsEmpty(); }
+
+	/** What a match is assembled from: each of its factions' parcel and built structures. The match server's to ask. */
+	void AskMatchBases(const FString& MatchId, TFunction<void(bool /* bOk */, const FString& /* Said */, const TArray<FSenniteMatchBaseView>&)> Done);
+
+	/** Tell the publisher's server a battle destroyed a built structure. The match server's to say. */
+	void ReportDestroyed(const FString& InFactionId, const FString& InstanceId, TFunction<void(bool /* bOk */, const FString& /* Said */)> Done);
 
 	/** Whether the server has answered with its world. */
 	bool HasWorld() const { return bWorld; }
@@ -252,7 +286,8 @@ private:
 	using FAnswer = TFunction<void(int32 /* Status */, const TSharedPtr<FJsonObject>& /* Json */)>;
 
 	bool Tick(float DeltaTime);
-	void Send(const TCHAR* Verb, const FString& Path, const TSharedPtr<FJsonObject>& Body, FAnswer Done);
+	/** Bearer, when given, is sent in place of the player's token. */
+	void Send(const TCHAR* Verb, const FString& Path, const TSharedPtr<FJsonObject>& Body, FAnswer Done, const FString& Bearer = FString());
 	/** Send something the wallet has to answer; the server names a request to ask about. */
 	void Ask(const FString& Path, const TSharedPtr<FJsonObject>& Body, const TCHAR* Waiting);
 	void SendChange(const TSharedRef<FJsonObject>& Change);
@@ -278,6 +313,8 @@ private:
 	bool bMeAsked = false;
 	/** The game's own token for this player at the server. Never DSM authority. */
 	FString Token;
+	/** The match server's secret, when this game was started with one. */
+	FString MatchSecret;
 	FString PendingRequest;
 	bool bRequestAsked = false;
 	/** The wallet's holdings changed with what was just asked: prove them again once it settles. */

@@ -2,6 +2,8 @@
 # Starts two copies of the game on this machine, neither with a window: one hosts the test range as a
 # listen server, the other joins it over the loopback address. Each runs its half of a check.
 #   Tools/run_two_player_check.sh <test group> <folder under Saved/>
+# The map is the test range, or SENNITE_MAP (a map's address, options and all). SENNITE_HOST_ARGS
+# are more arguments for the hosting game alone.
 # runs <test group>.Host on the host and <test group>.Joiner on the joining player.
 # Logs (host.log, joiner.log) and screenshots land in Saved/<folder>/.
 # Exit status 0 only if both halves ran to their end and passed.
@@ -18,8 +20,8 @@ mkdir -p "$OUT"
 touch "$OUT/.started"
 COMMON=(-game -windowed -ResX=1280 -ResY=720 -RenderOffscreen -unattended -nosplash -nosound -notexturestreaming -stdout -TestExit="Automation Test Queue Empty")
 
-"$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/Sennite.uproject" "/Game/Maps/TestRange?listen" -port=$PORT $COMMON \
-  -ExecCmds="Automation RunTests $GROUP.Host; Quit" > "$OUT/host.log" 2>&1 &
+"$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/Sennite.uproject" "${SENNITE_MAP:-/Game/Maps/TestRange}?listen" -port=$PORT $COMMON \
+  ${=SENNITE_HOST_ARGS} -ExecCmds="Automation RunTests $GROUP.Host; Quit" > "$OUT/host.log" 2>&1 &
 host=$!
 
 # the joining player starts once the host is up and its map is loaded

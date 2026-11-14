@@ -11,6 +11,7 @@
 #include "GameFramework/Actor.h"
 #include "SenniteStructure.generated.h"
 
+class ASenniteMatchBases;
 class UStaticMeshComponent;
 
 /** How one prefab is put together from panels. */
@@ -69,10 +70,23 @@ public:
 	FString PrefabId;
 	bool bStanding = false;
 
+	/** Its instance_id, and the match it stands in, when a match set it on its arena. */
+	FString InstanceId;
+	TWeakObjectPtr<ASenniteMatchBases> Match;
+
+	/**
+	 * A shot landed on it. In a match the match server keeps the sum and it comes down for everyone;
+	 * on the persistent map a shot does nothing to it.
+	 */
+	void TakeHit(float Damage);
+
 	/** The panels it is made of. */
 	UPROPERTY()
 	TArray<UStaticMeshComponent*> Panels;
 
 private:
+	/** How many times it has been put together: a panel's name is never used twice. */
+	int32 Builds = 0;
+
 	void AddPanel(const FVector& Centre, const FVector& Size, class UMaterialInterface* Face);
 };

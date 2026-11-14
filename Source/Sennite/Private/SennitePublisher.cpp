@@ -53,6 +53,15 @@ void USennitePublisher::Initialize(FSubsystemCollectionBase& Collection)
 	if (!IsOn()) {
 		return;
 	}
+	FString SecretFile;
+	if (FParse::Value(FCommandLine::Get(), TEXT("MatchSecretFile="), SecretFile)) {
+		if (FFileHelper::LoadFileToString(MatchSecret, *SecretFile)) {
+			MatchSecret.TrimStartAndEndInline();
+		}
+		if (MatchSecret.IsEmpty()) {
+			UE_LOG(LogSennitePublisher, Error, TEXT("No match server's secret could be read from %s"), *SecretFile);
+		}
+	}
 	// the token of an earlier run, if it was for this server
 	FString Saved;
 	TSharedPtr<FJsonObject> Json;
@@ -83,13 +92,71 @@ const FSenniteParcel* USennitePublisher::FindParcel(const FString& Id) const
 	return Parcels.FindByPredicate([&Id](const FSenniteParcel& P) { return P.Id == Id; });
 }
 
-void USennitePublisher::Send(const TCHAR* Verb, const FString& Path, const TSharedPtr<FJsonObject>& Body, FAnswer Done)
+void USennitePublisher::AskMatchBases(const FString& MatchId, TFunction<void(bool, const FString&, const TArray<FSenniteMatchBaseView>&)> Done)
+{
+	Send(TEXT("GET"), FString::Printf(TEXT("/matches/%s/bases"), *MatchId), nullptr, [Done = MoveTemp(Done)](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+		TArray<FSenniteMatchBaseView> Bases;
+		const TArray<TSharedPtr<FJsonValue>>* Listed = nullptr;
+		if (Status != 200 || !Json.IsValid() || !Json->TryGetArrayField(TEXT("bases"), Listed)) {
+			Done(false, ErrorOf(Status, Json), Bases);
+			return;
+		}
+		for (const TSharedPtr<FJsonValue>& Value : *Listed) {
+			const TSharedPtr<FJsonObject> Entry = Value->AsObject();
+			if (!Entry.IsValid()) {
+				continue;
+			}
+			FSenniteMatchBaseView& Base = Bases.AddDefaulted_GetRef();
+			Base.FactionId = Entry->GetStringField(TEXT("factionId"));
+			Base.ParcelId = Entry->GetStringField(TEXT("parcelId"));
+			const TArray<TSharedPtr<FJsonValue>>* Corners = nullptr;
+			if (Entry->TryGetArrayField(TEXT("boundary"), Corners)) {
+				for (const TSharedPtr<FJsonValue>& Corner : *Corners) {
+					const TArray<TSharedPtr<FJsonValue>>& At = Corner->AsArray();
+					if (At.Num() == 2) {
+						Base.Boundary.Add(FIntPoint(static_cast<int32>(At[0]->AsNumber()), static_cast<int32>(At[1]->AsNumber())));
+					}
+				}
+			}
+			const TArray<TSharedPtr<FJsonValue>>* Built = nullptr;
+			if (Entry->TryGetArrayField(TEXT("structures"), Built)) {
+				for (const TSharedPtr<FJsonValue>& One : *Built) {
+					const TSharedPtr<FJsonObject> Structure = One->AsObject();
+					if (!Structure.IsValid()) {
+						continue;
+					}
+					FSenniteMatchStructureView& View = Base.Structures.AddDefaulted_GetRef();
+					View.InstanceId = Structure->GetStringField(TEXT("instanceId"));
+					View.PrefabId = Structure->GetStringField(TEXT("prefabId"));
+					View.X = Structure->GetIntegerField(TEXT("x"));
+					View.Y = Structure->GetIntegerField(TEXT("y"));
+					View.Rotation = Structure->GetIntegerField(TEXT("rotation"));
+					View.Width = Structure->GetIntegerField(TEXT("width"));
+					View.Depth = Structure->GetIntegerField(TEXT("depth"));
+				}
+			}
+		}
+		Done(true, FString(), Bases);
+	}, MatchSecret);
+}
+
+void USennitePublisher::ReportDestroyed(const FString& InFactionId, const FString& InstanceId, TFunction<void(bool, const FString&)> Done)
+{
+	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("instanceId"), InstanceId);
+	Send(TEXT("POST"), FString::Printf(TEXT("/factions/%s/destroyed"), *InFactionId), Body, [Done = MoveTemp(Done)](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+		Done(Status == 200, Status == 200 ? FString() : ErrorOf(Status, Json));
+	}, MatchSecret);
+}
+
+void USennitePublisher::Send(const TCHAR* Verb, const FString& Path, const TSharedPtr<FJsonObject>& Body, FAnswer Done, const FString& Bearer)
 {
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
 	Request->SetURL(PublisherUrl + Path);
 	Request->SetVerb(Verb);
-	if (!Token.IsEmpty()) {
-		Request->SetHeader(TEXT("Authorization"), TEXT("Bearer ") + Token);
+	const FString& Carries = Bearer.IsEmpty() ? Token : Bearer;
+	if (!Carries.IsEmpty()) {
+		Request->SetHeader(TEXT("Authorization"), TEXT("Bearer ") + Carries);
 	}
 	if (Body.IsValid()) {
 		FString Text;
@@ -117,6 +184,10 @@ void USennitePublisher::Send(const TCHAR* Verb, const FString& Path, const TShar
 
 bool USennitePublisher::Tick(float)
 {
+	// the publisher's match server is no player's game: it has no wallet to connect and no base to plan
+	if (IsMatchServer()) {
+		return true;
+	}
 	const double Now = FPlatformTime::Seconds();
 	if (!bWorld) {
 		if (!bWorldAsked && Now >= NextWorld) {

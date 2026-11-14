@@ -20,7 +20,9 @@
 #include "Materials/MaterialInterface.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "SenniteArena.h"
 #include "SenniteCharacter.h"
+#include "SenniteMatchBases.h"
 #include "SennitePublisher.h"
 #include "SenniteStructure.h"
 
@@ -1100,6 +1102,14 @@ void USenniteBaseWorld::OnWorldBeginPlay(UWorld& World)
 	Super::OnWorldBeginPlay(World);
 	const UGameInstance* Game = World.GetGameInstance();
 	const USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+	// A match is not on the persistent map: there is no base to plan in it. Its factions' bases are
+	// the match server's to set on the arena, when the map's address names the match.
+	if (TActorIterator<ASenniteArena>(&World)) {
+		if (World.GetNetMode() != NM_Client && World.URL.GetOption(TEXT("Match="), nullptr) != nullptr) {
+			World.SpawnActor<ASenniteMatchBases>();
+		}
+		return;
+	}
 	// with no publisher's server set, the game has no faction bases and plays as it did
 	if (Server != nullptr && Server->IsOn()) {
 		World.SpawnActor<ASenniteBaseEditor>();

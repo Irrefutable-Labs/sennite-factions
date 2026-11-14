@@ -1,6 +1,7 @@
 #include "SenniteStructure.h"
 
 #include "BuildingActor.h"
+#include "SenniteMatchBases.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
@@ -16,7 +17,10 @@ ASenniteStructure::ASenniteStructure()
 void ASenniteStructure::AddPanel(const FVector& Centre, const FVector& Size, UMaterialInterface* Face)
 {
 	const ABuildingActor* Pieces = GetDefault<ABuildingActor>();
-	UStaticMeshComponent* Panel = NewObject<UStaticMeshComponent>(this);
+	// In a match every machine builds the same structure, and a player may stand on it: its panels
+	// have the same names on every machine, so the server can say which one a hero stands on.
+	UStaticMeshComponent* Panel = NewObject<UStaticMeshComponent>(this, *FString::Printf(TEXT("Panel_%d_%d"), Builds, Panels.Num()));
+	Panel->SetNetAddressable();
 	Panel->SetupAttachment(RootComponent);
 	Panel->SetCanEverAffectNavigation(false);
 	if (UStaticMesh* Cube = Cast<UStaticMesh>(Pieces->PieceShape.TryLoad())) {
@@ -30,6 +34,8 @@ void ASenniteStructure::AddPanel(const FVector& Centre, const FVector& Size, UMa
 	}
 	if (bStanding) {
 		Panel->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+		// a bullet learns what it landed on from the overlap, as it does with a building piece
+		Panel->SetGenerateOverlapEvents(true);
 	}
 	else {
 		// a plan is seen and nothing else
@@ -40,6 +46,13 @@ void ASenniteStructure::AddPanel(const FVector& Centre, const FVector& Size, UMa
 	Panels.Add(Panel);
 }
 
+void ASenniteStructure::TakeHit(float Damage)
+{
+	if (ASenniteMatchBases* In = Match.Get()) {
+		In->Hit(this, Damage);
+	}
+}
+
 void ASenniteStructure::Build(const FString& InPrefabId, int32 Width, int32 Depth, bool bInStanding)
 {
 	for (UStaticMeshComponent* Panel : Panels) {
@@ -48,6 +61,7 @@ void ASenniteStructure::Build(const FString& InPrefabId, int32 Width, int32 Dept
 		}
 	}
 	Panels.Reset();
+	++Builds;
 	PrefabId = InPrefabId;
 	bStanding = bInStanding;
 

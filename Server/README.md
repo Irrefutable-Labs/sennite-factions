@@ -57,12 +57,15 @@ DSM_APP_HOST_BIN=<...> DSM_ENV_CONFIG=<...> DSM_STORAGE_NODE_BIN=<dsm checkout>/
 Every seat is serving again when they end, whatever happened.
 
 The game itself, with the same two settings and Unreal Engine on this machine. It runs the Unreal
-game headless on the test range against this server, five times, with real wallets answering: the
-base editor (plan, commit, built in play), the faction's people (join, vote, invite), the shop
-(D-bucks, a skin bought, worn and sold on), the server killed while a player plans (the game
+game headless against this server, six times, with real wallets answering. Five are on the test
+range: the base editor (plan, commit, built in play), the faction's people (join, vote, invite), the
+shop (D-bucks, a skin bought, worn and sold on), the server killed while a player plans (the game
 shows the base, says there is no live session, and builds on the same base when a server is back),
 and a match won (the game says a prize is waiting and where the wallet finds it, and the player
-collects it in their own wallet):
+collects it in their own wallet). The sixth is a match in the arena, as two games: the publisher's
+match server hosts it and a player joins; both factions' built structures stand on their bases of
+the arena, the same on both machines; the host shoots one down, it is gone for both, and this
+server records it:
 
 ```bash
 DSM_APP_HOST_BIN=<...> DSM_ENV_CONFIG=<...> ../Tools/check_base_editor.sh
@@ -131,6 +134,25 @@ The publisher's match server opens and decides matches with the secret the serve
 - `GET /matches/<id>` reads the prize, share by share, as DSM holds it.
 
 A player's game reads what its wallet has won and not collected at `GET /players/me/prizes`.
+
+A match is played in an arena assembled for it (spec 10.3), not on the persistent map:
+
+- `GET /matches/<id>/bases` gives the match server what the match is assembled from: for each
+  faction of the match, in the match's order, its parcel's boundary and its built structures, read
+  from that faction's latest state. A plan, and a structure a battle destroyed, are not in it.
+- `POST /factions/<id>/destroyed` with `{"instanceId": ...}` records that a battle destroyed a built
+  structure. It is a plan again, with its funding as it was, until a member rebuilds it.
+
+The game that is the match server is started on the arena with the match on the map's address and
+this server and its secret on the command line:
+
+```bash
+UnrealEditor-Cmd Sennite.uproject "/Game/Maps/Arena?listen?Bases=2?Match=<id>" -game -PublisherUrl=http://127.0.0.1:8790 -MatchSecretFile=<SENNITE_DATA_DIR>/match-secret
+```
+
+It sets each faction's parcel on one base of the arena, in the match's order, and sends where every
+structure stands to every game in the match. `?Bases=` is the number of factions in the match. A
+game that joins needs neither setting.
 
 ## Running it for the game
 

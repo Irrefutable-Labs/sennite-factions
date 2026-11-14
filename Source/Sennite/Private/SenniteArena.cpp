@@ -640,11 +640,15 @@ void ASenniteArena::Build()
 		FLinearColor(0.38f, 0.13f, 0.05f),   // Hidden: shown, as rock, only when its scenery is missing
 	};
 	const auto MakeSet = [this](UStaticMesh* Shape, UMaterialInterface* Face) {
-		UInstancedStaticMeshComponent* Set = NewObject<UInstancedStaticMeshComponent>(this);
+		UInstancedStaticMeshComponent* Set = NewObject<UInstancedStaticMeshComponent>(this, *FString::Printf(TEXT("ArenaBlocks_%d"), BlockSets.Num()));
 		Set->SetStaticMesh(Shape);
 		Set->SetMaterial(0, Face);
 		Set->SetCollisionProfileName(TEXT("BlockAll"));
 		Set->SetCanEverAffectNavigation(false);
+		// A player stands on these. The server tells a joined machine where its hero is by what the
+		// hero stands on, so each machine must be able to name the same set: every machine makes them
+		// in the same order, under the same names.
+		Set->SetNetAddressable();
 		Set->SetupAttachment(RootComponent);
 		Set->RegisterComponent();
 		BlockSets.Add(Set);
