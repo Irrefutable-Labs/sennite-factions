@@ -181,6 +181,9 @@ public:
 	/** On the server: this character is hit for Damage by Shooter (none for the storm). Shield goes first, then health; with no health left the character dies. */
 	void TakeHit(float Damage, ASenniteCharacter* Shooter);
 
+	/** Falling below the world's floor: on the server the character dies, as from any other cause. */
+	virtual void FellOutOfWorld(const class UDamageType& DamageType) override;
+
 	/** On the server: this character dies. What it holds goes, its player becomes a spectator, and Killer, if there is one, is credited. */
 	void Die(ASenniteCharacter* Killer);
 

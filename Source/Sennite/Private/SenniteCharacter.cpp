@@ -2009,6 +2009,12 @@ void ASenniteCharacter::TakeHit(float Damage, ASenniteCharacter* Shooter) {
 	}
 }
 
+void ASenniteCharacter::FellOutOfWorld(const UDamageType& DamageType) {
+	if (HasAuthority()) {
+		Die(nullptr);
+	}
+}
+
 void ASenniteCharacter::Die(ASenniteCharacter* Killer) {
 	if (!HasAuthority() || IsActorBeingDestroyed()) {
 		return;
