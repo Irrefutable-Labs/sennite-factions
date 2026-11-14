@@ -14,6 +14,7 @@
     "test:dsm": "vitest run --config vitest.dsm.config.ts",
     "test:game": "vitest run --config vitest.game.config.ts",
     "test:seats": "vitest run --config vitest.seats.config.ts",
+    "check:formal": "formal/check.sh",
     "start": "node dist/publisher/main.js"
   },
   "dependencies": {

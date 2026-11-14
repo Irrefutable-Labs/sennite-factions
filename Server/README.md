@@ -15,6 +15,7 @@ What is here:
 | `world/` | The publisher's game assets: the prefab catalogue, the parcel registry, what the account issues, the shop (`shop.json`: D-bucks, the vault's opening reserves and fee, the skins and their prices), and what a match pays (`matches.json`). |
 | `vendor/` | DSM's TypeScript client, packed from DSM `main` at `2d109bb58` (`clients/typescript`, `npm pack`). |
 | `docs/dsm-gaps.md` | What the specification needs that DSM's app surface does not offer yet. |
+| `formal/` | Formal models of the lineage and of supply (spec 12.4), in TLA+, and the script that checks them. |
 
 ## Checks
 
@@ -74,6 +75,50 @@ it builds again when the seat returns:
 ```bash
 DSM_APP_HOST_BIN=<...> DSM_ENV_CONFIG=<...> DSM_STORAGE_NODE_BIN=<...> ../Tools/check_building_paused.sh
 ```
+
+## Formal models (spec 12.4)
+
+Spec 12.4 lists four things to show, each with a formal model, before the mechanism is called safe.
+`formal/` has two TLA+ models, checked by TLC, the TLA+ model checker:
+
+```bash
+TLA_TOOLS_JAR=<path>/tla2tools.jar npm run check:formal
+```
+
+It needs Java 11 or later (`JAVA` names one that is not on the path) and `tla2tools.jar` from
+github.com/tlaplus/tlaplus; a DSM checkout has one in `tla/`.
+
+| 12.4 | Model | What TLC checks |
+|---|---|---|
+| At most one successor per faction state | `FactionLineage.tla` | `OneSuccessor`: a cell's occupant, once there, is never another. |
+| Two mirrors that read the same cells hold the same state | `FactionLineage.tla` | `MirrorsAgree`: mirrors at the same cell hold the same state, and one that is behind holds a state the others passed through. `MirrorsHoldTheCells`: a mirror holds only what the cells hold, Final. |
+| No sequence of contribute, withdraw, leave, replace and dismantle creates or destroys a unit | `FactionSupply.tla` | `Conserved`, `NothingSpentTwice`, `ReleasePaysWhomItNames`, `FundingIsInVaults`. |
+| A host, a non-member and a stale writer cause delay and nothing else | both | `OccupantsAreWriters` and `OnlyMembersChangeTheBase` with any key writing anything at any cell; `Built`: with a host that carries nothing, a non-member writing, stale writes arriving and the leader seat lost twice, a member who carries their own change still builds, on every mirror. |
+
+The script makes three kinds of run and prints one line for each:
+
+- **holds**: the properties hold in every state TLC reaches.
+- **red**: one rule is left out of the model, and the property that rule is there for must fail.
+  Eleven rules, one run each (the last arrival holds the cell; a non-member's write is recognized; a
+  mirror takes what the host sends; a vault releases twice; and so on).
+- **reached**: a case the models are about is given to TLC as something that never happens, and
+  TLC must find it happening: a race for a cell, a stale write, a non-member's write, an invalid
+  occupant, a removal by vote, a join, a mirror catching up, a shortfall after a withdrawal.
+
+What the models are, and are not:
+
+- **Taken from DSM, not shown here.** A keyed cell is held by the first recognized write to arrive
+  at its leader, and a seat never alters or loses it; a vault debits its owner, and is released
+  whole, once, to the identity its outcome pays. These are the models' starting rules (`Arrive`,
+  `Contribute`, `Release`). Showing them is DSM's.
+- **Written by hand from the rules.** `Judge`, `Applied` and `Settled` follow `judge`, `applied` and
+  `settled` in `src/faction/validity.ts`; `Walk` follows `Mirror.walk`; `Counts` and `Funded` follow
+  `Contributions.funding`. Nothing checks by machine that the TypeScript and the models agree.
+- **Small.** Two mirrors, up to three members and one more key, one spot on the parcel, three
+  successor cells (`CELLS=4` for four), two vaults of one resource. Placement geometry is one rule:
+  a spot holds one structure.
+- **Not the negative tests on real devices** that 12.4 also asks for. Those are not done: every
+  run of this server so far is on one Mac.
 
 ## Matches
 
