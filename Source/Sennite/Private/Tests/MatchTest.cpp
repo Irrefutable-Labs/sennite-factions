@@ -53,7 +53,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogMatchCheck, Log, All);
 
 namespace
 {
-	ASenniteCharacter* OtherHero(UWorld* World, const ASenniteCharacter* Own)
+	ASenniteCharacter* OtherHeroInMatch(UWorld* World, const ASenniteCharacter* Own)
 	{
 		for (TActorIterator<ASenniteCharacter> It(World); It; ++It) {
 			if (*It != Own && !It->IsActorBeingDestroyed() && It->Health > 0.0f) {
@@ -63,20 +63,20 @@ namespace
 		return nullptr;
 	}
 
-	ASenniteArena* ArenaOf(UWorld* World)
+	ASenniteArena* MatchArena(UWorld* World)
 	{
 		TActorIterator<ASenniteArena> It(World);
 		return It ? *It : nullptr;
 	}
 
-	void Tap(APlayerController* Controller, const FKey& InKey)
+	void TapKey(APlayerController* Controller, const FKey& InKey)
 	{
 		GameCheck::Key(Controller, InKey, IE_Pressed);
 		GameCheck::Key(Controller, InKey, IE_Released);
 	}
 
 	/** Walking to a place with the mouse and the W key. */
-	struct FWalk
+	struct FMatchWalk
 	{
 		bool bForward = false;
 
@@ -101,11 +101,11 @@ namespace
 	};
 
 	/** The hero goes to the nearest closed crate, opens it with the key, and takes the rifle it lays out. */
-	struct FArm
+	struct FMatchArm
 	{
 		int32 Step = 0;
 		double Since = 0.0;
-		FWalk Walk;
+		FMatchWalk Walk;
 		TWeakObjectPtr<ASenniteCrate> Crate;
 		int32 RoundsBefore = 0;
 		/** Why it could not be done; empty while it can. */
@@ -142,7 +142,7 @@ namespace
 				if (Now - Since < 0.3) {
 					return false;
 				}
-				Tap(Controller, EKeys::E);
+				TapKey(Controller, EKeys::E);
 				Next(3);
 				return false;
 			case 3:
@@ -173,7 +173,7 @@ namespace
 				if (Now - Since < 0.5) {
 					return false;
 				}
-				Tap(Controller, EKeys::Two);
+				TapKey(Controller, EKeys::Two);
 				Next(6);
 				return false;
 			default:
@@ -204,7 +204,7 @@ namespace
 		EPhase Phase = EPhase::WaitForPawn;
 		double PhaseStart = 0.0;
 		int32 Step = 0;
-		FArm Arm;
+		FMatchArm Arm;
 	};
 
 	bool FCratesRun::Update()
@@ -216,7 +216,7 @@ namespace
 		APlayerController* Controller = World ? World->GetFirstPlayerController() : nullptr;
 		ASenniteCharacter* Hero = Controller ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
 		ASennitePlayerState* State = Controller ? Cast<ASennitePlayerState>(Controller->PlayerState) : nullptr;
-		ASenniteArena* Arena = ArenaOf(World);
+		ASenniteArena* Arena = MatchArena(World);
 		if (Phase == EPhase::WaitForPawn) {
 			if (Hero == nullptr || State == nullptr || Arena == nullptr || !Arena->IsBuilt() || !Hero->GetCharacterMovement()->IsMovingOnGround()) {
 				return FPlatformTime::Seconds() - RealStart > 90.0 ? Fail(TEXT("No hero on an arena: is this the arena map?")) : false;
@@ -250,7 +250,7 @@ namespace
 			// the key does nothing away from a crate
 			if (Step == 0) {
 				Step = 1;
-				Tap(Controller, EKeys::E);
+				TapKey(Controller, EKeys::E);
 				return false;
 			}
 			if (Elapsed(World) < 1.0) {
@@ -284,7 +284,7 @@ namespace
 					return false;
 				}
 				Step = 1;
-				Tap(Controller, EKeys::LeftMouseButton);
+				TapKey(Controller, EKeys::LeftMouseButton);
 				PhaseStart = World->GetTimeSeconds();
 				return false;
 			}
@@ -300,7 +300,7 @@ namespace
 					return false;
 				}
 				Step = 1;
-				Tap(Controller, EKeys::R);
+				TapKey(Controller, EKeys::R);
 				PhaseStart = World->GetTimeSeconds();
 				return false;
 			}
@@ -369,8 +369,8 @@ namespace
 		EPhase Phase = EPhase::Enter;
 		double PhaseStart = 0.0;
 		int32 Step = 0;
-		FArm Arm;
-		FWalk Walk;
+		FMatchArm Arm;
+		FMatchWalk Walk;
 		GameCheck::FRouteWalker Walker;
 		int32 OwnBase = 0;
 		int32 Shots = 0;
@@ -453,7 +453,7 @@ namespace
 		APlayerController* Controller = World ? World->GetFirstPlayerController() : nullptr;
 		ASenniteCharacter* Hero = Controller ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
 		ASennitePlayerState* State = Controller ? Cast<ASennitePlayerState>(Controller->PlayerState) : nullptr;
-		ASenniteArena* Arena = ArenaOf(World);
+		ASenniteArena* Arena = MatchArena(World);
 		ASenniteMatchBases* Bases = ASenniteMatchBases::Find(World);
 		ASenniteMatch* Match = ASenniteMatch::Find(World);
 
@@ -573,7 +573,7 @@ namespace
 				return Fail(TEXT("The attacker's hero fell on the other base"));
 			}
 			// toward where the other faction's heroes start, until its hero is 20 m off
-			const ASenniteCharacter* Other = OtherHero(World, Hero);
+			const ASenniteCharacter* Other = OtherHeroInMatch(World, Hero);
 			const FVector Their = Other != nullptr ? Other->GetActorLocation() : Arena->GetPlan().Bases[OwnBase == 0 ? 1 : 0];
 			if (FVector::Dist2D(Hero->GetActorLocation(), Their) > 2000.0) {
 				Walk.Toward(Controller, Hero, Their);
@@ -596,12 +596,12 @@ namespace
 			}
 			// walking over the shotgun the crate laid out puts it in hand: the rifle is the one that reaches
 			if (Hero->CurrentWeapon->WeaponType != 1) {
-				Tap(Controller, EKeys::Two);
+				TapKey(Controller, EKeys::Two);
 				NextShot = World->GetTimeSeconds() + 1.0;
 				return false;
 			}
 			if (Hero->CurrentWeapon->CurrentBulletCount <= 0) {
-				Tap(Controller, EKeys::R);
+				TapKey(Controller, EKeys::R);
 				NextShot = World->GetTimeSeconds() + 2.8;
 				return false;
 			}
@@ -617,7 +617,7 @@ namespace
 			}
 			else {
 				// the other faction's hero, when it is there: it is gone for a while each time it falls
-				const ASenniteCharacter* Other = OtherHero(World, Hero);
+				const ASenniteCharacter* Other = OtherHeroInMatch(World, Hero);
 				if (Other == nullptr || !Other->GetCharacterMovement()->IsMovingOnGround()) {
 					return false;
 				}
@@ -632,7 +632,7 @@ namespace
 				NextShot = World->GetTimeSeconds() + 0.5;
 				return false;
 			}
-			Tap(Controller, EKeys::LeftMouseButton);
+			TapKey(Controller, EKeys::LeftMouseButton);
 			++Shots;
 			NextShot = World->GetTimeSeconds() + 0.4;
 			return false;

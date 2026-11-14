@@ -196,6 +196,10 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	FSoftObjectPath BlockMaterial;
 
+	/** What the ground of a base is drawn with. Empty: the plain tint a base's blocks have. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	FSoftObjectPath BaseGround;
+
 	/** The scenery meshes, in the order of EArenaScenery: the cliff, the rocky ground, the island, six rocks. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	TArray<FSoftObjectPath> SceneryMeshes;

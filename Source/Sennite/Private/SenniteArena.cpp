@@ -624,6 +624,12 @@ void ASenniteArena::Build()
 		return;
 	}
 
+	// the ground of a base: its own material when one is set and loads, else the base's plain tint
+	UMaterialInterface* Ground = BaseGround.IsNull() ? nullptr : Cast<UMaterialInterface>(BaseGround.TryLoad());
+	if (!BaseGround.IsNull() && Ground == nullptr) {
+		UE_LOG(LogTemp, Error, TEXT("The ground of a base '%s' did not load; the bases are drawn plain"), *BaseGround.ToString());
+	}
+
 	// one colour to a sort of block, so each kind of connector reads at a glance
 	const FLinearColor Colours[static_cast<int32>(EArenaTint::Count)] = {
 		FLinearColor(0.20f, 0.21f, 0.23f),   // Base
@@ -659,7 +665,8 @@ void ASenniteArena::Build()
 		UMaterialInstanceDynamic* Face = UMaterialInstanceDynamic::Create(Material, this);
 		Face->SetVectorParameterValue(TEXT("Tint"), Colours[Tint]);
 		Tints.Add(Face);
-		ByTint.Add(MakeSet(Cube, Face));
+		// a base's own blocks are its ground too
+		ByTint.Add(MakeSet(Cube, Tint == static_cast<int32>(EArenaTint::Base) && Ground != nullptr ? Ground : static_cast<UMaterialInterface*>(Face)));
 	}
 	for (const FArenaBox& Block : Plan.Boxes) {
 		ByTint[static_cast<int32>(Block.Tint)]->AddInstance(FTransform(Block.Rotation, Block.Centre, Block.Size / 100.0f), true);
@@ -713,7 +720,7 @@ void ASenniteArena::Build()
 
 	// the bases: round platforms, their tops at the height everything is measured from
 	const float Thick = 200.0f;
-	UInstancedStaticMeshComponent* Discs = MakeSet(Disc, Tints[static_cast<int32>(EArenaTint::Base)]);
+	UInstancedStaticMeshComponent* Discs = MakeSet(Disc, Ground != nullptr ? Ground : static_cast<UMaterialInterface*>(Tints[static_cast<int32>(EArenaTint::Base)]));
 	for (const FVector& Base : Plan.Bases) {
 		Discs->AddInstance(FTransform(FQuat::Identity, Base - FVector(0.0f, 0.0f, Thick * 0.5f), FVector(BaseRadius / 50.0f, BaseRadius / 50.0f, Thick / 100.0f)), true);
 	}
