@@ -466,6 +466,8 @@ FArenaSizes ASenniteArena::Sizes()
 	Out.BaseRadius = Settings->BaseRadius;
 	Out.ConnectorLength = Settings->ConnectorLength;
 	Out.ConnectorWidth = Settings->ConnectorWidth;
+	Out.TreesPerBase = Settings->TreesPerBase;
+	Out.BushesPerBase = Settings->BushesPerBase;
 	return Out;
 }
 
@@ -544,6 +546,76 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 		Home.Point = Plan.Bases[Connector.ToBase] - Along * (BaseRadius * 0.5f);
 		Connector.Route.Add(Home);
 	}
+	// Trees and bushes round the rim of each base, clear of every way out of it. They come from a
+	// stream of their own, so everything else of the arena is what its seed made before there were
+	// any. A tree is scenery over a trunk block, which is what a hero or a shot meets; the block is
+	// seen only if the tree is missing. A bush is scenery alone.
+	FRandomStream Green(Seed ^ 0x47524E);
+	const int32 TreeKinds = static_cast<int32>(EArenaScenery::BushA) - static_cast<int32>(EArenaScenery::TreeA);
+	const int32 BushKinds = static_cast<int32>(EArenaScenery::Count) - static_cast<int32>(EArenaScenery::BushA);
+	for (int32 Base = 0; Base < Bases; ++Base) {
+		// the ways out: toward each base this one is joined to
+		TArray<FVector> Ways;
+		for (const FArenaConnector& Connector : Plan.Connectors) {
+			if (Connector.FromBase == Base || Connector.ToBase == Base) {
+				Ways.Add((Plan.Bases[Connector.FromBase == Base ? Connector.ToBase : Connector.FromBase] - Plan.Bases[Base]).GetSafeNormal2D());
+			}
+		}
+		// clear of a way out: not in the strip, a connector wide and Margin more each side, that runs out along it
+		const auto Clear = [&Plan, &Ways, Base, ConnectorWidth](const FVector& At, float Margin) {
+			const FVector Out = At - Plan.Bases[Base];
+			for (const FVector& Way : Ways) {
+				if (FVector::DotProduct(Out, Way) > 0.0 && FMath::Abs(FVector::CrossProduct(Way, Out).Z) < ConnectorWidth * 0.5f + Margin) {
+					return false;
+				}
+			}
+			return true;
+		};
+		const auto Somewhere = [&Plan, &Green, Base, BaseRadius](float Near, float Far) {
+			const float Turned = Green.FRandRange(0.0f, 360.0f);
+			return Plan.Bases[Base] + FRotator(0.0f, Turned, 0.0f).RotateVector(FVector(BaseRadius * Green.FRandRange(Near, Far), 0.0f, 0.0f));
+		};
+		TArray<FVector> Trunks;
+		for (int32 Tree = 0; Tree < Size.TreesPerBase; ++Tree) {
+			for (int32 Try = 0; Try < 12; ++Try) {
+				const FVector At = Somewhere(0.80f, 0.94f);
+				if (!Clear(At, 600.0f) || Trunks.ContainsByPredicate([&At](const FVector& Other) { return FVector::Dist2D(At, Other) < 900.0f; })) {
+					continue;
+				}
+				const FRotator Turned(0.0f, Green.FRandRange(0.0f, 360.0f), 0.0f);
+				const float Grown = Green.FRandRange(0.8f, 1.2f);
+				FArenaProp Piece;
+				Piece.Scenery = static_cast<EArenaScenery>(static_cast<int32>(EArenaScenery::TreeA) + Green.RandRange(0, TreeKinds - 1));
+				Piece.Transform = FTransform(Turned, At, FVector(Grown));
+				Plan.Props.Add(Piece);
+				FArenaBox Trunk;
+				Trunk.Size = FVector(60.0f, 60.0f, 300.0f) * Grown;
+				Trunk.Centre = At + FVector(0.0f, 0.0f, Trunk.Size.Z * 0.5f);
+				Trunk.Rotation = Turned.Quaternion();
+				Trunk.Tint = EArenaTint::Hidden;
+				Plan.Boxes.Add(Trunk);
+				Trunks.Add(At);
+				break;
+			}
+		}
+		for (int32 Bush = 0; Bush < Size.BushesPerBase; ++Bush) {
+			for (int32 Try = 0; Try < 6; ++Try) {
+				const FVector At = Somewhere(0.70f, 0.97f);
+				if (!Clear(At, 200.0f) || Trunks.ContainsByPredicate([&At](const FVector& Other) { return FVector::Dist2D(At, Other) < 250.0f; })) {
+					continue;
+				}
+				FArenaProp Piece;
+				Piece.Scenery = static_cast<EArenaScenery>(static_cast<int32>(EArenaScenery::BushA) + Green.RandRange(0, BushKinds - 1));
+				// drawn one at a time, in this order: inside one call the order would be the compiler's to choose
+				const float Turned = Green.FRandRange(0.0f, 360.0f);
+				const float Grown = Green.FRandRange(0.8f, 1.4f);
+				Piece.Transform = FTransform(FRotator(0.0f, Turned, 0.0f), At, FVector(Grown));
+				Plan.Props.Add(Piece);
+				break;
+			}
+		}
+	}
+
 	Plan.Hash = HashOf(Plan);
 	return Plan;
 }
@@ -685,6 +757,15 @@ void ASenniteArena::Build()
 		ByTint[static_cast<int32>(Block.Tint)]->AddInstance(FTransform(Block.Rotation, Block.Centre, Block.Size / 100.0f), true);
 	}
 
+	// The bases: round platforms, their tops at the height everything is measured from. Made before
+	// the scenery's sets, so the name a machine gives this set, which heroes stand on, does not hang
+	// on how many pieces of scenery it could load.
+	const float Thick = 200.0f;
+	UInstancedStaticMeshComponent* Discs = MakeSet(Disc, Ground != nullptr ? Ground : static_cast<UMaterialInterface*>(Tints[static_cast<int32>(EArenaTint::Base)]));
+	for (const FVector& Base : Plan.Bases) {
+		Discs->AddInstance(FTransform(FQuat::Identity, Base - FVector(0.0f, 0.0f, Thick * 0.5f), FVector(BaseRadius / 50.0f, BaseRadius / 50.0f, Thick / 100.0f)), true);
+	}
+
 	// The scenery: seen, and nothing else. Blocks marked hidden are the walls and ground inside it;
 	// they stay hidden only if the scenery that covers them is there to be seen.
 	bool bAllScenery = true;
@@ -753,13 +834,6 @@ void ASenniteArena::Build()
 			Part->SetWorldLocationAndRotation(FVector(0.0, 0.0, -LandDepth), FRotator::ZeroRotator);
 			LandParts.Add(Part);
 		}
-	}
-
-	// the bases: round platforms, their tops at the height everything is measured from
-	const float Thick = 200.0f;
-	UInstancedStaticMeshComponent* Discs = MakeSet(Disc, Ground != nullptr ? Ground : static_cast<UMaterialInterface*>(Tints[static_cast<int32>(EArenaTint::Base)]));
-	for (const FVector& Base : Plan.Bases) {
-		Discs->AddInstance(FTransform(FQuat::Identity, Base - FVector(0.0f, 0.0f, Thick * 0.5f), FVector(BaseRadius / 50.0f, BaseRadius / 50.0f, Thick / 100.0f)), true);
 	}
 
 	// the craft: seen here, moved in Tick, and felt through the server's own sums, not through collision

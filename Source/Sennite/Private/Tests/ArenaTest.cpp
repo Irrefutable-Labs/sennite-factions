@@ -11,6 +11,10 @@
 // to the far base, jumping where it is a jump and waiting for a clear lane where craft cross, and
 // arrives alive.
 //
+// Of the trees and bushes round the bases: on plans, that every base has them near its rim, clear of
+// every way out, each tree with its trunk block, and the rest of the arena unchanged by them; and in
+// the running match, that a tree's trunk stops a line run through it and a bush does not.
+//
 // And of the land far below (Tools/import_land.py), on this machine, which draws it: the land and its
 // water are drawn; nothing of them can be stood on or hit; the lake's surface, read from the water's
 // own mesh under the middle of the arena, lies as far below the bases as the settings say, and the
@@ -149,6 +153,153 @@ namespace
 			Lake == Unread ? 0.0 : -Lake / 100.0, Reach / 100.0, -Highest / 100.0, -Lowest / 100.0);
 	}
 
+	bool IsTree(const FArenaProp& Piece)
+	{
+		return Piece.Scenery >= EArenaScenery::TreeA && Piece.Scenery < EArenaScenery::BushA;
+	}
+
+	bool IsBush(const FArenaProp& Piece)
+	{
+		return Piece.Scenery >= EArenaScenery::BushA && Piece.Scenery < EArenaScenery::Count;
+	}
+
+	/**
+	 * The trees and bushes round the bases, held against plans for many seeds: every base has trees
+	 * and bushes; each stands on its base, near the rim; none stands in a way out of its base; trees
+	 * stand apart; every tree has its trunk block; and the rest of the arena (its bases, connectors,
+	 * ways across, craft, blocks and other scenery) is what the seed makes when the settings ask for
+	 * no trees or bushes.
+	 */
+	void CheckGreen(FAutomationTestBase* Test)
+	{
+		const FArenaSizes Size = ASenniteArena::Sizes();
+		FArenaSizes Bare = Size;
+		Bare.TreesPerBase = 0;
+		Bare.BushesPerBase = 0;
+		bool bEveryBaseHasSome = true, bOnTheRim = true, bWaysOutClear = true, bApart = true, bTrunks = true, bRestUnchanged = true;
+		int32 Trees = 0, Bushes = 0, Plans = 0;
+		for (int32 Seed = 1; Seed <= 60; ++Seed) {
+			for (int32 Bases = 2; Bases <= static_cast<int32>(EConnectorKind::Count); ++Bases) {
+				const FArenaPlan Plan = ASenniteArena::MakePlan(Seed, Bases, INDEX_NONE, Size);
+				const FArenaPlan Without = ASenniteArena::MakePlan(Seed, Bases, INDEX_NONE, Bare);
+				++Plans;
+				TArray<int32> TreesOn, BushesOn;
+				TreesOn.SetNumZeroed(Bases);
+				BushesOn.SetNumZeroed(Bases);
+				TArray<FVector> Stood;
+				int32 TrunkBlocks = 0;
+				int32 GreenPieces = 0;
+				for (const FArenaProp& Piece : Plan.Props) {
+					if (!IsTree(Piece) && !IsBush(Piece)) {
+						continue;
+					}
+					++GreenPieces;
+					const FVector At = Piece.Transform.GetLocation();
+					int32 Base = 0;
+					for (int32 Each = 1; Each < Bases; ++Each) {
+						if (FVector::Dist2D(At, Plan.Bases[Each]) < FVector::Dist2D(At, Plan.Bases[Base])) {
+							Base = Each;
+						}
+					}
+					const double Out = FVector::Dist2D(At, Plan.Bases[Base]);
+					bOnTheRim = bOnTheRim && Out > Size.BaseRadius * 0.69 && Out < Size.BaseRadius * 0.98 && FMath::IsNearlyEqual(At.Z, Plan.Bases[Base].Z, 1.0);
+					for (const FArenaConnector& Connector : Plan.Connectors) {
+						if (Connector.FromBase != Base && Connector.ToBase != Base) {
+							continue;
+						}
+						const FVector Way = (Plan.Bases[Connector.FromBase == Base ? Connector.ToBase : Connector.FromBase] - Plan.Bases[Base]).GetSafeNormal2D();
+						const FVector From = At - Plan.Bases[Base];
+						bWaysOutClear = bWaysOutClear && !(FVector::DotProduct(From, Way) > 0.0 && FMath::Abs(FVector::CrossProduct(Way, From).Z) < Size.ConnectorWidth * 0.5 + 150.0);
+					}
+					if (IsTree(Piece)) {
+						++TreesOn[Base];
+						++Trees;
+						bApart = bApart && !Stood.ContainsByPredicate([&At](const FVector& Other) { return FVector::Dist2D(At, Other) < 899.0; });
+						Stood.Add(At);
+						const bool bHasTrunk = Plan.Boxes.ContainsByPredicate([&At](const FArenaBox& Block) {
+							return Block.Tint == EArenaTint::Hidden && FVector::Dist2D(Block.Centre, At) < 1.0 && Block.Size.Z >= 200.0 && FMath::IsNearlyEqual(Block.Centre.Z - Block.Size.Z * 0.5, At.Z, 1.0);
+						});
+						bTrunks = bTrunks && bHasTrunk;
+						TrunkBlocks += bHasTrunk ? 1 : 0;
+					}
+					else {
+						++BushesOn[Base];
+						++Bushes;
+					}
+				}
+				for (int32 Base = 0; Base < Bases; ++Base) {
+					bEveryBaseHasSome = bEveryBaseHasSome && TreesOn[Base] >= Size.TreesPerBase / 2 && TreesOn[Base] <= Size.TreesPerBase
+						&& BushesOn[Base] >= Size.BushesPerBase / 2 && BushesOn[Base] <= Size.BushesPerBase;
+				}
+				// with the trees and bushes and their trunks taken away, the plan is the bare one
+				bRestUnchanged = bRestUnchanged && Plan.Bases == Without.Bases && Plan.Craft.Num() == Without.Craft.Num()
+					&& Plan.Boxes.Num() - TrunkBlocks == Without.Boxes.Num() && Plan.Props.Num() - GreenPieces == Without.Props.Num();
+				bRestUnchanged = bRestUnchanged && Plan.Connectors.Num() == Without.Connectors.Num();
+				for (int32 Link = 0; bRestUnchanged && Link < Without.Connectors.Num(); ++Link) {
+					const FArenaConnector& With = Plan.Connectors[Link];
+					const FArenaConnector& Bare0 = Without.Connectors[Link];
+					bRestUnchanged = With.Kind == Bare0.Kind && With.FromBase == Bare0.FromBase && With.ToBase == Bare0.ToBase && With.Frame.Equals(Bare0.Frame, 0.01) && With.Route.Num() == Bare0.Route.Num();
+					for (int32 Step = 0; bRestUnchanged && Step < Bare0.Route.Num(); ++Step) {
+						bRestUnchanged = With.Route[Step].Point.Equals(Bare0.Route[Step].Point, 0.01) && With.Route[Step].bJump == Bare0.Route[Step].bJump && With.Route[Step].Lane == Bare0.Route[Step].Lane;
+					}
+				}
+				for (int32 Each = 0; bRestUnchanged && Each < Without.Craft.Num(); ++Each) {
+					const FArenaCraft& With = Plan.Craft[Each];
+					const FArenaCraft& Bare0 = Without.Craft[Each];
+					bRestUnchanged = With.LaneStart.Equals(Bare0.LaneStart, 0.01) && With.LaneDirection.Equals(Bare0.LaneDirection, 0.0001) && With.LaneLength == Bare0.LaneLength && With.Speed == Bare0.Speed
+						&& With.Offset == Bare0.Offset && With.Size.Equals(Bare0.Size, 0.01) && With.Rotation.Equals(Bare0.Rotation, 0.0001) && With.Connector == Bare0.Connector && With.Lane == Bare0.Lane;
+				}
+				for (int32 Block = 0; bRestUnchanged && Block < Without.Boxes.Num(); ++Block) {
+					bRestUnchanged = Plan.Boxes[Block].Centre.Equals(Without.Boxes[Block].Centre, 0.01) && Plan.Boxes[Block].Size.Equals(Without.Boxes[Block].Size, 0.01)
+						&& Plan.Boxes[Block].Rotation.Equals(Without.Boxes[Block].Rotation, 0.0001) && Plan.Boxes[Block].Tint == Without.Boxes[Block].Tint;
+				}
+				for (int32 Piece = 0; bRestUnchanged && Piece < Without.Props.Num(); ++Piece) {
+					bRestUnchanged = Plan.Props[Piece].Scenery == Without.Props[Piece].Scenery && Plan.Props[Piece].bFit == Without.Props[Piece].bFit && Plan.Props[Piece].Transform.Equals(Without.Props[Piece].Transform, 0.01);
+				}
+			}
+		}
+		Test->TestTrue(TEXT("Every base has at least half the trees and bushes the settings ask for, and no more than they ask for"), bEveryBaseHasSome);
+		Test->TestTrue(TEXT("Every tree and bush stands on its base, near its rim, at the base's height"), bOnTheRim);
+		Test->TestTrue(TEXT("No tree or bush stands in a way out of its base"), bWaysOutClear);
+		Test->TestTrue(TEXT("Trees stand at least 9 m apart"), bApart);
+		Test->TestTrue(TEXT("Every tree has a trunk block standing on the base where it stands"), bTrunks);
+		Test->TestTrue(TEXT("But for its trees and bushes, an arena is what its seed makes when the settings ask for none"), bRestUnchanged);
+		UE_LOG(LogArenaCheck, Display, TEXT("GAMECHECK green: %d trees and %d bushes over %d plans"), Trees, Bushes, Plans);
+	}
+
+	/**
+	 * The trees of the arena built here: every piece of scenery the settings name loads, so no trunk
+	 * block shows; and a tree's trunk stops a line run through it, where a bush stops nothing.
+	 */
+	void CheckTrees(FAutomationTestBase* Test, UWorld* World, const ASenniteArena* Arena)
+	{
+		const ASenniteArena* Rules = GetDefault<ASenniteArena>();
+		bool bAllLoad = Rules->SceneryMeshes.Num() == static_cast<int32>(EArenaScenery::Count);
+		for (const FSoftObjectPath& Named : Rules->SceneryMeshes) {
+			bAllLoad = bAllLoad && Cast<UStaticMesh>(Named.TryLoad()) != nullptr;
+		}
+		Test->TestTrue(TEXT("Every piece of scenery the settings name is there to load"), bAllLoad);
+		int32 Trees = 0, Bushes = 0;
+		bool bTrunksStop = true, bBushesDoNot = true;
+		for (const FArenaProp& Piece : Arena->GetPlan().Props) {
+			const FVector At = Piece.Transform.GetLocation() + FVector(0.0, 0.0, 100.0);
+			FHitResult Hit;
+			const bool bStopped = World->LineTraceSingleByChannel(Hit, At - FVector(200.0, 0.0, 0.0), At + FVector(200.0, 0.0, 0.0), ECC_Visibility);
+			if (IsTree(Piece)) {
+				++Trees;
+				bTrunksStop = bTrunksStop && bStopped && Hit.GetActor() == Arena;
+			}
+			else if (IsBush(Piece)) {
+				++Bushes;
+				bBushesDoNot = bBushesDoNot && !bStopped;
+			}
+		}
+		Test->TestTrue(TEXT("The arena built here has trees and bushes"), Trees > 0 && Bushes > 0);
+		Test->TestTrue(TEXT("Every tree's trunk stops a line run through it"), bTrunksStop);
+		Test->TestTrue(TEXT("No bush stops a line run through it"), bBushesDoNot);
+		UE_LOG(LogArenaCheck, Display, TEXT("GAMECHECK trees: %d trees and %d bushes on %d bases"), Trees, Bushes, Arena->GetPlan().Bases.Num());
+	}
+
 	/** What the seeding promises, held against plans for many seeds. */
 	void CheckPlans(FAutomationTestBase* Test)
 	{
@@ -186,7 +337,11 @@ namespace
 						}
 					}
 				}
-				bEveryConnectorBuilt &= Plan.Boxes.Num() > 0 && Plan.Bases.Num() == Bases;
+				// counted on the same arena with no trees, whose trunks are blocks too
+				FArenaSizes NoTrees = ASenniteArena::Sizes();
+				NoTrees.TreesPerBase = 0;
+				NoTrees.BushesPerBase = 0;
+				bEveryConnectorBuilt &= ASenniteArena::MakePlan(Seed, Bases, INDEX_NONE, NoTrees).Boxes.Num() > 0 && Plan.Bases.Num() == Bases;
 				if (Bases == 2) {
 					KindsAsOnlyConnector.Add(static_cast<int32>(Plan.Connectors[0].Kind));
 				}
@@ -253,7 +408,9 @@ namespace
 				return Fail(TEXT("The map has no built arena (run this with Tools/check_arena.sh)"));
 			}
 			CheckPlans(Test);
+			CheckGreen(Test);
 			CheckLand(Test, World, Arena);
+			CheckTrees(Test, World, Arena);
 
 			const FArenaPlan& Plan = Arena->GetPlan();
 			const FArenaConnector& Connector = Plan.Connectors[0];

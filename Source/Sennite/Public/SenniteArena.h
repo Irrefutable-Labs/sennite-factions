@@ -43,7 +43,14 @@ enum class EConnectorKind : uint8
 enum class EArenaTint : uint8 { Base, Floating, Boardwalk, Trunk, Rock, Deck, Craft, TunnelRock, Bridge, Cover, Marking, Hidden, Count };
 
 /** A piece of scenery: seen, never stood on or bumped into. The blocks under it are what a player meets. */
-enum class EArenaScenery : uint8 { Cliff, RockyGround, Island, RockA, RockB, RockC, RockD, RockE, RockF, Count };
+enum class EArenaScenery : uint8
+{
+	Cliff, RockyGround, Island, RockA, RockB, RockC, RockD, RockE, RockF,
+	// four trees, then seven bushes: what stands round the rim of a base
+	TreeA, TreeB, TreeC, TreeD,
+	BushA, BushB, BushC, BushD, BushE, BushF, BushG,
+	Count
+};
 
 /** One piece of scenery, in the world. */
 struct FArenaProp
@@ -63,6 +70,9 @@ struct FArenaSizes
 	float BaseRadius = 12000.0f;
 	float ConnectorLength = 24000.0f;
 	float ConnectorWidth = 12000.0f;
+	/** How many trees and bushes the seed tries to stand round the rim of each base. */
+	int32 TreesPerBase = 14;
+	int32 BushesPerBase = 24;
 };
 
 /** One block of the arena: a box, in the world. */
@@ -147,6 +157,17 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	float ConnectorWidth = 12000.0f;
 
+	/**
+	 * How many trees and bushes the seed tries to stand round the rim of each base, clear of every
+	 * way out of it. A tree is scenery over a trunk block, which is what a hero or a shot meets; a
+	 * bush is scenery alone. Set in DefaultGame.ini.
+	 */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	int32 TreesPerBase = 14;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	int32 BushesPerBase = 24;
+
 	/** The sizes in the settings. */
 	static FArenaSizes Sizes();
 
@@ -204,7 +225,7 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	FSoftObjectPath RoadSurface;
 
-	/** The scenery meshes, in the order of EArenaScenery: the cliff, the rocky ground, the island, six rocks. Set in DefaultGame.ini. */
+	/** The scenery meshes, in the order of EArenaScenery: the cliff, the rocky ground, the island, six rocks, four trees, seven bushes. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	TArray<FSoftObjectPath> SceneryMeshes;
 
