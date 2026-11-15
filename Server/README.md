@@ -66,7 +66,8 @@ collects it in their own wallet). The sixth is a match in the arena, played to i
 each as three games: the publisher's match server, which has no player of its own, and two players'
 games, each let in by a ticket for the faction its wallet is a member of. Both factions' built
 structures stand on their bases, the same on both machines, and a player takes a rifle from a
-weapon crate. Once the time runs out and nobody wins, and the prize is the publisher's again; once
+weapon crate. Each of the three is on a different arena, by its seed: floating pieces, a canyon and
+a traffic deck between the bases. Once the time runs out and nobody wins, and the prize is the publisher's again; once
 a faction is first to the kills to win, and its member has the prize to collect; once a faction's
 base is wiped, it is out, and this server has the structure as destroyed. The match server itself
 tells this server how each ended. A third game, whose wallet is in neither faction, joins the first
@@ -169,7 +170,8 @@ UnrealEditor-Cmd Sennite.uproject "/Game/Maps/Arena?Bases=2?Match=<id>" -server 
 
 It has no player of its own. It sets each faction's parcel on one base of the arena, in the match's
 order, and sends where every structure stands to every game in the match. `?Bases=` is the number
-of factions in the match. A faction with nothing built cannot be in a match (spec 10.3: an empty
+of factions in the match. With no `?Seed=` the match server picks the arena's seed itself, so what
+lies between the bases differs from match to match; `?Seed=<n>` has one arena again. A faction with nothing built cannot be in a match (spec 10.3: an empty
 parcel does not appear in one). A player's game joins at the match server's address, started with
 this server (`-PublisherUrl=`) so it can ask for its ticket. When the match is over the match
 server tells this server who won, or `void`, and closes.

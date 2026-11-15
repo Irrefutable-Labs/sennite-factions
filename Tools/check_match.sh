@@ -13,7 +13,7 @@ if ./run_game_check.sh Sennite.Match.Rules Rules MatchRules > ../Saved/match_rul
 else
   echo "FAILED  rules"; grep "GAMECHECK\|Error" ../Saved/match_rules.out | cut -c1-300; failed=1
 fi
-if SENNITE_MAP="/Game/Maps/Arena?Seed=${SENNITE_SEED:-11}?Bases=2?Connector=Bridges" ./run_game_check.sh Sennite.Crates OpenAndArm Crates > ../Saved/crates.out 2>&1; then
+if SENNITE_MAP="/Game/Maps/Arena?Seed=${SENNITE_SEED:-11}?Bases=2" ./run_game_check.sh Sennite.Crates OpenAndArm Crates > ../Saved/crates.out 2>&1; then
   echo "passed  crates:"; grep -o 'GAMECHECK crates.*' ../Saved/crates.out | sed 's/^/          /'
 else
   echo "FAILED  crates"; grep "GAMECHECK\|Error" ../Saved/crates.out | cut -c1-300; failed=1

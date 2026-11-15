@@ -6,8 +6,10 @@
 // who opened it rounds for both. A while later it is closed and full again, and what nobody took is
 // gone.
 //
-// A crate is drawn as plain blocks, as the arena is, until it has scenery of its own. What it holds,
-// how near a hero must be and how long it takes to fill are set in DefaultGame.ini.
+// A crate is the long green ammunition crate of the Fab pack "Wooden Ammo Crates Pack", brought in by
+// Tools/import_crate.py. The model is one piece with no lid of its own, so an opened crate looks as
+// a closed one does: what shows it is open is the weapons lying in front of it. What it holds, how
+// near a hero must be and how long it takes to fill are set in DefaultGame.ini.
 
 #pragma once
 
@@ -49,18 +51,15 @@ public:
 	UPROPERTY(Config)
 	int32 ShotgunShells = 20;
 
-	/** How big a crate is: across, front to back, and high. */
+	/** The crate's model. */
 	UPROPERTY(Config)
-	FVector Size = FVector(130.0, 80.0, 70.0);
+	FSoftObjectPath Model;
 
-	/** The unit cube a crate is shaped from, and what it is drawn with. */
+	/** How long a crate is along its long side. The model is scaled evenly to it. */
 	UPROPERTY(Config)
-	FSoftObjectPath Shape;
+	float Across = 150.0f;
 
-	UPROPERTY(Config)
-	FSoftObjectPath Material;
-
-	UPROPERTY(ReplicatedUsing = OnRep_Open)
+	UPROPERTY(Replicated)
 	bool bOpen = false;
 
 	/** A hero opens it. On the server. False when it is open already or the hero is not beside it. */
@@ -78,20 +77,14 @@ public:
 	virtual void PostInitializeComponents() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-protected:
-	UFUNCTION()
-	void OnRep_Open();
-
 private:
 	void Restock();
-	/** Draw the lid shut or thrown back. */
-	void ShowLid();
 
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> Body;
 
-	UPROPERTY()
-	TObjectPtr<UStaticMeshComponent> Lid;
+	/** How big the crate is as it stands: across, front to back, and high. From the model and Across. */
+	FVector Size = FVector::ZeroVector;
 
 	/** What it laid out when it was last opened. On the server. */
 	TArray<TWeakObjectPtr<AActor>> Laid;

@@ -22,6 +22,9 @@
  * first, the third wallet's game joins the match server too: it is given no ticket, gets no hero,
  * and is put out.
  *
+ * Each match is on a different arena. A match's seed chooses what lies between its bases; the three
+ * seeds here give floating pieces, a canyon and a traffic deck, and each run is held to that.
+ *
  * Tools/check_base_editor.sh runs it (see test/real-dsm/hosts.ts for what it needs).
  */
 import { spawn } from "node:child_process";
@@ -109,11 +112,19 @@ interface Played {
   outsider: string;
 }
 
+/** The arena each match is played on: its seed, and what that seed puts between the two bases. */
+const ARENAS = {
+  Time: { seed: 23, between: "Floating" },
+  Kills: { seed: 12, between: "Canyon" },
+  Wipe: { seed: 4, between: "Traffic" },
+} as const;
+
 /**
  * Play one match: the match server and the two players' games, started on `matchId` with the
  * match's rules; with `outsider`, a third game too, whose wallet is in no faction of the match.
  */
 async function play(what: "Kills" | "Wipe" | "Time", matchId: string, rules: string[], outsider = ""): Promise<Played> {
+  const arena = ARENAS[what];
   const game = spawn(join(REPO, "Tools", "run_match_check.sh"), [what, matchId], {
     cwd: REPO,
     env: {
@@ -124,6 +135,7 @@ async function play(what: "Kills" | "Wipe" | "Time", matchId: string, rules: str
       SENNITE_ATTACKER_FILE: files.alice as string,
       SENNITE_DEFENDER_FILE: files.carol as string,
       SENNITE_SERVER_ARGS: `-ini:Game:${rules.map((rule) => `[/Script/Sennite.SenniteMatch]:${rule}`).join(",")}`,
+      SENNITE_SEED: String(arena.seed),
       ...(outsider === "" ? {} : { SENNITE_OUTSIDER_FILE: files[outsider] as string }),
     },
   });
@@ -141,6 +153,8 @@ async function play(what: "Kills" | "Wipe" | "Time", matchId: string, rules: str
     defender: readFileSync(join(folder, "defender.log"), "utf8"),
     outsider: outsider === "" ? "" : readFileSync(join(folder, "outsider.log"), "utf8"),
   };
+  // the arena is the one its seed makes
+  expect(played.server).toContain(`Arena built: seed ${arena.seed}, 2 bases, connectors: ${arena.between};`);
   // each player's hero is their wallet's faction's, on that faction's base
   expect(played.attacker).toContain(`GAMECHECK attacker: match ${matchId}; plays for faction ${factions.alice} on base 0; wallet ${(connections.alice as Connection).peer}`);
   expect(played.defender).toContain(`GAMECHECK defender: match ${matchId}; plays for faction ${factions.carol} on base 1; wallet ${(connections.carol as Connection).peer}`);

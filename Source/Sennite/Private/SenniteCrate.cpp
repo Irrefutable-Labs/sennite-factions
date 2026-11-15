@@ -8,18 +8,10 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "Materials/MaterialInstanceDynamic.h"
-#include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSenniteCrate, Log, All);
-
-namespace
-{
-	/** How much of a crate's height is its lid. */
-	const float LidShare = 0.2f;
-}
 
 ASenniteCrate::ASenniteCrate()
 {
@@ -30,9 +22,6 @@ ASenniteCrate::ASenniteCrate()
 	Body->SetupAttachment(RootComponent);
 	Body->SetCollisionProfileName(TEXT("BlockAll"));
 	Body->SetCanEverAffectNavigation(false);
-	Lid = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Lid"));
-	Lid->SetupAttachment(RootComponent);
-	Lid->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void ASenniteCrate::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -44,53 +33,33 @@ void ASenniteCrate::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 void ASenniteCrate::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
-	UStaticMesh* Cube = Cast<UStaticMesh>(Shape.TryLoad());
-	UMaterialInterface* Face = Cast<UMaterialInterface>(Material.TryLoad());
-	if (Cube == nullptr || Face == nullptr) {
-		UE_LOG(LogSenniteCrate, Error, TEXT("A crate's shape '%s' or material '%s' did not load"), *Shape.ToString(), *Material.ToString());
+	UStaticMesh* Mesh = Cast<UStaticMesh>(Model.TryLoad());
+	const FVector Extent = Mesh != nullptr ? Mesh->GetBoundingBox().GetSize() : FVector::ZeroVector;
+	const bool bLongX = Extent.X >= Extent.Y;
+	const double Long = bLongX ? Extent.X : Extent.Y;
+	if (Mesh == nullptr || Long <= 0.0) {
+		UE_LOG(LogSenniteCrate, Error, TEXT("A crate's model '%s' did not load"), *Model.ToString());
 		return;
 	}
-	// the actor stands on the ground at the middle of what the crate covers; its front is the way it faces
-	const float BodyHigh = Size.Z * (1.0f - LidShare);
-	Body->SetStaticMesh(Cube);
-	Body->SetRelativeLocation(FVector(0.0, 0.0, BodyHigh * 0.5));
-	Body->SetRelativeScale3D(FVector(Size.Y, Size.X, BodyHigh) / 100.0);
-	Lid->SetStaticMesh(Cube);
-	Lid->SetRelativeScale3D(FVector(Size.Y, Size.X, Size.Z * LidShare) / 100.0);
-	UMaterialInstanceDynamic* BodyFace = UMaterialInstanceDynamic::Create(Face, this);
-	BodyFace->SetVectorParameterValue(TEXT("Tint"), FLinearColor(0.07f, 0.12f, 0.05f));
-	Body->SetMaterial(0, BodyFace);
-	UMaterialInstanceDynamic* LidFace = UMaterialInstanceDynamic::Create(Face, this);
-	LidFace->SetVectorParameterValue(TEXT("Tint"), FLinearColor(0.80f, 0.60f, 0.02f));
-	Lid->SetMaterial(0, LidFace);
-	ShowLid();
-}
-
-void ASenniteCrate::ShowLid()
-{
-	const float BodyHigh = Size.Z * (1.0f - LidShare);
-	const float LidHigh = Size.Z * LidShare;
-	if (bOpen) {
-		// thrown back: standing on its edge behind the crate
-		Lid->SetRelativeLocationAndRotation(FVector(-Size.Y * 0.5 - LidHigh * 0.5, 0.0, BodyHigh + Size.Y * 0.5), FRotator(90.0, 0.0, 0.0));
-	}
-	else {
-		Lid->SetRelativeLocationAndRotation(FVector(0.0, 0.0, BodyHigh + LidHigh * 0.5), FRotator::ZeroRotator);
-	}
-}
-
-void ASenniteCrate::OnRep_Open()
-{
-	ShowLid();
+	// The actor stands on the ground at the middle of what the crate covers; its front is the way it
+	// faces. The model is scaled evenly to be Across along its long side, and turned so that side
+	// lies across the way the crate faces.
+	const FBox Box = Mesh->GetBoundingBox();
+	const double Scale = Across / Long;
+	const FRotator Turn(0.0, bLongX ? 90.0 : 0.0, 0.0);
+	Size = FVector(Across, (bLongX ? Extent.Y : Extent.X) * Scale, Extent.Z * Scale);
+	Body->SetStaticMesh(Mesh);
+	Body->SetRelativeScale3D(FVector(Scale));
+	Body->SetRelativeRotation(Turn);
+	Body->SetRelativeLocation(-Turn.RotateVector(FVector(Box.GetCenter().X, Box.GetCenter().Y, Box.Min.Z) * Scale));
 }
 
 bool ASenniteCrate::Open(ASenniteCharacter* By)
 {
-	if (!HasAuthority() || bOpen || By == nullptr || FVector::Dist(By->GetActorLocation(), GetActorLocation()) > Reach + Size.GetMax()) {
+	if (!HasAuthority() || bOpen || By == nullptr || FVector::Dist(By->GetActorLocation(), GetActorLocation()) > Reach + Across) {
 		return false;
 	}
 	bOpen = true;
-	ShowLid();
 	// the weapons lie in front of it, at the height a hero's hands pass
 	const FVector Front = GetActorLocation() + GetActorForwardVector() * (Size.Y * 0.5 + 90.0) + FVector(0.0, 0.0, 60.0);
 	const FVector Side = GetActorRightVector() * 45.0;
@@ -124,7 +93,6 @@ void ASenniteCrate::Restock()
 	}
 	Laid.Reset();
 	bOpen = false;
-	ShowLid();
 }
 
 ASenniteCrate* ASenniteCrate::Nearest(const UWorld* World, const FVector& From, float Within, bool bClosed)

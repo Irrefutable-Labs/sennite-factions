@@ -12,6 +12,9 @@
 #   SENNITE_SERVER_ARGS         more arguments for the match server alone (the match's rules)
 #   SENNITE_OUTSIDER_FILE       optional: a third game's place, whose wallet is in no faction of the
 #                               match; it runs Sennite.Match.Outsider, and must be refused and put out
+#   SENNITE_SEED                optional: the arena's seed, so a run can be had again. Left out, the
+#                               match server picks one, as it does in play. Either way the seed chooses
+#                               what lies between the bases, and the run prints which it was.
 # Logs (server.log, attacker.log, defender.log) and screenshots land in Saved/Match_<what>/.
 # Exit status 0 only if both players' halves passed and the match server closed by itself.
 cd "$(dirname "$0")/.."
@@ -28,7 +31,7 @@ rm -f "$OUT"/*.log
 touch "$OUT/.started"
 PLAYER=(-game -windowed -ResX=1280 -ResY=720 -RenderOffscreen -unattended -nosplash -nosound -notexturestreaming -stdout -TestExit="Automation Test Queue Empty")
 
-"$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/Sennite.uproject" "/Game/Maps/Arena?Seed=${SENNITE_SEED:-11}?Bases=2?Connector=Bridges?Match=$MATCH" -server -port=$PORT \
+"$UE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PWD/Sennite.uproject" "/Game/Maps/Arena?Bases=2${SENNITE_SEED:+?Seed=$SENNITE_SEED}?Match=$MATCH" -server -port=$PORT \
   -unattended -nosplash -nosound -stdout -PublisherUrl="$SENNITE_PUBLISHER_URL" -MatchSecretFile="$SENNITE_MATCH_SECRET_FILE" ${=SENNITE_SERVER_ARGS} > "$OUT/server.log" 2>&1 &
 server=$!
 
@@ -68,6 +71,7 @@ if (( ! closed )); then
 fi
 wait $server 2>/dev/null
 
+grep -o "Arena built: .*" "$OUT/server.log"
 grep -o "LogSenniteMatch[A-Za-z]*: .*" "$OUT/server.log"
 sides=(attacker defender)
 [[ -n "$outsider" ]] && sides+=(outsider)

@@ -1017,14 +1017,14 @@ int ASenniteCharacter::GetHealingItemCount(int HealingItemType) {
 
 void ASenniteCharacter::OpenCrate() {
 	const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
-	if (ASenniteCrate::Nearest(GetWorld(), GetActorLocation(), Rules->Reach + Rules->Size.GetMax(), true) != nullptr) {
+	if (ASenniteCrate::Nearest(GetWorld(), GetActorLocation(), Rules->Reach + Rules->Across, true) != nullptr) {
 		ServerOpenCrate();
 	}
 }
 
 void ASenniteCharacter::ServerOpenCrate_Implementation() {
 	const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
-	if (ASenniteCrate* Crate = ASenniteCrate::Nearest(GetWorld(), GetActorLocation(), Rules->Reach + Rules->Size.GetMax(), true)) {
+	if (ASenniteCrate* Crate = ASenniteCrate::Nearest(GetWorld(), GetActorLocation(), Rules->Reach + Rules->Across, true)) {
 		Crate->Open(this);
 	}
 }

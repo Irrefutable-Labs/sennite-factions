@@ -223,7 +223,7 @@ void ASenniteHUD::DrawMatch()
 	// beside a closed weapon crate: how to open it
 	if (const ASenniteCharacter* Hero = Cast<ASenniteCharacter>(GetOwningPawn())) {
 		const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
-		if (ASenniteCrate::Nearest(GetWorld(), Hero->GetActorLocation(), Rules->Reach + Rules->Size.GetMax(), true) != nullptr) {
+		if (ASenniteCrate::Nearest(GetWorld(), Hero->GetActorLocation(), Rules->Reach + Rules->Across, true) != nullptr) {
 			DrawRect(Shade, W * 0.5f - 110.0f * S, H * 0.62f, 220.0f * S, 34.0f * S);
 			Label(TEXT("crate"), TEXT("E   OPEN THE CRATE"), W * 0.5f - 92.0f * S, H * 0.62f + 8.0f * S, 14, White);
 		}
