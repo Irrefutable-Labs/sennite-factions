@@ -1,5 +1,6 @@
 #include "SenniteCrate.h"
 
+#include "SenniteArena.h"
 #include "SenniteCharacter.h"
 #include "SennitePlayerState.h"
 #include "SenniteWeapons.h"
@@ -118,6 +119,8 @@ void ASenniteCrate::Stock(UWorld* World, const TArray<FTransform>& Starts, const
 		return;
 	}
 	const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
+	TActorIterator<ASenniteArena> Arenas(World);
+	const ASenniteArena* Arena = Arenas ? *Arenas : nullptr;
 	int32 Stood = 0;
 	for (const FTransform& Start : Starts) {
 		const FVector Ahead = Start.GetRotation().GetForwardVector().GetSafeNormal2D();
@@ -134,6 +137,10 @@ void ASenniteCrate::Stock(UWorld* World, const TArray<FTransform>& Starts, const
 					break;
 				}
 				At = Ground + Way * (Rules->FromStart + Farther * 150.0f);
+			}
+			// standing on the land there
+			if (Arena != nullptr) {
+				At.Z = ASenniteArena::GroundHeight(Arena->GetPlan(), At.X, At.Y);
 			}
 			FActorSpawnParameters Spawn;
 			Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;

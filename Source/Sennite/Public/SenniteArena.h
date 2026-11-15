@@ -1,20 +1,25 @@
-// The match arena: the factions' bases, floating, joined by connectors.
+// The match arena: one piece of land, made for the match from the plots of the factions playing.
 //
-// A match does not take place on the persistent map. It lays the bases of the factions playing close
-// together and fills the gaps between them with connectors, chosen and shaped from a seed. Every
-// machine in the match is given the same seed and builds the same arena from it; nothing of the
-// arena outlasts the match.
+// A match does not take place on the persistent map. It sets the plots of the factions playing
+// close together on one piece of land and fills the ground between them with connectors, chosen and
+// shaped from a seed. Every machine in the match is given the same seed and builds the same arena
+// from it; nothing of the arena outlasts the match.
 //
-// There are six kinds of connector, each a different way across:
-//   Floating  pieces to jump between, some with cover to shoot from
-//   TreeTop   a boardwalk between huts, high above the bases
+// The land is ground to walk on: hills, from the seed, everywhere but where a faction's buildings
+// stand (a level pad in the middle of each plot) and where a connector meets a plot. Its shore goes
+// down under the water of a lake, and nobody comes back from the water. Nothing of it floats.
+//
+// There are six kinds of connector, each a different way across the ground between two plots:
+//   Floating  a gorge with pieces hanging over it to jump between, some with cover to shoot from
+//   TreeTop   a forest with a boardwalk above it, between huts on tall trunks
 //   Canyon    a floor to walk through between two rims that can be held from above
-//   Traffic   an open deck that hovering craft cross without stopping
-//   Tunnel    a passage through a solid mass
-//   Bridges   narrow spans over the drop
+//   Traffic   a road that hovering craft cross without stopping
+//   Tunnel    a passage through a mass of rock
+//   Bridges   a river with arched bridges over it
 //
-// FArenaPlan is the arena as numbers, made from the seed alone (MakePlan); ASenniteArena builds a
-// plan in the world. The shapes are plain blocks, tinted by kind, until each kind has its own scenery.
+// FArenaPlan is the arena as numbers, made from the seed alone (MakePlan); GroundHeight is its
+// land; ASenniteArena builds a plan in the world. What stands on the land is plain blocks, tinted by
+// kind, until each kind has its own scenery.
 
 #pragma once
 
@@ -23,6 +28,7 @@
 #include "SenniteArena.generated.h"
 
 class APlayerStart;
+class UProceduralMeshComponent;
 class UInstancedStaticMeshComponent;
 class UMaterialInstanceDynamic;
 class UStaticMeshComponent;
@@ -40,12 +46,12 @@ enum class EConnectorKind : uint8
 };
 
 /** What a block is, for its colour. */
-enum class EArenaTint : uint8 { Base, Floating, Boardwalk, Trunk, Rock, Deck, Craft, TunnelRock, Bridge, Cover, Marking, Hidden, Count };
+enum class EArenaTint : uint8 { Floating, Boardwalk, Trunk, Rock, Deck, Craft, TunnelRock, Bridge, Cover, Marking, Hidden, Count };
 
 /** A piece of scenery: seen, never stood on or bumped into. The blocks under it are what a player meets. */
 enum class EArenaScenery : uint8
 {
-	Cliff, RockyGround, Island, RockA, RockB, RockC, RockD, RockE, RockF,
+	Cliff, RockyGround, RockA, RockB, RockC, RockD, RockE, RockF,
 	// four trees, then seven bushes: what stands round the rim of a base
 	TreeA, TreeB, TreeC, TreeD,
 	BushA, BushB, BushC, BushD, BushE, BushF, BushG,
@@ -73,6 +79,12 @@ struct FArenaSizes
 	/** How many trees and bushes the seed tries to stand round the rim of each base. */
 	int32 TreesPerBase = 14;
 	int32 BushesPerBase = 24;
+	/** The level ground in the middle of a plot, where a faction's buildings stand: this far out from its middle. */
+	float PadRadius = 5000.0f;
+	/** How far below a plot's level ground the water lies. */
+	float WaterDepth = 2000.0f;
+	/** How high the land's hills rise above a plot's level ground, about. */
+	float HillHeight = 900.0f;
 };
 
 /** One block of the arena: a box, in the world. */
@@ -81,7 +93,7 @@ struct FArenaBox
 	FVector Centre = FVector::ZeroVector;
 	FVector Size = FVector::OneVector;
 	FQuat Rotation = FQuat::Identity;
-	EArenaTint Tint = EArenaTint::Base;
+	EArenaTint Tint = EArenaTint::Rock;
 };
 
 /** One hovering craft: it flies its lane end to end, again and again. */
@@ -128,6 +140,12 @@ struct FArenaPlan
 	TArray<FArenaBox> Boxes;
 	TArray<FArenaCraft> Craft;
 	TArray<FArenaProp> Props;
+	/** What the land is made from: the sizes, how far a connector starts from its plot's middle, and where the seed set the hills and the coast. */
+	FArenaSizes Size;
+	float Reach = 0.0f;
+	FVector2D HillsAt = FVector2D::ZeroVector;
+	FVector2D RipplesAt = FVector2D::ZeroVector;
+	FVector2D CoastAt = FVector2D::ZeroVector;
 	/** A number that differs when anything in the plan differs. */
 	uint32 Hash = 0;
 
@@ -144,8 +162,8 @@ public:
 	ASenniteArena();
 
 	/**
-	 * A base is a round plot this far from its middle to its edge: room for a faction's base and
-	 * ground around it. Set in DefaultGame.ini.
+	 * A plot is this far from its middle to its edge: room for a faction's base and ground around
+	 * it. Set in DefaultGame.ini.
 	 */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	float BaseRadius = 12000.0f;
@@ -168,8 +186,42 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	int32 BushesPerBase = 24;
 
+	/** The level ground in the middle of a plot, where a faction's buildings stand. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	float PadRadius = 5000.0f;
+
+	/** How far below a plot's level ground the water of the lake lies. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	float WaterDepth = 2000.0f;
+
+	/** How high the land's hills rise above a plot's level ground, about. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	float HillHeight = 900.0f;
+
 	/** The sizes in the settings. */
 	static FArenaSizes Sizes();
+
+	/**
+	 * How high the land of a plan is at a place: the same on every machine, from the plan alone.
+	 * Level (0) on each plot's pad; the hills elsewhere on the land; a connector's own ground between
+	 * plots; and down under the water past the shore.
+	 */
+	static double GroundHeight(const FArenaPlan& Plan, double X, double Y);
+
+	/** How far a place is outside the land's outline, the plots and the connectors: nothing inside it. */
+	static double OutsideLand(const FArenaPlan& Plan, double X, double Y);
+
+	/** How wide the shore is: past the land's outline the ground goes down under the water over this far. */
+	static constexpr double ShoreWidth = 4500.0;
+
+	/** How far past its outline, the plots and the connectors, the land's coast wanders at most. */
+	static constexpr double CoastReach = 6000.0;
+
+	/** How far apart the points of the ground's mesh are. */
+	static constexpr double GroundCell = 500.0;
+
+	/** The ground as this machine built it: what heroes stand on. */
+	UProceduralMeshComponent* GetGround() const { return Ground; }
 
 	/**
 	 * The arena for a seed and a number of bases, at the sizes in the settings or at sizes given.
@@ -207,17 +259,14 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Arena")
 	int32 DefaultBases = 2;
 
-	/** The unit cube and unit cylinder the blocks and bases are shaped from, and what they are drawn with. Set in DefaultGame.ini. */
+	/** The unit cube the blocks are shaped from, and what they are drawn with. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	FSoftObjectPath BlockShape;
 
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
-	FSoftObjectPath BaseShape;
-
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	FSoftObjectPath BlockMaterial;
 
-	/** What the ground of a base is drawn with. Empty: the plain tint a base's blocks have. Set in DefaultGame.ini. */
+	/** What the land is drawn with. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	FSoftObjectPath BaseGround;
 
@@ -225,22 +274,20 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	FSoftObjectPath RoadSurface;
 
-	/** The scenery meshes, in the order of EArenaScenery: the cliff, the rocky ground, the island, six rocks, four trees, seven bushes. Set in DefaultGame.ini. */
+	/** The scenery meshes, in the order of EArenaScenery: the cliff, the rocky ground, six rocks, four trees, seven bushes. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	TArray<FSoftObjectPath> SceneryMeshes;
-
-	/** How wide the rock under a base is, as a share of the base's width. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
-	float IslandWidth = 0.96f;
 
 	/** What a craft takes from a player it runs into. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	float CraftDamage = 20.0f;
 
 	/**
-	 * The land far below the arena, and its water: mountains and lakes, seen and nothing else. Each
-	 * mesh has the place the arena floats over at its origin and its lake's surface at its own
-	 * height 0 (Tools/import_land.py). Empty: below the arena is haze. Set in DefaultGame.ini.
+	 * The country round the arena, and its water: mountains and a lake, seen and nothing else. Each
+	 * mesh has the place the arena stands at its origin and its lake's surface at its own height 0
+	 * (Tools/import_land.py). It is set with its lake WaterDepth below the plots' level ground, so
+	 * the arena's land rises out of its lake, and made LandScale times its size, so the lake's open
+	 * water is wider than the widest arena. Empty: round the arena is haze. Set in DefaultGame.ini.
 	 */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	FSoftObjectPath Land;
@@ -248,9 +295,8 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	FSoftObjectPath LandWater;
 
-	/** How far below the bases the land's lake lies. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
-	float LandDepth = 60000.0f;
+	float LandScale = 1.5f;
 
 	/** The land as this machine drew it: none on a machine with no screen. */
 	const TArray<TObjectPtr<UStaticMeshComponent>>& GetLand() const { return LandParts; }
@@ -287,6 +333,9 @@ private:
 
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> LandParts;
+
+	UPROPERTY()
+	TObjectPtr<UProceduralMeshComponent> Ground;
 
 	UPROPERTY()
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> Tints;

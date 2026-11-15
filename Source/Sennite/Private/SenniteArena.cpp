@@ -8,6 +8,7 @@
 #include "GameFramework/PlayerStart.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
+#include "ProceduralMeshComponent.h"
 
 namespace
 {
@@ -24,6 +25,8 @@ namespace
 		/** How long the connector is between its two bases, and how wide. */
 		float Length;
 		float Width;
+		/** How high the bed of a gorge is: under the water. What stands in a gorge stands on it. */
+		float Bed;
 
 		float R(float Low, float High) { return Rand.FRandRange(Low, High); }
 		bool Chance(float Odds) { return Rand.FRand() < Odds; }
@@ -87,8 +90,8 @@ namespace
 		void Bridges();
 	};
 
-	// Pieces to jump between, in several lanes, with nothing under them: some small, some broad enough
-	// to fight on, some carrying a wall to shoot from behind.
+	// A gorge, and pieces hanging over it to jump between, in several lanes: some small, some broad
+	// enough to fight on, some carrying a wall to shoot from behind. The one crossing that floats.
 	void FBuilder::Floating()
 	{
 		const float Half = Width * 0.5f;
@@ -144,7 +147,8 @@ namespace
 		Step(FVector(Length + 100.0f, 0.0f, 0.0f));
 	}
 
-	// A boardwalk between huts on tall trunks: a ramp up from each base, planks from hut to hut.
+	// A boardwalk between huts on tall trunks, over a forest that stands on the ground between the
+	// plots: a ramp up from each plot, planks from hut to hut. The ground under it can be walked too.
 	void FBuilder::TreeTop()
 	{
 		const float High = R(900.0f, 1300.0f);
@@ -261,7 +265,7 @@ namespace
 		Step(FVector(Length + 100.0f, 0.0f, 0.0f));
 	}
 
-	// An open deck that hovering craft cross, lane after lane, without stopping.
+	// A road across the land that hovering craft cross, lane after lane, without stopping.
 	void FBuilder::Traffic()
 	{
 		const float Half = Width * 0.5f;
@@ -307,7 +311,7 @@ namespace
 		Step(FVector(Length + 100.0f, 0.0f, 0.0f));
 	}
 
-	// A solid mass with one passage through it, which turns.
+	// A mass of rock standing on the land with one passage through it, which turns.
 	void FBuilder::Tunnel()
 	{
 		const float Cell = 960.0f;
@@ -357,7 +361,9 @@ namespace
 		}
 	}
 
-	// Spans over the drop: always one that is whole and level, the others arched or broken.
+	// A river gorge with arched bridges over it: always one that is whole, the others a higher arch
+	// or one broken at a gap to jump. Every bridge rises from each bank to a crown over the middle of
+	// the river and stands on piers that go down to the river's bed.
 	void FBuilder::Bridges()
 	{
 		const float Half = Width * 0.5f;
@@ -374,39 +380,114 @@ namespace
 		const int32 Count = Rand.RandRange(FMath::Max(2, Places / 2), Places);
 		const float X0 = 150.0f;
 		const float X1 = Length - 150.0f;
+		const float Middle = (X0 + X1) * 0.5f;
+		const float HalfSpan = (X1 - X0) * 0.5f;
+		const int32 Pieces = 16;
 		for (int32 Each = 0; Each < Count; ++Each) {
 			const float Y = Lines[Each];
 			const float Wide = R(300.0f, 600.0f);
 			// the first is the sure way; the others are one of three sorts
 			const int32 Sort = Each == 0 ? 0 : Rand.RandRange(0, 2);
-			if (Sort == 1) {
-				const float Rise = R(500.0f, 1100.0f);
-				const float Third = (X1 - X0) / 3.0f;
-				Ramp(X0, 0.0f, X0 + Third, Rise, Y, Wide, EArenaTint::Bridge);
-				Slab(X0 + Third, X1 - Third, Y - Wide * 0.5f, Y + Wide * 0.5f, Rise, 30.0f, EArenaTint::Bridge);
-				Ramp(X1 - Third, Rise, X1, 0.0f, Y, Wide, EArenaTint::Bridge);
+			const float Rise = Sort == 1 ? R(1400.0f, 2000.0f) : R(700.0f, 1100.0f);
+			const float Break = R(Length * 0.35f, Length * 0.65f);
+			const float Gap = Sort == 2 ? R(190.0f, 250.0f) : 0.0f;
+			// how high the deck is at a place along it: an arch, level with the banks at its ends
+			const auto DeckAt = [Middle, HalfSpan, Rise](float X) {
+				const float Out = (X - Middle) / HalfSpan;
+				return Rise * (1.0f - Out * Out);
+			};
+			const auto Deck = [this, &DeckAt, Y, Wide](float From, float To) {
+				if (To - From > 30.0f) {
+					Ramp(From, DeckAt(From), To, DeckAt(To), Y, Wide, EArenaTint::Bridge, 40.0f);
+				}
+			};
+			for (int32 Piece = 0; Piece < Pieces; ++Piece) {
+				const float From = FMath::Lerp(X0, X1, Piece / float(Pieces));
+				const float To = FMath::Lerp(X0, X1, (Piece + 1) / float(Pieces));
+				if (Gap <= 0.0f || To <= Break - Gap * 0.5f || From >= Break + Gap * 0.5f) {
+					Deck(From, To);
+				}
+				else {
+					// the broken one: its deck stops each side of the gap
+					Deck(From, Break - Gap * 0.5f);
+					Deck(Break + Gap * 0.5f, To);
+				}
 			}
-			else if (Sort == 2) {
-				const float Break = R(Length * 0.35f, Length * 0.65f);
-				const float Gap = R(190.0f, 250.0f);
-				Slab(X0, Break - Gap * 0.5f, Y - Wide * 0.5f, Y + Wide * 0.5f, FloorTop, 30.0f, EArenaTint::Bridge);
-				Slab(Break + Gap * 0.5f, X1, Y - Wide * 0.5f, Y + Wide * 0.5f, FloorTop, 30.0f, EArenaTint::Bridge);
-			}
-			else {
-				Slab(X0, X1, Y - Wide * 0.5f, Y + Wide * 0.5f, FloorTop, 30.0f, EArenaTint::Bridge);
+			// piers under it, down to the bed of the river
+			for (const float Out : { -0.6f, -0.2f, 0.2f, 0.6f }) {
+				const float X = Middle + Out * HalfSpan;
+				if (Gap <= 0.0f || FMath::Abs(X - Break) > Gap * 0.5f + 150.0f) {
+					const float Top = DeckAt(X) - 40.0f;
+					Box(FVector(X, Y, (Top + Bed) * 0.5f), FVector(160.0f, Wide * 0.6f, Top - Bed), EArenaTint::Bridge);
+				}
 			}
 			if (Sort != 1) {
 				// low walls down alternate sides: something to stand behind
 				int32 Post = 0;
 				for (float X = X0 + 900.0f; X < X1 - 600.0f; X += 1300.0f, ++Post) {
-					Box(FVector(X, Y + (Post % 2 == 0 ? 1.0f : -1.0f) * (Wide * 0.5f - 15.0f), 60.0f), FVector(R(120.0f, 260.0f), 30.0f, 120.0f), EArenaTint::Cover);
+					const float Long = R(120.0f, 260.0f);
+					Box(FVector(X, Y + (Post % 2 == 0 ? 1.0f : -1.0f) * (Wide * 0.5f - 15.0f), DeckAt(X) + 60.0f), FVector(Long, 30.0f, 120.0f), EArenaTint::Cover);
 				}
 			}
 			if (Each == 0) {
 				Step(FVector(-100.0f, Y, 0.0f));
+				Step(FVector(Middle, Y, Rise));
 				Step(FVector(Length + 100.0f, Y, 0.0f));
 			}
 		}
+	}
+
+	double Smooth(double Low, double High, double Value)
+	{
+		return FMath::SmoothStep(Low, High, Value);
+	}
+
+	/** Where a place is in a connector's strip, which runs from one plot's edge to the other's and is the connector's width across; and how far outside it. */
+	struct FStripPlace
+	{
+		double Along = 0.0;
+		double Across = 0.0;
+		double Outside = 0.0;
+	};
+
+	FStripPlace InStrip(const FArenaPlan& Plan, const FArenaConnector& Connector, double X, double Y)
+	{
+		const FVector Local = Connector.Frame.InverseTransformPosition(FVector(X, Y, 0.0));
+		const double Neck = Plan.Reach - Plan.Size.BaseRadius + 400.0;
+		const double OutAlong = FMath::Max3(-Neck - Local.X, Local.X - (Plan.Size.ConnectorLength + Neck), 0.0);
+		const double OutAcross = FMath::Max(FMath::Abs(Local.Y) - Plan.Size.ConnectorWidth * 0.5, 0.0);
+		FStripPlace Place;
+		Place.Along = Local.X;
+		Place.Across = Local.Y;
+		Place.Outside = FMath::Sqrt(OutAlong * OutAlong + OutAcross * OutAcross);
+		return Place;
+	}
+
+	/** A way over a gorge: the land stops at each end of it and the ground between goes down under the water. */
+	bool IsGorge(EConnectorKind Kind)
+	{
+		return Kind == EConnectorKind::Floating || Kind == EConnectorKind::Bridges;
+	}
+
+	/** How far along a way over a gorge the land of a mouth reaches, from that end: past what the connector lays there to stand on. */
+	double MouthOf(EConnectorKind Kind, bool bFar)
+	{
+		// A river has banks: 50 m of level ground under each end of its bridges, then the slope to the
+		// water. The gorge the floating pieces hang over is the whole way across, but for where they
+		// are stood on: the far landing may begin as much as 18.7 m short of the far plot.
+		if (Kind == EConnectorKind::Bridges) {
+			return 5000.0;
+		}
+		return bFar ? 2300.0 : 600.0;
+	}
+
+	/** How far the hills take to rise from level ground: long enough that the rise is a slope to walk, not a wall. */
+	constexpr double LevelEase = 4500.0;
+
+	/** How far under a plot's level ground the bed of the lake, and of a gorge, lies. */
+	double BedOf(const FArenaSizes& Size)
+	{
+		return -(Size.WaterDepth + 800.0);
 	}
 
 	uint32 HashOf(const FArenaPlan& Plan)
@@ -431,6 +512,10 @@ namespace
 			Mix(Craft.LaneStart);
 			Mix(FVector(Craft.Speed, Craft.Offset, Craft.LaneLength));
 		}
+		Mix(FVector(Plan.HillsAt.X, Plan.HillsAt.Y, Plan.Reach));
+		Mix(FVector(Plan.RipplesAt.X, Plan.RipplesAt.Y, Plan.Size.HillHeight));
+		Mix(FVector(Plan.CoastAt.X, Plan.CoastAt.Y, Plan.Size.WaterDepth));
+		Mix(FVector(Plan.Size.PadRadius, Plan.Size.BaseRadius, Plan.Size.ConnectorWidth));
 		for (const FArenaProp& Piece : Plan.Props) {
 			Mix(Piece.Transform.GetLocation());
 			Mix(Piece.Transform.GetRotation().Rotator().Euler());
@@ -468,7 +553,70 @@ FArenaSizes ASenniteArena::Sizes()
 	Out.ConnectorWidth = Settings->ConnectorWidth;
 	Out.TreesPerBase = Settings->TreesPerBase;
 	Out.BushesPerBase = Settings->BushesPerBase;
+	Out.PadRadius = Settings->PadRadius;
+	Out.WaterDepth = Settings->WaterDepth;
+	Out.HillHeight = Settings->HillHeight;
 	return Out;
+}
+
+double ASenniteArena::OutsideLand(const FArenaPlan& Plan, double X, double Y)
+{
+	double Out = TNumericLimits<double>::Max();
+	for (const FVector& Base : Plan.Bases) {
+		Out = FMath::Min(Out, FMath::Max(0.0, FVector2D::Distance(FVector2D(X, Y), FVector2D(Base)) - Plan.Size.BaseRadius));
+	}
+	// how far outside any gorge: the coast keeps to its outline there, so a river's banks stand where the bridges begin
+	double FromGorge = TNumericLimits<double>::Max();
+	for (const FArenaConnector& Connector : Plan.Connectors) {
+		const FStripPlace Place = InStrip(Plan, Connector, X, Y);
+		if (!IsGorge(Connector.Kind)) {
+			Out = FMath::Min(Out, Place.Outside);
+			continue;
+		}
+		// a way over a gorge is land only at its two mouths; between them is the gorge, open to the lake at both sides
+		const double Near = MouthOf(Connector.Kind, false);
+		const double Far = Plan.Size.ConnectorLength - MouthOf(Connector.Kind, true);
+		const double Neck = Plan.Reach - Plan.Size.BaseRadius + 400.0;
+		const double PastMouth = Place.Along < (Near + Far) * 0.5
+			? FMath::Max3(Place.Along - Near, -Neck - Place.Along, 0.0)
+			: FMath::Max3(Far - Place.Along, Place.Along - (Plan.Size.ConnectorLength + Neck), 0.0);
+		Out = FMath::Min(Out, FMath::Sqrt(PastMouth * PastMouth + FMath::Square(FMath::Max(FMath::Abs(Place.Across) - Plan.Size.ConnectorWidth * 0.5, 0.0))));
+		FromGorge = FMath::Min(FromGorge, Place.Outside);
+	}
+	// the coast wanders: the land reaches 10 to 60 m past its outline, farther in some places than others
+	const double Wander = (1000.0 + (CoastReach - 1000.0) * 0.5 * (1.0 + FMath::PerlinNoise2D(FVector2D(X, Y) / 6000.0 + Plan.CoastAt))) * Smooth(0.0, 3000.0, FromGorge);
+	return FMath::Max(0.0, Out - Wander);
+}
+
+double ASenniteArena::GroundHeight(const FArenaPlan& Plan, double X, double Y)
+{
+	const FArenaSizes& Size = Plan.Size;
+	const FVector2D At(X, Y);
+	// the hills: broad ones, with ripples over them, a little more up than down
+	const double Hills = Size.HillHeight * (0.45 + FMath::PerlinNoise2D(At / 14000.0 + Plan.HillsAt))
+		+ Size.HillHeight * 0.12 * FMath::PerlinNoise2D(At / 4000.0 + Plan.RipplesAt);
+	// level where things stand: each plot's pad, for a faction's buildings, and where a connector meets the land
+	double Level = 0.0;
+	for (const FVector& Base : Plan.Bases) {
+		Level = FMath::Max(Level, 1.0 - Smooth(Size.PadRadius, Size.PadRadius + LevelEase, FVector2D::Distance(At, FVector2D(Base))));
+	}
+	TArray<TPair<double, double>, TInlineAllocator<6>> Strips;
+	for (const FArenaConnector& Connector : Plan.Connectors) {
+		const FStripPlace Place = InStrip(Plan, Connector, X, Y);
+		const double Weight = 1.0 - Smooth(0.0, LevelEase, Place.Outside);
+		if (Weight <= 0.0) {
+			continue;
+		}
+		Level = FMath::Max(Level, Weight);
+		// a connector's own ground lies a hair under its floor; where it is a way over a gorge the shore, below, takes the ground down between its mouths
+		Strips.Emplace(Weight, FloorTop - 4.0);
+	}
+	double Height = Hills * (1.0 - Level);
+	for (const TPair<double, double>& Strip : Strips) {
+		Height = FMath::Lerp(Height, Strip.Value, Strip.Key);
+	}
+	// the shore, and a gorge's banks: past the land's outline the ground goes down under the water
+	return FMath::Lerp(Height, BedOf(Size), Smooth(0.0, ShoreWidth, OutsideLand(Plan, X, Y)));
 }
 
 FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind)
@@ -484,6 +632,13 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 	const float Length = ConnectorLength;
 	FArenaPlan Plan;
 	Plan.Seed = Seed;
+	Plan.Size = Size;
+	// where the hills, their ripples and the coast's wander are taken from, drawn one at a time from a stream of their own
+	FRandomStream Lay(Seed ^ 0x4C414E44);
+	for (FVector2D* Shift : { &Plan.HillsAt, &Plan.RipplesAt, &Plan.CoastAt }) {
+		Shift->X = Lay.FRandRange(-500.0f, 500.0f);
+		Shift->Y = Lay.FRandRange(-500.0f, 500.0f);
+	}
 	FRandomStream Rand(Seed);
 	const int32 Bases = FMath::Clamp(BaseCount, 2, static_cast<int32>(EConnectorKind::Count));
 
@@ -509,14 +664,7 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 		Plan.Bases.Add(FRotator(0.0f, Turn + Base * 360.0f / Bases, 0.0f).RotateVector(FVector(Ring, 0.0f, 0.0f)));
 	}
 
-	// An island under each base, each turned a different way. The plan gives where and which way;
-	// the arena sizes and sets it when it builds (IslandWidth).
-	for (int32 Base = 0; Base < Bases; ++Base) {
-		FArenaProp Island;
-		Island.Scenery = EArenaScenery::Island;
-		Island.Transform = FTransform(FRotator(0.0f, Rand.FRandRange(0.0f, 360.0f), 0.0f), Plan.Bases[Base]);
-		Plan.Props.Add(Island);
-	}
+	Plan.Reach = Reach;
 
 	Plan.Connectors.SetNum(Links);
 	for (int32 Link = 0; Link < Links; ++Link) {
@@ -527,12 +675,8 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 		Connector.Frame = FTransform(Along.Rotation(), Plan.Bases[Connector.FromBase] + Along * Reach);
 		Connector.Kind = ForcedKind >= 0 && ForcedKind < static_cast<int32>(EConnectorKind::Count) ? static_cast<EConnectorKind>(ForcedKind) : Kinds[Link % Kinds.Num()];
 
-		FBuilder Builder{ Plan, Connector, Rand, Link, ConnectorLength, ConnectorWidth };
-		if (Reach > BaseRadius + 1.0f) {
-			// a neck from each base out to where the connector starts
-			Builder.Slab(-(Reach - BaseRadius) - 300.0f, -380.0f, -ConnectorWidth * 0.5f, ConnectorWidth * 0.5f, FloorTop - 2.0f, 100.0f, EArenaTint::Base);
-			Builder.Slab(Length + 380.0f, Length + (Reach - BaseRadius) + 300.0f, -ConnectorWidth * 0.5f, ConnectorWidth * 0.5f, FloorTop - 2.0f, 100.0f, EArenaTint::Base);
-		}
+		// where a connector starts short of its plot's edge, the land between is ground like any other
+		FBuilder Builder{ Plan, Connector, Rand, Link, ConnectorLength, ConnectorWidth, static_cast<float>(BedOf(Size)) };
 		switch (Connector.Kind) {
 		case EConnectorKind::Floating: Builder.Floating(); break;
 		case EConnectorKind::TreeTop: Builder.TreeTop(); break;
@@ -546,13 +690,27 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 		Home.Point = Plan.Bases[Connector.ToBase] - Along * (BaseRadius * 0.5f);
 		Connector.Route.Add(Home);
 	}
-	// Trees and bushes round the rim of each base, clear of every way out of it. They come from a
-	// stream of their own, so everything else of the arena is what its seed made before there were
-	// any. A tree is scenery over a trunk block, which is what a hero or a shot meets; the block is
-	// seen only if the tree is missing. A bush is scenery alone.
+	// Trees and bushes on the land of each plot, outside its pad and clear of every way out of it, each
+	// standing on the ground where it is. They come from a stream of their own, so everything else of
+	// the arena is what its seed makes with none. A tree is scenery over a trunk block, which is what a
+	// hero or a shot meets; the block is seen only if the tree is missing. A bush is scenery alone.
 	FRandomStream Green(Seed ^ 0x47524E);
 	const int32 TreeKinds = static_cast<int32>(EArenaScenery::BushA) - static_cast<int32>(EArenaScenery::TreeA);
 	const int32 BushKinds = static_cast<int32>(EArenaScenery::Count) - static_cast<int32>(EArenaScenery::BushA);
+	const auto StandTree = [&Plan, &Green, TreeKinds](const FVector& At) {
+		const FRotator Turned(0.0f, Green.FRandRange(0.0f, 360.0f), 0.0f);
+		const float Grown = Green.FRandRange(0.8f, 1.2f);
+		FArenaProp Piece;
+		Piece.Scenery = static_cast<EArenaScenery>(static_cast<int32>(EArenaScenery::TreeA) + Green.RandRange(0, TreeKinds - 1));
+		Piece.Transform = FTransform(Turned, At, FVector(Grown));
+		Plan.Props.Add(Piece);
+		FArenaBox Trunk;
+		Trunk.Size = FVector(60.0f, 60.0f, 300.0f) * Grown;
+		Trunk.Centre = At + FVector(0.0f, 0.0f, Trunk.Size.Z * 0.5f);
+		Trunk.Rotation = Turned.Quaternion();
+		Trunk.Tint = EArenaTint::Hidden;
+		Plan.Boxes.Add(Trunk);
+	};
 	for (int32 Base = 0; Base < Bases; ++Base) {
 		// the ways out: toward each base this one is joined to
 		TArray<FVector> Ways;
@@ -578,30 +736,28 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 		TArray<FVector> Trunks;
 		for (int32 Tree = 0; Tree < Size.TreesPerBase; ++Tree) {
 			for (int32 Try = 0; Try < 12; ++Try) {
-				const FVector At = Somewhere(0.80f, 0.94f);
+				FVector At = Somewhere(0.66f, 0.97f);
 				if (!Clear(At, 600.0f) || Trunks.ContainsByPredicate([&At](const FVector& Other) { return FVector::Dist2D(At, Other) < 900.0f; })) {
 					continue;
 				}
-				const FRotator Turned(0.0f, Green.FRandRange(0.0f, 360.0f), 0.0f);
-				const float Grown = Green.FRandRange(0.8f, 1.2f);
-				FArenaProp Piece;
-				Piece.Scenery = static_cast<EArenaScenery>(static_cast<int32>(EArenaScenery::TreeA) + Green.RandRange(0, TreeKinds - 1));
-				Piece.Transform = FTransform(Turned, At, FVector(Grown));
-				Plan.Props.Add(Piece);
-				FArenaBox Trunk;
-				Trunk.Size = FVector(60.0f, 60.0f, 300.0f) * Grown;
-				Trunk.Centre = At + FVector(0.0f, 0.0f, Trunk.Size.Z * 0.5f);
-				Trunk.Rotation = Turned.Quaternion();
-				Trunk.Tint = EArenaTint::Hidden;
-				Plan.Boxes.Add(Trunk);
+				// on the ground there, and not where it has begun to fall toward a gorge or the water
+				At.Z = GroundHeight(Plan, At.X, At.Y);
+				if (At.Z < -300.0) {
+					continue;
+				}
+				StandTree(At);
 				Trunks.Add(At);
 				break;
 			}
 		}
 		for (int32 Bush = 0; Bush < Size.BushesPerBase; ++Bush) {
 			for (int32 Try = 0; Try < 6; ++Try) {
-				const FVector At = Somewhere(0.70f, 0.97f);
+				FVector At = Somewhere(0.50f, 0.99f);
 				if (!Clear(At, 200.0f) || Trunks.ContainsByPredicate([&At](const FVector& Other) { return FVector::Dist2D(At, Other) < 250.0f; })) {
+					continue;
+				}
+				At.Z = GroundHeight(Plan, At.X, At.Y);
+				if (At.Z < -300.0) {
 					continue;
 				}
 				FArenaProp Piece;
@@ -611,6 +767,29 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 				const float Grown = Green.FRandRange(0.8f, 1.4f);
 				Piece.Transform = FTransform(FRotator(0.0f, Turned, 0.0f), At, FVector(Grown));
 				Plan.Props.Add(Piece);
+				break;
+			}
+		}
+	}
+
+	// A forest under each tree-top boardwalk: four plots' worth of trees on the ground between its two
+	// plots, at least 7 m apart, their tops above the walk.
+	for (const FArenaConnector& Connector : Plan.Connectors) {
+		if (Connector.Kind != EConnectorKind::TreeTop) {
+			continue;
+		}
+		TArray<FVector> Trunks;
+		for (int32 Tree = 0; Tree < Size.TreesPerBase * 4; ++Tree) {
+			for (int32 Try = 0; Try < 8; ++Try) {
+				const float Along = Green.FRandRange(1500.0f, ConnectorLength - 1500.0f);
+				const float Across = Green.FRandRange(-ConnectorWidth * 0.5f + 400.0f, ConnectorWidth * 0.5f - 400.0f);
+				FVector At = Connector.Frame.TransformPosition(FVector(Along, Across, 0.0f));
+				if (Trunks.ContainsByPredicate([&At](const FVector& Other) { return FVector::Dist2D(At, Other) < 700.0f; })) {
+					continue;
+				}
+				At.Z = GroundHeight(Plan, At.X, At.Y);
+				StandTree(At);
+				Trunks.Add(At);
 				break;
 			}
 		}
@@ -688,16 +867,9 @@ void ASenniteArena::OnRep_Arena()
 void ASenniteArena::Build()
 {
 	Plan = MakePlan(MatchSeed, MatchBases, MatchForcedKind);
-	UStaticMesh* Cube = Cast<UStaticMesh>(BlockShape.TryLoad());
-	UStaticMesh* Disc = Cast<UStaticMesh>(BaseShape.TryLoad());
-	UMaterialInterface* Material = Cast<UMaterialInterface>(BlockMaterial.TryLoad());
-	if (Cube == nullptr || Disc == nullptr || Material == nullptr) {
-		UE_LOG(LogTemp, Error, TEXT("The arena's shapes or material did not load (%s, %s, %s); there is nothing to stand on"), *BlockShape.ToString(), *BaseShape.ToString(), *BlockMaterial.ToString());
-		return;
-	}
+	const FArenaSizes& Size = Plan.Size;
 
-	// the ground of a base, and the road of a deck or a span: its own material when one is set and
-	// loads, else the plain tint of that sort of block
+	// what the land, and the road of a deck or a span, is drawn with: its own material when one is set and loads
 	const auto Surface = [](const FSoftObjectPath& Named, const TCHAR* What) -> UMaterialInterface* {
 		UMaterialInterface* Loaded = Named.IsNull() ? nullptr : Cast<UMaterialInterface>(Named.TryLoad());
 		if (!Named.IsNull() && Loaded == nullptr) {
@@ -705,12 +877,97 @@ void ASenniteArena::Build()
 		}
 		return Loaded;
 	};
-	UMaterialInterface* Ground = Surface(BaseGround, TEXT("The ground of a base"));
+
+	// The land: one mesh of ground, a point every GroundCell, wherever the plan's ground is land or
+	// shore. It is what heroes stand on, so it is made first, on every machine, under one name. The
+	// part of it under the water is the lake's bed.
+	{
+		FBox2D Reaches(ForceInit);
+		for (const FVector& Base : Plan.Bases) {
+			Reaches += FVector2D(Base) - FVector2D(Size.BaseRadius);
+			Reaches += FVector2D(Base) + FVector2D(Size.BaseRadius);
+		}
+		for (const FArenaConnector& Connector : Plan.Connectors) {
+			const double Neck = Plan.Reach - Size.BaseRadius + 400.0;
+			for (const double Along : { -Neck, Size.ConnectorLength + Neck }) {
+				for (const double Across : { -Size.ConnectorWidth * 0.5, Size.ConnectorWidth * 0.5 }) {
+					Reaches += FVector2D(Connector.Frame.TransformPosition(FVector(Along, Across, 0.0)));
+				}
+			}
+		}
+		// past the outline: as far as the coast wanders, then the shore, and a cell more
+		const double Past = CoastReach + ShoreWidth + GroundCell;
+		const FVector2D Corner = Reaches.Min - FVector2D(Past);
+		const int32 Across = FMath::CeilToInt32((Reaches.Max.X - Reaches.Min.X + 2.0 * Past) / GroundCell) + 1;
+		const int32 Down = FMath::CeilToInt32((Reaches.Max.Y - Reaches.Min.Y + 2.0 * Past) / GroundCell) + 1;
+		TArray<double> High;
+		TArray<bool> bLand;
+		High.SetNumUninitialized(Across * Down);
+		bLand.SetNumUninitialized(Across * Down);
+		for (int32 Row = 0; Row < Down; ++Row) {
+			for (int32 Column = 0; Column < Across; ++Column) {
+				const double X = Corner.X + Column * GroundCell;
+				const double Y = Corner.Y + Row * GroundCell;
+				High[Row * Across + Column] = GroundHeight(Plan, X, Y);
+				bLand[Row * Across + Column] = OutsideLand(Plan, X, Y) < ShoreWidth + GroundCell;
+			}
+		}
+		// a cell is made if any corner of it is land or shore; a point is kept if a cell that is made uses it
+		TArray<int32> Kept;
+		Kept.Init(INDEX_NONE, Across * Down);
+		TArray<FVector> Points;
+		TArray<FVector> Normals;
+		TArray<FVector2D> Places;
+		TArray<int32> Corners;
+		const auto Point = [&](int32 Column, int32 Row) {
+			int32& Index = Kept[Row * Across + Column];
+			if (Index == INDEX_NONE) {
+				Index = Points.Num();
+				const auto At = [&](int32 C, int32 R) { return High[FMath::Clamp(R, 0, Down - 1) * Across + FMath::Clamp(C, 0, Across - 1)]; };
+				Points.Add(FVector(Corner.X + Column * GroundCell, Corner.Y + Row * GroundCell, At(Column, Row)));
+				Normals.Add(FVector(At(Column - 1, Row) - At(Column + 1, Row), At(Column, Row - 1) - At(Column, Row + 1), 2.0 * GroundCell).GetSafeNormal());
+				Places.Add(FVector2D(Points.Last().X, Points.Last().Y) / 100.0);
+			}
+			return Index;
+		};
+		for (int32 Row = 0; Row + 1 < Down; ++Row) {
+			for (int32 Column = 0; Column + 1 < Across; ++Column) {
+				if (!bLand[Row * Across + Column] && !bLand[Row * Across + Column + 1] && !bLand[(Row + 1) * Across + Column] && !bLand[(Row + 1) * Across + Column + 1]) {
+					continue;
+				}
+				const int32 A = Point(Column, Row);
+				const int32 B = Point(Column, Row + 1);
+				const int32 C = Point(Column + 1, Row + 1);
+				const int32 D = Point(Column + 1, Row);
+				// wound to face up
+				Corners.Append({ A, B, D, B, C, D });
+			}
+		}
+		Ground = NewObject<UProceduralMeshComponent>(this, TEXT("ArenaGround"));
+		Ground->bUseComplexAsSimpleCollision = true;
+		Ground->SetCollisionProfileName(TEXT("BlockAll"));
+		Ground->SetCanEverAffectNavigation(false);
+		Ground->SetNetAddressable();
+		Ground->SetupAttachment(RootComponent);
+		Ground->RegisterComponent();
+		Ground->SetWorldTransform(FTransform::Identity);
+		Ground->CreateMeshSection_LinearColor(0, Points, Corners, Normals, Places, TArray<FLinearColor>(), TArray<FProcMeshTangent>(), true);
+		if (UMaterialInterface* Earth = Surface(BaseGround, TEXT("What the land is drawn with"))) {
+			Ground->SetMaterial(0, Earth);
+		}
+		UE_LOG(LogTemp, Display, TEXT("Arena ground: %d points, %d triangles, %.0f by %.0f m"), Points.Num(), Corners.Num() / 3, (Across - 1) * GroundCell / 100.0, (Down - 1) * GroundCell / 100.0);
+	}
+
+	UStaticMesh* Cube = Cast<UStaticMesh>(BlockShape.TryLoad());
+	UMaterialInterface* Material = Cast<UMaterialInterface>(BlockMaterial.TryLoad());
+	if (Cube == nullptr || Material == nullptr) {
+		UE_LOG(LogTemp, Error, TEXT("The arena's block shape or material did not load (%s, %s); there is land and nothing on it"), *BlockShape.ToString(), *BlockMaterial.ToString());
+		return;
+	}
 	UMaterialInterface* Road = Surface(RoadSurface, TEXT("The road of a deck or a span"));
 
 	// one colour to a sort of block, so each kind of connector reads at a glance
 	const FLinearColor Colours[static_cast<int32>(EArenaTint::Count)] = {
-		FLinearColor(0.20f, 0.21f, 0.23f),   // Base
 		FLinearColor(0.10f, 0.24f, 0.50f),   // Floating
 		FLinearColor(0.22f, 0.11f, 0.04f),   // Boardwalk
 		FLinearColor(0.05f, 0.03f, 0.02f),   // Trunk
@@ -731,7 +988,7 @@ void ASenniteArena::Build()
 		Set->SetCanEverAffectNavigation(false);
 		// A player stands on these. The server tells a joined machine where its hero is by what the
 		// hero stands on, so each machine must be able to name the same set: every machine makes them
-		// in the same order, under the same names.
+		// in the same order, under the same names, before any set of scenery.
 		Set->SetNetAddressable();
 		Set->SetupAttachment(RootComponent);
 		Set->RegisterComponent();
@@ -743,27 +1000,12 @@ void ASenniteArena::Build()
 		UMaterialInstanceDynamic* Face = UMaterialInstanceDynamic::Create(Material, this);
 		Face->SetVectorParameterValue(TEXT("Tint"), Colours[Tint]);
 		Tints.Add(Face);
-		// a base's own blocks are its ground too; the traffic deck and the bridge spans are road
-		UMaterialInterface* Drawn = Face;
-		if (Tint == static_cast<int32>(EArenaTint::Base) && Ground != nullptr) {
-			Drawn = Ground;
-		}
-		else if ((Tint == static_cast<int32>(EArenaTint::Deck) || Tint == static_cast<int32>(EArenaTint::Bridge)) && Road != nullptr) {
-			Drawn = Road;
-		}
-		ByTint.Add(MakeSet(Cube, Drawn));
+		// the traffic road and the bridges' decks are road
+		const bool bRoad = Tint == static_cast<int32>(EArenaTint::Deck) || Tint == static_cast<int32>(EArenaTint::Bridge);
+		ByTint.Add(MakeSet(Cube, bRoad && Road != nullptr ? Road : static_cast<UMaterialInterface*>(Face)));
 	}
 	for (const FArenaBox& Block : Plan.Boxes) {
 		ByTint[static_cast<int32>(Block.Tint)]->AddInstance(FTransform(Block.Rotation, Block.Centre, Block.Size / 100.0f), true);
-	}
-
-	// The bases: round platforms, their tops at the height everything is measured from. Made before
-	// the scenery's sets, so the name a machine gives this set, which heroes stand on, does not hang
-	// on how many pieces of scenery it could load.
-	const float Thick = 200.0f;
-	UInstancedStaticMeshComponent* Discs = MakeSet(Disc, Ground != nullptr ? Ground : static_cast<UMaterialInterface*>(Tints[static_cast<int32>(EArenaTint::Base)]));
-	for (const FVector& Base : Plan.Bases) {
-		Discs->AddInstance(FTransform(FQuat::Identity, Base - FVector(0.0f, 0.0f, Thick * 0.5f), FVector(BaseRadius / 50.0f, BaseRadius / 50.0f, Thick / 100.0f)), true);
 	}
 
 	// The scenery: seen, and nothing else. Blocks marked hidden are the walls and ground inside it;
@@ -798,22 +1040,14 @@ void ASenniteArena::Build()
 				Placed.SetScale3D(Scale);
 				Placed.AddToTranslation(-Placed.GetRotation().RotateVector(Bounds.GetCenter() * Scale));
 			}
-			if (Piece.Scenery == EArenaScenery::Island) {
-				// The island is the rock under a base. Its mesh is that rock alone, its flat top at its own
-				// height 0 and its middle over its origin; it is sized so its longer side is IslandWidth of
-				// the base's width, and set with its top inside the base's floor.
-				const FVector Size = Set->GetStaticMesh()->GetBoundingBox().GetSize();
-				const float Scale = BaseRadius * 2.0f * IslandWidth / FMath::Max(Size.X, Size.Y);
-				Placed.SetScale3D(FVector(Scale));
-				Placed.AddToTranslation(FVector(0.0f, 0.0f, -100.0f));
-			}
 			Set->AddInstance(Placed, true);
 		}
 	}
 	ByTint[static_cast<int32>(EArenaTint::Hidden)]->SetVisibility(!bAllScenery);
 
-	// The land far below: seen, and nothing else, so a machine with no screen does without it. Its
-	// meshes have the place the arena floats over at their origin and the lake's surface at height 0.
+	// The country round the arena: seen, and nothing else, so a machine with no screen does without
+	// it. Its meshes have the place the arena stands at their origin and the lake's surface at height
+	// 0: set WaterDepth below the plots' level ground, the arena's land rises out of its lake.
 	if (GetNetMode() != NM_DedicatedServer) {
 		for (const FSoftObjectPath& Named : { Land, LandWater }) {
 			if (Named.IsNull()) {
@@ -821,7 +1055,7 @@ void ASenniteArena::Build()
 			}
 			UStaticMesh* Mesh = Cast<UStaticMesh>(Named.TryLoad());
 			if (Mesh == nullptr) {
-				UE_LOG(LogTemp, Error, TEXT("'%s', part of the land below the arena, did not load; it is not drawn"), *Named.ToString());
+				UE_LOG(LogTemp, Error, TEXT("'%s', part of the country round the arena, did not load; it is not drawn"), *Named.ToString());
 				continue;
 			}
 			UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(this);
@@ -831,7 +1065,7 @@ void ASenniteArena::Build()
 			Part->SetCastShadow(false);
 			Part->SetupAttachment(RootComponent);
 			Part->RegisterComponent();
-			Part->SetWorldLocationAndRotation(FVector(0.0, 0.0, -LandDepth), FRotator::ZeroRotator);
+			Part->SetWorldTransform(FTransform(FRotator::ZeroRotator, FVector(0.0, 0.0, -Size.WaterDepth), FVector(LandScale)));
 			LandParts.Add(Part);
 		}
 	}
@@ -848,7 +1082,7 @@ void ASenniteArena::Build()
 		CraftBodies.Add(Body);
 	}
 
-	// on the server, a place to start on each base, facing the way out
+	// on the server, a place to start on each plot's pad, facing the way out
 	if (HasAuthority()) {
 		for (int32 Base = 0; Base < Plan.Bases.Num(); ++Base) {
 			const int32 Out = Plan.Connectors.IsValidIndex(Base) ? Base : 0;

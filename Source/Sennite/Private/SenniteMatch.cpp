@@ -210,7 +210,9 @@ void ASenniteMatch::BasesPlaced(const TArray<FString>& InFactions, const TArray<
 				bFound = Clear(At, 200.0f);
 			}
 		}
-		Starts.Add(FTransform(FRotator(0.0, Out.Rotation().Yaw, 0.0), (bFound ? At : Centre) + FVector(0.0, 0.0, 110.0)));
+		// standing on the land there: past the pad it is hills
+		const FVector On = bFound ? At : Centre;
+		Starts.Add(FTransform(FRotator(0.0, Out.Rotation().Yaw, 0.0), FVector(On.X, On.Y, ASenniteArena::GroundHeight(Plan, On.X, On.Y) + 110.0)));
 	}
 	bBases = true;
 	ASenniteCrate::Stock(GetWorld(), Starts, Built);

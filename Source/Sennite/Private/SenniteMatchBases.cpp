@@ -132,8 +132,9 @@ void ASenniteMatchBases::Place(const TArray<FSenniteMatchBaseView>& Bases)
 		}
 		const FVector2D Middle((Min.X + Max.X) * 0.5, (Min.Y + Max.Y) * 0.5);
 		for (const FIntPoint& Corner : View.Boundary) {
-			if (FVector2D::Distance(FVector2D(Corner.X, Corner.Y), Middle) > Arena->BaseRadius) {
-				Fail(FString::Printf(TEXT("parcel %s does not fit on a base of the arena"), *View.ParcelId));
+			// a faction's buildings stand on the level pad in the middle of its plot; past it the land is hills
+			if (FVector2D::Distance(FVector2D(Corner.X, Corner.Y), Middle) > Arena->PadRadius) {
+				Fail(FString::Printf(TEXT("parcel %s does not fit on the level ground of a plot of the arena"), *View.ParcelId));
 				return;
 			}
 		}

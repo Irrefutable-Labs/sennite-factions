@@ -1,6 +1,6 @@
-"""Build the arena map: sky, light, and one ASenniteArena, which lays out the bases and the connectors
-between them from a seed when a match starts. Nothing else is placed: the arena is all there is to
-stand on, and below it is the drop.
+"""Build the arena map: sky, light, haze, and one ASenniteArena, which makes the match's land (the
+plots, the connectors between them, the ground under both) from a seed when a match starts. Nothing
+else is placed: the arena's land is all there is to stand on, and round it is the water.
 
   UnrealEditor-Cmd Sennite.uproject -run=pythonscript -script=Tools/build_arena.py -unattended -nullrhi
 
@@ -88,18 +88,17 @@ for key, value in (("real_time_capture", True), ("cast_shadows", False), ("inten
     kc.set_editor_property(key, value)
 
 spawn(unreal.SkyAtmosphere, "atmosphere", folder="lights")
-# Haze. With no land below, a thin dense layer just under the arena: below it is nothing but haze.
-# With the land (the arena's Land setting, Tools/import_land.py), the haze lies on the land's lake,
-# LandDepth below the bases, and thins slowly upward: the lake is seen through it from above, the
-# mountains stand out of it, and the land's far edge is lost in it.
+# Haze. The arena's land rises out of a lake, WaterDepth below its plots' level ground. With the
+# country round it (the arena's Land setting, Tools/import_land.py), a thin haze lies on the lake
+# and thins slowly upward: the arena is clear, the mountains pale with distance, and the country's
+# far edge is lost in it. With no country, a dense layer on the water: round the arena is haze.
 rules = unreal.SenniteArena.get_default_object()
 has_land = rules.get_editor_property("land").export_text() not in ("", "None")
-land_depth = rules.get_editor_property("land_depth")
-fog = spawn(unreal.ExponentialHeightFog, "haze", unreal.Vector(0, 0, -land_depth if has_land else -2000), folder="lights")
-fog.component.set_editor_property("fog_density", 0.006 if has_land else 0.004)
+water_depth = rules.get_editor_property("water_depth")
+fog = spawn(unreal.ExponentialHeightFog, "haze", unreal.Vector(0, 0, -water_depth), folder="lights")
+fog.component.set_editor_property("fog_density", 0.0015 if has_land else 0.02)
 if has_land:
     fog.component.set_editor_property("fog_height_falloff", 0.05)
-unreal.log("ARENA haze: %s" % ("on the land's lake, %.0f cm below the bases" % land_depth if has_land else "just under the arena"))
 
 ppv = spawn(unreal.PostProcessVolume, "exposure", folder="lights")
 ppv.set_editor_property("unbound", True)
@@ -111,8 +110,8 @@ for key, value in (("override_auto_exposure_method", True), ("auto_exposure_meth
 ppv.set_editor_property("settings", s)
 
 world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
-# below this a player has fallen out of the arena
+# nobody comes back from the water: a hero whose middle is this far under its surface is out
 settings = world.get_world_settings()
-settings.set_editor_property("kill_z", -3000.0)
+settings.set_editor_property("kill_z", -water_depth - 150.0)
 if not unreal.EditorLoadingAndSavingUtils.save_map(world, MAP):
     raise RuntimeError("map did not save")
