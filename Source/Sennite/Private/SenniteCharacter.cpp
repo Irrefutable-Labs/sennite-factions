@@ -251,6 +251,7 @@ void ASenniteCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerI
 	PlayerInputComponent->BindAction("PreviewFloor", IE_Pressed, this, &ASenniteCharacter::PreviewFloor);
 	PlayerInputComponent->BindAction("SwitchBuildingMaterial", IE_Pressed, this, &ASenniteCharacter::SwitchBuildingMaterial);
 	PlayerInputComponent->BindAction("ShootGun", IE_Pressed, this, &ASenniteCharacter::ShootGun);
+	PlayerInputComponent->BindAction("ShootGun", IE_Released, this, &ASenniteCharacter::StopShooting);
 	PlayerInputComponent->BindAction("UseHealingItem", IE_Pressed, this, &ASenniteCharacter::UseHealingItem);
 	PlayerInputComponent->BindAction("Reload", IE_Pressed, this, &ASenniteCharacter::Reload);
 	PlayerInputComponent->BindAction("HoldPickaxe", IE_Pressed, this, &ASenniteCharacter::HoldPickaxe);
@@ -411,6 +412,22 @@ void ASenniteCharacter::Tick(float DeltaTime) {
 	if (HasAuthority() && CurrentStorm != nullptr) {
 		InStorm = FVector::Dist2D(GetActorLocation(), CurrentStorm->GetActorLocation()) > CurrentStorm->GetRadius();
 	}
+	// Something to pick up is offered when the hero first walks onto it, and refused if the hero is
+	// busy then (firing, reloading, building). A hero still standing on it is offered it again, a few
+	// times a second, so it is taken as soon as they are free.
+	if (HasAuthority()) {
+		SincePickupOffer += DeltaTime;
+		if (SincePickupOffer >= 0.3f) {
+			SincePickupOffer = 0.0f;
+			TArray<AActor*> Under;
+			GetOverlappingActors(Under);
+			for (AActor* Each : Under) {
+				if (IsValid(Each) && (Each->IsA<AWeaponActor>() || Each->IsA<AHealingActor>() || Each->IsA<AAmmunitionActor>())) {
+					OnOverlapBegin(nullptr, Each, nullptr, 0, false, FHitResult());
+				}
+			}
+		}
+	}
 	const bool bHideBuiltIn = CurrentWeapon != nullptr;
 	if (bHideBuiltIn != bBuiltInWeaponHidden && GetMesh() != nullptr) {
 		bBuiltInWeaponHidden = bHideBuiltIn;
@@ -523,34 +540,15 @@ void ASenniteCharacter::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AAct
 
 			}
 			else if (OtherActor->IsA(AHealingActor::StaticClass())) {
-				//pick up the item
+				// A pack of bandages or potions goes with what the hero carries. What is in hand stays in
+				// hand: walking over a pack does not take a weapon out of it.
 				AHealingActor* HealingActor = Cast<AHealingActor>(OtherActor);
-				ASennitePlayerState* State = Cast<ASennitePlayerState>(GetController()->PlayerState);
-				if (CurrentHealingItem) {
-					CurrentHealingItem->Destroy();
-					CurrentHealingItem = nullptr;
-				}
-				if (State) {
-					//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, OtherActor->GetName());
+				ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
+				if (State != nullptr && HealingActor->Holder == nullptr && State->HealingItemCounts.IsValidIndex(HealingActor->HealingType)) {
 					if (State->InBuildMode || State->JustShotRifle || State->JustShotShotgun || State->JustSwungPickaxe || State->JustUsedHealingItem || State->JustReloadedRifle || State->JustReloadedShotgun) {
 						return; // can't pick up items while in build mode or if just shot rifle, shot shotgun, swung pickaxe, used healing item, or reloaded
 					}
-					//CurrentHealingItem = Cast<AHealingActor>(OtherActor);
-					if (HealingActor->Holder != nullptr) {
-						return; // do nothing if someone is holding the healing item
-					}
-					//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString("didn't end early"));
-					// Destroy old weapon
-					if (CurrentWeapon && CurrentWeaponType > 0 && CurrentWeaponType < 3) {
-						State->EquippedWeaponsClips[CurrentWeaponType] = CurrentWeapon->CurrentBulletCount;
-					}
-					if (CurrentWeapon) {
-						CurrentWeapon->Destroy();
-						CurrentWeapon = nullptr;
-					}
-					// pick up healing item
 					State->HealingItemCounts[HealingActor->HealingType] += HealingActor->Count;
-					ClientGetHealingItemTransform(HealingActor->HealingType);
 					HealingActor->Destroy();
 				}
 			}
@@ -857,6 +855,24 @@ void ASenniteCharacter::SwitchBuildingMaterial() {
 
 void ASenniteCharacter::ShootGun() {
 	ServerFireWeapon();
+	// The rifle goes on firing while the button is held: a shot is asked for again a little slower
+	// than the server lets one out (0.233 s), so every one asked for is fired.
+	if (CurrentWeaponType == 1) {
+		GetWorldTimerManager().SetTimer(HeldFireTimer, this, &ASenniteCharacter::FireWhileHeld, 0.24f, true);
+	}
+}
+
+void ASenniteCharacter::FireWhileHeld() {
+	const ASennitePlayerState* State = GetPlayerState<ASennitePlayerState>();
+	if (CurrentWeaponType != 1 || CurrentWeapon == nullptr || State == nullptr || State->InBuildMode) {
+		StopShooting();
+		return;
+	}
+	ServerFireWeapon();
+}
+
+void ASenniteCharacter::StopShooting() {
+	GetWorldTimerManager().ClearTimer(HeldFireTimer);
 }
 
 void ASenniteCharacter::UseHealingItem() {
@@ -1185,6 +1201,7 @@ void ASenniteCharacter::ServerBuildStructure_Implementation(TSubclassOf<ABuildin
 			}
 			else {
 				State->MaterialCounts[MaterialType] -= BuildingPieceCost;
+				Piece->FactionId = State->FactionId;
 			}
 		}
 	}
@@ -2048,6 +2065,21 @@ void ASenniteCharacter::Die(ASenniteCharacter* Killer) {
 	if (BuildingPreview != nullptr) {
 		BuildingPreview->Destroy();
 		BuildingPreview = nullptr;
+	}
+	// The weapons the hero had lie where it fell, for whoever comes by: one of each kind, as new.
+	// What it carried besides (rounds, bandages, potions, materials) goes with it.
+	if (const ASennitePlayerState* Mine = GetPlayerState<ASennitePlayerState>()) {
+		const FVector Feet = GetActorLocation() - FVector(0.0, 0.0, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+		FActorSpawnParameters Spawn;
+		Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		int32 Laid = 0;
+		for (const int32 Kind : Mine->EquippedWeapons) {
+			UClass* Class = Kind == 1 ? ASenniteRifle::StaticClass() : (Kind == 2 ? ASenniteShotgun::StaticClass() : nullptr);
+			if (Class != nullptr) {
+				GetWorld()->SpawnActor<AWeaponActor>(Class, Feet + GetActorRightVector() * (Laid * 90.0 - 45.0) + FVector(0.0, 0.0, 60.0), FRotator(0.0, GetActorRotation().Yaw, 0.0), Spawn);
+				++Laid;
+			}
+		}
 	}
 	if (CurrentWeapon != nullptr) {
 		CurrentWeapon->Destroy();

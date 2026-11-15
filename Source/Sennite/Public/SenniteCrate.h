@@ -2,9 +2,9 @@
 //
 // A hero starts with a pickaxe. Crates stand by where heroes start on each base of an arena. A hero
 // beside a closed crate opens it (the OpenCrate key): the crate lays a rifle and a shotgun on the
-// ground in front of it, to be picked up by walking over them as any weapon is, and gives the hero
-// who opened it rounds for both. A while later it is closed and full again, and what nobody took is
-// gone.
+// ground in front of it and a pack of bandages and potions at its ends, to be picked up by walking
+// over them, and gives the hero who opened it rounds for both weapons. A while later it is closed
+// and full again, and what nobody took is gone.
 //
 // A crate is the long green ammunition crate of the Fab pack "Wooden Ammo Crates Pack", brought in by
 // Tools/import_crate.py. The model is one piece with no lid of its own, so an opened crate looks as

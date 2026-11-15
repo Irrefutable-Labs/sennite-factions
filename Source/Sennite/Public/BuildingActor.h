@@ -20,6 +20,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, Replicated, Category = "Health")
 	float Health;
 
+	/** The faction of the player who built it: in a match a shot counts on a piece only from another faction. Empty outside a match. */
+	UPROPERTY(Replicated)
+	FString FactionId;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Preview")
 	bool IsPreview;
 

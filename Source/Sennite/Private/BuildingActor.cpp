@@ -106,4 +106,5 @@ void ABuildingActor::GetLifetimeReplicatedProps(TArray< FLifetimeProperty > & Ou
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ABuildingActor, Health);
+	DOREPLIFETIME(ABuildingActor, FactionId);
 }

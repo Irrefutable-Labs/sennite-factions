@@ -44,6 +44,9 @@
 #include "SenniteWeapons.h"
 #include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
+#include "HealingActor.h"
+#include "SenniteHealing.h"
+#include "WeaponActor.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/CommandLine.h"
@@ -194,7 +197,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, FromAfar, Arm, Shoot, Reload, Restock, Done };
+		enum class EPhase { WaitForPawn, FromAfar, Arm, Shoot, Reload, Bandages, Restock, Done };
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
 		bool Fail(const FString& Why) { Test->AddError(Why); return true; }
@@ -205,6 +208,7 @@ namespace
 		double PhaseStart = 0.0;
 		int32 Step = 0;
 		FMatchArm Arm;
+		FMatchWalk ToPack;
 	};
 
 	bool FCratesRun::Update()
@@ -274,6 +278,17 @@ namespace
 			Test->TestEqual(TEXT("The crate gave the hero who opened it its rifle rounds"), State->EquippedWeaponsAmmunition[1], Arm.RoundsBefore + GetDefault<ASenniteCrate>()->RifleRounds);
 			Test->TestEqual(TEXT("and its shells"), State->EquippedWeaponsAmmunition[2], GetDefault<ASenniteCrate>()->ShotgunShells);
 			Test->TestEqual(TEXT("The rifle has a full magazine"), Hero->CurrentWeapon->CurrentBulletCount, Hero->CurrentWeapon->MagazineSize);
+			{
+				// at its ends: a pack of bandages and potions
+				int32 Bandages = 0, Potions = 0;
+				for (TActorIterator<AHealingActor> It(World); It; ++It) {
+					if (It->Holder == nullptr && Arm.Crate.IsValid() && FVector::Dist(It->GetActorLocation(), Arm.Crate->GetActorLocation()) < 400.0) {
+						Bandages += It->HealingType == 0 ? 1 : 0;
+						Potions += It->HealingType == 1 ? 1 : 0;
+					}
+				}
+				Test->TestTrue(TEXT("The opened crate laid out a pack of bandages and a pack of potions"), Bandages == 1 && Potions == 1);
+			}
 			GameCheck::Shot(TEXT("Crates"), TEXT("crate_opened.png"));
 			Enter(EPhase::Shoot, World);
 			return false;
@@ -309,8 +324,28 @@ namespace
 			}
 			Test->TestEqual(TEXT("The reload took one round of those the crate gave"), State->EquippedWeaponsAmmunition[1], Arm.RoundsBefore + GetDefault<ASenniteCrate>()->RifleRounds - 1);
 			UE_LOG(LogMatchCheck, Display, TEXT("GAMECHECK crates: fired and reloaded; %d rounds more"), State->EquippedWeaponsAmmunition[1]);
+			Enter(EPhase::Bandages, World);
+			return false;
+
+		case EPhase::Bandages: {
+			// a pack of bandages lies at one end of the crate: walk over it
+			const AHealingActor* Pack = nullptr;
+			for (TActorIterator<AHealingActor> It(World); It; ++It) {
+				if (It->Holder == nullptr && It->HealingType == 0 && Arm.Crate.IsValid() && FVector::Dist(It->GetActorLocation(), Arm.Crate->GetActorLocation()) < 400.0) {
+					Pack = *It;
+				}
+			}
+			if (Pack != nullptr && Elapsed(World) < 20.0) {
+				ToPack.Toward(Controller, Hero, Pack->GetActorLocation());
+				return false;
+			}
+			ToPack.Go(Controller, false);
+			Test->TestEqual(TEXT("Walking over the crate's bandages, the hero has them"), State->HealingItemCounts[0], GetDefault<ASenniteBandage>()->Count);
+			Test->TestTrue(TEXT("and the rifle is still in hand"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 1);
+			UE_LOG(LogMatchCheck, Display, TEXT("GAMECHECK crates: took the bandages (%d) by walking over them; the rifle is still in hand"), State->HealingItemCounts[0]);
 			Enter(EPhase::Restock, World);
 			return false;
+		}
 
 		case EPhase::Restock: {
 			if (!Arm.Crate.IsValid()) {
@@ -324,6 +359,17 @@ namespace
 				Lying += It->Holder == nullptr && FVector::Dist(It->GetActorLocation(), Arm.Crate->GetActorLocation()) < 500.0 ? 1 : 0;
 			}
 			Test->TestEqual(TEXT("What nobody took of the crate is gone when it is full again"), Lying, 0);
+			{
+				// what nobody took of it is gone: the shotgun, the bandages, the potions
+				int32 Left = 0;
+				for (TActorIterator<AHealingActor> It(World); It; ++It) {
+					Left += It->Holder == nullptr && FVector::Dist(It->GetActorLocation(), Arm.Crate->GetActorLocation()) < 400.0 ? 1 : 0;
+				}
+				for (TActorIterator<AWeaponActor> It(World); It; ++It) {
+					Left += It->Holder == nullptr && FVector::Dist(It->GetActorLocation(), Arm.Crate->GetActorLocation()) < 400.0 ? 1 : 0;
+				}
+				Test->TestEqual(TEXT("When the crate is full again, what nobody took of it is gone"), Left, 0);
+			}
 			UE_LOG(LogMatchCheck, Display, TEXT("GAMECHECK crates: closed and full again after %.0f s"), Elapsed(World));
 			UE_LOG(LogMatchCheck, Display, TEXT("GAMECHECK finished"));
 			Phase = EPhase::Done;

@@ -325,6 +325,11 @@ protected:
 	/* Set the animation variable as well as shoot a very small projectile from the gun or pickaxe*/
 	UFUNCTION()
 	void ShootGun();
+	/** The fire button let go: the rifle stops. */
+	void StopShooting();
+	/** The fire button still held with the rifle in hand: another shot. */
+	void FireWhileHeld();
+	FTimerHandle HeldFireTimer;
 
 	/* Set the animation variable as well as shoot a very small projectile from the gun*/
 	UFUNCTION()
@@ -424,6 +429,9 @@ public:
 	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 	// Tick function is called every frame
 	virtual void Tick(float DeltaTime) override;
+
+	/** How long since the hero was last offered what it stands on. On the server. */
+	float SincePickupOffer = 0.0f;
 	// Override playanimmontage to use pawn mesh
 	virtual float PlayAnimMontage(class UAnimMontage* AnimMontage, float InPlayRate = 1.f, FName StartSectionName = NAME_None) override;
 

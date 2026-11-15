@@ -24,6 +24,7 @@
 #include "SenniteWeapons.h"
 #include "Components/CapsuleComponent.h"
 #include "EngineUtils.h"
+#include "WeaponActor.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/GameStateBase.h"
@@ -207,7 +208,9 @@ namespace
 			return false;
 
 		case EPhase::Fallen:
-			if (Elapsed(World) < 1.5) {
+			// the server says so, the player's own machine hears it a little later: wait for the word, not for a set time
+			if (Elapsed(World) < 1.5 || (Elapsed(World) < 8.0 && !(State->IsSpectator() && Controller->GetPawn() != nullptr && Controller->GetPawn()->IsA<ASenniteSpectator>()
+				&& Hud->LastDrawn.Contains(TEXT("SPECTATING"))))) {
 				return false;
 			}
 			Test->TestTrue(TEXT("The fallen player is a spectator"), State->IsSpectator());
@@ -348,6 +351,12 @@ namespace
 					bOutOfTheWay &= Body->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Ignore && Body->GetCollisionResponseToChannel(ECC_WorldDynamic) == ECR_Ignore
 						&& Body->GetCollisionResponseToChannel(ECC_Visibility) == ECR_Ignore && !Body->GetGenerateOverlapEvents();
 				}
+				// each player took one of the range's two rifles; the fallen one's lies where they fell
+				int32 RiflesLying = 0;
+				for (TActorIterator<AWeaponActor> It(World); It; ++It) {
+					RiflesLying += It->Holder == nullptr && It->WeaponType == 1 ? 1 : 0;
+				}
+				Test->TestEqual(TEXT("The fallen player's rifle lies where they fell"), RiflesLying, 1);
 				Test->TestEqual(TEXT("The fallen player has one spectator on the server"), Watchers, 1);
 				Test->TestTrue(TEXT("The spectator is in nobody's way: players, bullets and aim pass through it"), bOutOfTheWay);
 				Test->TestTrue(TEXT("The host's HUD showed a hit marker"), bSawHitMarker);

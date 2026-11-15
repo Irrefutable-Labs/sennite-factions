@@ -8,6 +8,7 @@
 #include "MaterialActor.h"
 #include "SennitePlayerState.h"
 #include "SenniteHUD.h"
+#include "SenniteMatch.h"
 #include "SenniteStructure.h"
 #include "StormActor.h"
 #include "SennitePlayerController.h"
@@ -99,9 +100,14 @@ void AProjectileActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActo
 			return;
 		}
 		bSpent = true;
-		Piece->Health -= Damage;
-		if (Piece->Health <= 0) {
-			Piece->Destroy();
+		// In a match a shot counts on a piece as it does on a hero: from another faction than the
+		// one that built it, while the match is being played. The piece stops the bullet either way.
+		const ASenniteMatch* Match = ASenniteMatch::Find(GetWorld());
+		if (Match == nullptr || Match->Harms(Shooter, Piece->FactionId)) {
+			Piece->Health -= Damage;
+			if (Piece->Health <= 0) {
+				Piece->Destroy();
+			}
 		}
 		Destroy();
 		return;

@@ -2,6 +2,7 @@
 
 #include "SenniteArena.h"
 #include "SenniteCharacter.h"
+#include "SenniteHealing.h"
 #include "SennitePlayerState.h"
 #include "SenniteWeapons.h"
 #include "Components/SceneComponent.h"
@@ -69,6 +70,10 @@ bool ASenniteCrate::Open(ASenniteCharacter* By)
 	Laid.Reset();
 	Laid.Add(GetWorld()->SpawnActor<ASenniteRifle>(Front - Side, GetActorRotation(), Spawn));
 	Laid.Add(GetWorld()->SpawnActor<ASenniteShotgun>(Front + Side, GetActorRotation(), Spawn));
+	// and a pack of bandages and potions, one at each end of it, out of the way to the weapons
+	const FVector End = GetActorRightVector() * (Size.X * 0.5 + 70.0);
+	Laid.Add(GetWorld()->SpawnActor<ASenniteBandage>(GetActorLocation() - End + FVector(0.0, 0.0, 60.0), GetActorRotation(), Spawn));
+	Laid.Add(GetWorld()->SpawnActor<ASennitePotion>(GetActorLocation() + End + FVector(0.0, 0.0, 60.0), GetActorRotation(), Spawn));
 	// the rounds go to the hero who opened it
 	if (ASennitePlayerState* State = By->GetPlayerState<ASennitePlayerState>()) {
 		if (State->EquippedWeaponsAmmunition.IsValidIndex(2)) {
@@ -85,10 +90,11 @@ bool ASenniteCrate::Open(ASenniteCharacter* By)
 
 void ASenniteCrate::Restock()
 {
-	// what nobody took is gone; a weapon someone took is theirs
+	// what nobody took is gone; what someone took is theirs
 	for (const TWeakObjectPtr<AActor>& Each : Laid) {
 		const AWeaponActor* Weapon = Cast<AWeaponActor>(Each.Get());
-		if (Weapon != nullptr && Weapon->Holder == nullptr) {
+		const AHealingActor* Item = Cast<AHealingActor>(Each.Get());
+		if ((Weapon != nullptr && Weapon->Holder == nullptr) || (Item != nullptr && Item->Holder == nullptr)) {
 			Each->Destroy();
 		}
 	}

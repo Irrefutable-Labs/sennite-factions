@@ -168,11 +168,13 @@ namespace
 			}
 			GameCheck::Key(Controller, EKeys::LeftShift, IE_Released);
 			GameCheck::Key(Controller, EKeys::W, IE_Released);
+			// what she picked up went into what she carries, not into her hand: key 5 holds a potion
+			Tap(Controller, EKeys::Five);
 			Enter(EPhase::Potion, World);
 			return false;
 
 		case EPhase::Potion:
-			// the potions were picked up last, so one is in her hand
+			// key 5 has put a potion in her hand
 			if (Elapsed(World) < 1.0) {
 				return false;
 			}

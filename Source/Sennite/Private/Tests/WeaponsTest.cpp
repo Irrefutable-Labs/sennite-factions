@@ -39,7 +39,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, WalkOverPickups, HoldShotgun, HoldRifle, Fire, Done };
+		enum class EPhase { WaitForPawn, WalkOverPickups, HoldShotgun, HoldRifle, Fire, HoldFire, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -73,6 +73,7 @@ namespace
 		int32 PickupsAtStart = 0;
 		int32 BulletsSpawned = 0;
 		int32 RoundsBefore = 0;
+		int32 RoundsWhenLetGo = 0;
 		bool bTriggerPulled = false;
 		bool bSawFireAnimation = false;
 		bool bShotTaken = false;
@@ -201,6 +202,30 @@ namespace
 			Test->TestTrue(TEXT("The shot spends one round"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->CurrentBulletCount == RoundsBefore - 1);
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK fire: bullets=%d rounds %d -> %d animation=%d"), BulletsSpawned, RoundsBefore,
 				Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1, bSawFireAnimation ? 1 : 0);
+			// then the button held down: the rifle goes on firing until it is let go
+			RoundsBefore = Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : 0;
+			bTriggerPulled = false;
+			GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Pressed);
+			Enter(EPhase::HoldFire, World);
+			return false;
+
+		case EPhase::HoldFire:
+			if (Elapsed(World) < 1.0) {
+				return false;
+			}
+			if (!bTriggerPulled) {
+				bTriggerPulled = true;
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
+				RoundsWhenLetGo = Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1;
+				Test->TestTrue(TEXT("Held down for a second, the rifle fires four times or more"), RoundsWhenLetGo >= 0 && RoundsBefore - RoundsWhenLetGo >= 4);
+				return false;
+			}
+			if (Elapsed(World) < 2.0) {
+				return false;
+			}
+			Test->TestTrue(TEXT("Let go, the rifle stops: no more than the shot already asked for"), Hero->CurrentWeapon != nullptr && RoundsWhenLetGo - Hero->CurrentWeapon->CurrentBulletCount <= 1);
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK held fire: rounds %d -> %d in a second held, %d a second after letting go"), RoundsBefore, RoundsWhenLetGo,
+				Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1);
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK finished"));
 			Phase = EPhase::Done;
 			return true;
