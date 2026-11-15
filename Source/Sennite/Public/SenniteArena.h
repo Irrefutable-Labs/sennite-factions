@@ -216,6 +216,24 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	float CraftDamage = 20.0f;
 
+	/**
+	 * The land far below the arena, and its water: mountains and lakes, seen and nothing else. Each
+	 * mesh has the place the arena floats over at its origin and its lake's surface at its own
+	 * height 0 (Tools/import_land.py). Empty: below the arena is haze. Set in DefaultGame.ini.
+	 */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	FSoftObjectPath Land;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	FSoftObjectPath LandWater;
+
+	/** How far below the bases the land's lake lies. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	float LandDepth = 60000.0f;
+
+	/** The land as this machine drew it: none on a machine with no screen. */
+	const TArray<TObjectPtr<UStaticMeshComponent>>& GetLand() const { return LandParts; }
+
 protected:
 	/** What the server chose, sent to every machine. Negative until chosen. */
 	UPROPERTY(ReplicatedUsing = OnRep_Arena)
@@ -245,6 +263,9 @@ private:
 
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> CraftBodies;
+
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> LandParts;
 
 	UPROPERTY()
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> Tints;

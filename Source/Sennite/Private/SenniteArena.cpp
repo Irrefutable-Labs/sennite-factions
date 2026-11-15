@@ -731,6 +731,30 @@ void ASenniteArena::Build()
 	}
 	ByTint[static_cast<int32>(EArenaTint::Hidden)]->SetVisibility(!bAllScenery);
 
+	// The land far below: seen, and nothing else, so a machine with no screen does without it. Its
+	// meshes have the place the arena floats over at their origin and the lake's surface at height 0.
+	if (GetNetMode() != NM_DedicatedServer) {
+		for (const FSoftObjectPath& Named : { Land, LandWater }) {
+			if (Named.IsNull()) {
+				continue;
+			}
+			UStaticMesh* Mesh = Cast<UStaticMesh>(Named.TryLoad());
+			if (Mesh == nullptr) {
+				UE_LOG(LogTemp, Error, TEXT("'%s', part of the land below the arena, did not load; it is not drawn"), *Named.ToString());
+				continue;
+			}
+			UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(this);
+			Part->SetStaticMesh(Mesh);
+			Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Part->SetCanEverAffectNavigation(false);
+			Part->SetCastShadow(false);
+			Part->SetupAttachment(RootComponent);
+			Part->RegisterComponent();
+			Part->SetWorldLocationAndRotation(FVector(0.0, 0.0, -LandDepth), FRotator::ZeroRotator);
+			LandParts.Add(Part);
+		}
+	}
+
 	// the bases: round platforms, their tops at the height everything is measured from
 	const float Thick = 200.0f;
 	UInstancedStaticMeshComponent* Discs = MakeSet(Disc, Ground != nullptr ? Ground : static_cast<UMaterialInterface*>(Tints[static_cast<int32>(EArenaTint::Base)]));

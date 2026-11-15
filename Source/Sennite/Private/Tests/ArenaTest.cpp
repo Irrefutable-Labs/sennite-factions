@@ -11,6 +11,12 @@
 // to the far base, jumping where it is a jump and waiting for a clear lane where craft cross, and
 // arrives alive.
 //
+// And of the land far below (Tools/import_land.py), on this machine, which draws it: the land and its
+// water are drawn; nothing of them can be stood on or hit; the lake's surface, read from the water's
+// own mesh under the middle of the arena, lies as far below the bases as the settings say, and the
+// map's haze lies on it; and under the widest arena there can be (six bases) no triangle of the land
+// comes within 50 m of the lowest thing of the arena built here.
+//
 // The overview picture is taken from a camera put above the connector for the purpose; the player
 // has no such view.
 
@@ -23,14 +29,126 @@
 #include "SenniteArena.h"
 #include "SenniteCharacter.h"
 #include "Camera/CameraActor.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "HAL/PlatformTime.h"
+#include "Misc/App.h"
+#include "StaticMeshResources.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogArenaCheck, Log, All);
 
 namespace
 {
+	/**
+	 * The land far below, on a machine that draws it. The arena made its two parts and they are
+	 * drawn. Nothing of them can be stood on or hit. The lake's surface, read from the water's own
+	 * triangle under the middle of the arena, lies LandDepth below the bases. The map's haze lies on
+	 * that lake. And the land is clear of the arena: no triangle of it that reaches under the square
+	 * the widest arena fits in (six bases on their ring) has a corner within 50 m of the lowest thing
+	 * of the arena built here, which is the rock under a base or whatever this kind of connector
+	 * hangs down. A triangle counts whole, so the height it gives is no lower than the truth.
+	 */
+	void CheckLand(FAutomationTestBase* Test, UWorld* World, const ASenniteArena* Arena)
+	{
+		const ASenniteArena* Rules = GetDefault<ASenniteArena>();
+		const int32 Wanted = (Rules->Land.IsNull() ? 0 : 1) + (Rules->LandWater.IsNull() ? 0 : 1);
+		if (Wanted == 0) {
+			UE_LOG(LogArenaCheck, Display, TEXT("GAMECHECK land: none is set; below the arena is haze"));
+			return;
+		}
+		const TArray<TObjectPtr<UStaticMeshComponent>>& Parts = Arena->GetLand();
+		if (!Test->TestEqual(TEXT("The arena made a part for each mesh of the land that is set"), Parts.Num(), Wanted)) {
+			return;
+		}
+
+		// how far from the middle the widest arena reaches, and how far down this one goes
+		const FArenaPlan Widest = ASenniteArena::MakePlan(1, static_cast<int32>(EConnectorKind::Count));
+		double Reach = 0.0;
+		for (const FVector& Base : Widest.Bases) {
+			Reach = FMath::Max(Reach, Base.Size2D() + Arena->BaseRadius);
+		}
+		double Lowest = 0.0;
+		TInlineComponentArray<UPrimitiveComponent*> Drawn(Arena);
+		for (const UPrimitiveComponent* Each : Drawn) {
+			if (!Parts.Contains(Each)) {
+				Lowest = FMath::Min(Lowest, Each->Bounds.GetBox().Min.Z);
+			}
+		}
+
+		const UObject* WaterMesh = Rules->LandWater.ResolveObject();
+		const double Unread = TNumericLimits<double>::Max();
+		double Highest = -Unread;
+		double Lake = Unread;
+		for (const UStaticMeshComponent* Part : Parts) {
+			Test->TestTrue(TEXT("The land below the arena and its water are drawn"),
+				Part->IsRegistered() && Part->ShouldRender() && (!FApp::CanEverRender() || Part->SceneProxy != nullptr));
+			Test->TestTrue(TEXT("Nothing of the land can be stood on or hit"), Part->GetCollisionEnabled() == ECollisionEnabled::NoCollision);
+			const FStaticMeshRenderData* Data = Part->GetStaticMesh() ? Part->GetStaticMesh()->GetRenderData() : nullptr;
+			if (!Test->TestTrue(TEXT("The land's mesh can be read"), Data != nullptr && Data->LODResources.Num() > 0)) {
+				continue;
+			}
+			const FStaticMeshLODResources& Lod = Data->LODResources[0];
+			const FPositionVertexBuffer& Points = Lod.VertexBuffers.PositionVertexBuffer;
+			const FIndexArrayView Corners = Lod.IndexBuffer.GetArrayView();
+			Test->TestTrue(TEXT("The land's mesh has triangles to read"), Points.GetNumVertices() > 0 && Corners.Num() >= 3);
+			const bool bWater = WaterMesh != nullptr && Part->GetStaticMesh() == WaterMesh;
+			const FTransform Placed = Part->GetComponentTransform();
+			for (int32 Corner = 0; Corner + 2 < Corners.Num(); Corner += 3) {
+				FVector At[3];
+				FBox2D Covers(ForceInit);
+				for (int32 Each = 0; Each < 3; ++Each) {
+					At[Each] = Placed.TransformPosition(FVector(Points.VertexPosition(Corners[Corner + Each])));
+					Covers += FVector2D(At[Each].X, At[Each].Y);
+				}
+				// a triangle that reaches under the arena's square counts whole: no higher than its highest corner
+				if (Covers.Min.X <= Reach && Covers.Max.X >= -Reach && Covers.Min.Y <= Reach && Covers.Max.Y >= -Reach) {
+					Highest = FMath::Max(Highest, FMath::Max3(At[0].Z, At[1].Z, At[2].Z));
+				}
+				// the water's triangle over the middle of the arena: its height there is the lake's
+				if (bWater && Covers.IsInside(FVector2D::ZeroVector)) {
+					const double Den = (At[1].Y - At[2].Y) * (At[0].X - At[2].X) + (At[2].X - At[1].X) * (At[0].Y - At[2].Y);
+					if (FMath::Abs(Den) > UE_DOUBLE_SMALL_NUMBER) {
+						const double U = ((At[1].Y - At[2].Y) * (0.0 - At[2].X) + (At[2].X - At[1].X) * (0.0 - At[2].Y)) / Den;
+						const double V = ((At[2].Y - At[0].Y) * (0.0 - At[2].X) + (At[0].X - At[2].X) * (0.0 - At[2].Y)) / Den;
+						if (U >= 0.0 && V >= 0.0 && U + V <= 1.0) {
+							Lake = U * At[0].Z + V * At[1].Z + (1.0 - U - V) * At[2].Z;
+						}
+					}
+				}
+			}
+		}
+		if (WaterMesh != nullptr) {
+			Test->TestTrue(TEXT("The lake under the middle of the arena lies LandDepth below the bases, to within a metre"),
+				Lake != Unread && FMath::Abs(Lake + Rules->LandDepth) < 100.0);
+		}
+		Test->TestTrue(TEXT("Some of the land lies under the arena"), Highest != -Unread);
+		Test->TestTrue(TEXT("Under the widest arena the land stays at least 50 m below the lowest thing of the arena"), Highest < Lowest - 5000.0);
+
+		// The map's haze is set on the lake when the map is made (Tools/build_arena.py); the land is set
+		// there when the arena is built. A map made for another depth shows here.
+		TActorIterator<AExponentialHeightFog> Haze(World);
+		if (Test->TestTrue(TEXT("The map has its haze"), static_cast<bool>(Haze) && Haze->GetComponent() != nullptr)) {
+			Test->TestTrue(TEXT("The map's haze lies on the land's lake (after changing Land or LandDepth, make the map again with Tools/build_arena.py)"),
+				FMath::Abs(Haze->GetComponent()->GetComponentLocation().Z + Rules->LandDepth) < 1.0);
+		}
+
+		// and a line from under each base straight down past the lake meets nothing
+		bool bMetNothing = true;
+		for (const FVector& Base : Arena->GetPlan().Bases) {
+			FHitResult Hit;
+			const FVector From(Base.X, Base.Y, Lowest - 100.0);
+			const FVector To(Base.X, Base.Y, -Rules->LandDepth - 50000.0);
+			bMetNothing = bMetNothing && !World->LineTraceSingleByChannel(Hit, From, To, ECC_Visibility) && !World->LineTraceSingleByChannel(Hit, From, To, ECC_WorldStatic);
+		}
+		Test->TestTrue(TEXT("A line from under a base down past the lake meets nothing"), bMetNothing);
+		UE_LOG(LogArenaCheck, Display, TEXT("GAMECHECK land: the lake under the middle lies %.1f m below the bases; no triangle of the land reaching under the square %.0f m each way from the middle has a corner higher than %.0f m below them; the arena's lowest point is %.0f m below them"),
+			Lake == Unread ? 0.0 : -Lake / 100.0, Reach / 100.0, -Highest / 100.0, -Lowest / 100.0);
+	}
+
 	/** What the seeding promises, held against plans for many seeds. */
 	void CheckPlans(FAutomationTestBase* Test)
 	{
@@ -135,6 +253,7 @@ namespace
 				return Fail(TEXT("The map has no built arena (run this with Tools/check_arena.sh)"));
 			}
 			CheckPlans(Test);
+			CheckLand(Test, World, Arena);
 
 			const FArenaPlan& Plan = Arena->GetPlan();
 			const FArenaConnector& Connector = Plan.Connectors[0];

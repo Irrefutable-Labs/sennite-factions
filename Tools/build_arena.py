@@ -88,8 +88,18 @@ for key, value in (("real_time_capture", True), ("cast_shadows", False), ("inten
     kc.set_editor_property(key, value)
 
 spawn(unreal.SkyAtmosphere, "atmosphere", folder="lights")
-fog = spawn(unreal.ExponentialHeightFog, "haze", unreal.Vector(0, 0, -2000), folder="lights")
-fog.component.set_editor_property("fog_density", 0.004)
+# Haze. With no land below, a thin dense layer just under the arena: below it is nothing but haze.
+# With the land (the arena's Land setting, Tools/import_land.py), the haze lies on the land's lake,
+# LandDepth below the bases, and thins slowly upward: the lake is seen through it from above, the
+# mountains stand out of it, and the land's far edge is lost in it.
+rules = unreal.SenniteArena.get_default_object()
+has_land = rules.get_editor_property("land").export_text() not in ("", "None")
+land_depth = rules.get_editor_property("land_depth")
+fog = spawn(unreal.ExponentialHeightFog, "haze", unreal.Vector(0, 0, -land_depth if has_land else -2000), folder="lights")
+fog.component.set_editor_property("fog_density", 0.006 if has_land else 0.004)
+if has_land:
+    fog.component.set_editor_property("fog_height_falloff", 0.05)
+unreal.log("ARENA haze: %s" % ("on the land's lake, %.0f cm below the bases" % land_depth if has_land else "just under the arena"))
 
 ppv = spawn(unreal.PostProcessVolume, "exposure", folder="lights")
 ppv.set_editor_property("unbound", True)
