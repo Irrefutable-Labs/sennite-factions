@@ -105,8 +105,9 @@ public:
 	bool bInventory = false;
 	/** Which skin of the inventory is chosen. */
 	int32 InventoryIndex = 0;
-	/** The mesh the hero is dressed in now. */
+	/** The mesh the hero is dressed in now, and the hero's own mesh it was dressed over. */
 	FSoftObjectPath Dressed;
+	FSoftObjectPath DressedHero;
 
 	/** Whether the panel shows the faction's people instead of the parcel. */
 	bool bPeople = false;

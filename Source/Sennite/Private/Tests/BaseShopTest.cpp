@@ -103,7 +103,7 @@ namespace
 			// a run without a window starts with a stray mouse movement; begin from the view behind the hero
 			Controller->SetControlRotation(FRotator(-12.0, Hero->GetActorRotation().Yaw, 0.0));
 			OwnBody = Body(Hero);
-			Test->TestTrue(TEXT("The hero starts in her own mesh"), OwnBody == GetDefault<ASenniteCharacter>()->HeroMesh.ToString());
+			Test->TestTrue(TEXT("The hero starts in her own mesh"), OwnBody == Hero->HeroMesh.ToString());
 			Tap(Controller, EKeys::B);
 			Enter(EPhase::Opened, World);
 			return false;

@@ -258,9 +258,14 @@ bool USennitePublisher::Tick(float)
 	}
 	// a skin the shop gave reaches the wallet on the wallet's own time: until its proof lists the skin, the game
 	// asks again every few seconds, a bounded number of times
-	if (!OnItsWay.IsEmpty() && !ProofPending() && Now >= NextArrival) {
-		if (Owns(OnItsWay) || ArrivalProofs >= 60) {
+	if ((!OnItsWay.IsEmpty() || !HeroOnItsWay.IsEmpty()) && !ProofPending() && Now >= NextArrival) {
+		if ((OnItsWay.IsEmpty() || Owns(OnItsWay)) && (HeroOnItsWay.IsEmpty() || OwnsHero(HeroOnItsWay))) {
 			OnItsWay.Reset();
+			HeroOnItsWay.Reset();
+		}
+		else if (ArrivalProofs >= 60) {
+			OnItsWay.Reset();
+			HeroOnItsWay.Reset();
 		}
 		else {
 			++ArrivalProofs;
@@ -401,6 +406,18 @@ void USennitePublisher::AskShop()
 			Skin.Price = FCString::Atoi(*One->GetStringField(TEXT("price")));
 			ShopSkins.Add(MoveTemp(Skin));
 		}
+		ShopHeroes.Reset();
+		const TArray<TSharedPtr<FJsonValue>>* Heroes = nullptr;
+		if (Json->TryGetArrayField(TEXT("heroes"), Heroes)) {
+			for (const TSharedPtr<FJsonValue>& Value : *Heroes) {
+				const TSharedPtr<FJsonObject> One = Value->AsObject();
+				FSenniteHeroForSale Hero;
+				Hero.Id = One->GetStringField(TEXT("id"));
+				Hero.Name = One->GetStringField(TEXT("name"));
+				Hero.Price = FCString::Atoi(*One->GetStringField(TEXT("price")));
+				ShopHeroes.Add(MoveTemp(Hero));
+			}
+		}
 		bShop = true;
 	});
 }
@@ -423,6 +440,18 @@ void USennitePublisher::BuySkin(const FString& SkinId)
 	Ask(TEXT("/shop/skins"), Body, TEXT("waiting for the wallet to pay for the skin..."));
 	bProveAfter = bBusy;
 	BuyingSkin = SkinId;
+}
+
+void USennitePublisher::BuyHero(const FString& HeroId)
+{
+	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("heroId"), HeroId);
+	if (bBusy) {
+		return;
+	}
+	Ask(TEXT("/shop/heroes"), Body, TEXT("waiting for the wallet to pay for the hero..."));
+	bProveAfter = bBusy;
+	BuyingHero = HeroId;
 }
 
 void USennitePublisher::Wear(const FString& SkinId)
@@ -629,6 +658,15 @@ void USennitePublisher::AskRequest()
 			}
 			BuyingSkin.Reset();
 		}
+		if (!BuyingHero.IsEmpty()) {
+			// the same for a hero
+			if (bLastOk) {
+				HeroOnItsWay = BuyingHero;
+				ArrivalProofs = 0;
+				NextArrival = FPlatformTime::Seconds() + 2.0;
+			}
+			BuyingHero.Reset();
+		}
 		Message = Json->GetStringField(TEXT("message"));
 		if (bProveAfter) {
 			// what the wallet holds changed with this: ask it again, without holding the player up
@@ -658,8 +696,9 @@ void USennitePublisher::Ask(const FString& Path, const TSharedPtr<FJsonObject>& 
 			return;
 		}
 		bBusy = false;
-		// nothing was started: a skin that was to be bought is not being bought
+		// nothing was started: a skin or hero that was to be bought is not being bought
 		BuyingSkin.Reset();
+		BuyingHero.Reset();
 		Message = ErrorOf(Status, Json);
 	});
 }
@@ -742,6 +781,13 @@ void USennitePublisher::ReadHoldings(const FJsonObject& Json)
 			Skin.Serial = One->GetIntegerField(TEXT("serial"));
 			OwnedSkins.AddUnique(Skin.SkinId);
 			Inventory.Add(MoveTemp(Skin));
+		}
+	}
+	OwnedHeroes.Reset();
+	const TArray<TSharedPtr<FJsonValue>>* Heroes = nullptr;
+	if (Json.TryGetArrayField(TEXT("heroes"), Heroes)) {
+		for (const TSharedPtr<FJsonValue>& Value : *Heroes) {
+			OwnedHeroes.AddUnique(Value->AsObject()->GetStringField(TEXT("heroId")));
 		}
 	}
 	bMaterialsKnown = true;

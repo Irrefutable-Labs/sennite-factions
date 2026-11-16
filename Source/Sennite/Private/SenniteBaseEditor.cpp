@@ -595,17 +595,23 @@ void ASenniteBaseEditor::DressHero()
 	if (Server == nullptr || Hero == nullptr) {
 		return;
 	}
-	if (DressedPawn.Get() != Hero) {
-		// a new pawn starts in the hero's own mesh
+	if (DressedPawn.Get() != Hero || DressedHero != Hero->HeroMesh) {
+		// a new pawn, or a pawn that became another hero, starts in the hero's own mesh
 		DressedPawn = Hero;
-		Dressed = GetDefault<ASenniteCharacter>()->HeroMesh;
+		DressedHero = Hero->HeroMesh;
+		Dressed = Hero->HeroMesh;
 	}
-	// the skin the player chose, only while the wallet's proof says it owns it; otherwise the hero as she ships
-	FSoftObjectPath Want = GetDefault<ASenniteCharacter>()->HeroMesh;
+	// the skin the player chose, only while the wallet's proof says it owns it and only on the hero it is a
+	// skin of (the same skeleton); otherwise the hero as it ships
+	FSoftObjectPath Want = Hero->HeroMesh;
 	if (Server->bMaterialsKnown && !Server->Wearing.IsEmpty() && Server->Owns(Server->Wearing)) {
 		const ASenniteBaseEditor* Shared = GetDefault<ASenniteBaseEditor>();
 		if (const FSenniteSkinMesh* Skin = Shared->Skins.FindByPredicate([Server](const FSenniteSkinMesh& S) { return S.Id == Server->Wearing; })) {
-			Want = Skin->Mesh;
+			const USkeletalMesh* SkinMesh = Cast<USkeletalMesh>(Skin->Mesh.TryLoad());
+			const USkeletalMesh* Own = Cast<USkeletalMesh>(Hero->HeroMesh.TryLoad());
+			if (SkinMesh != nullptr && Own != nullptr && SkinMesh->GetSkeleton() == Own->GetSkeleton()) {
+				Want = Skin->Mesh;
+			}
 		}
 	}
 	if (Want == Dressed) {

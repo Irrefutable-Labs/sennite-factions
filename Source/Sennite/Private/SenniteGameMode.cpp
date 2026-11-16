@@ -2,6 +2,7 @@
 
 #include "SenniteGameMode.h"
 #include "SenniteCharacter.h"
+#include "SenniteHeroes.h"
 #include "SennitePlayerState.h"
 #include "SennitePlayerController.h"
 #include "GameFramework/GameModeBase.h"
@@ -102,6 +103,10 @@ void ASenniteGameMode::Logout(AController* Exiting) {
 
 FString ASenniteGameMode::InitNewPlayer(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId, const FString& Options, const FString& Portal) {
 	FString InitializedString = Super::InitNewPlayer(NewPlayerController, UniqueId, Options, Portal);
+	// the hero the player's game logged in as (USenniteLocalPlayer), or the default hero
+	if (ASennitePlayerState* State = NewPlayerController != nullptr ? NewPlayerController->GetPlayerState<ASennitePlayerState>() : nullptr) {
+		State->SetHero(USenniteHeroes::FindOrDefault(FName(UGameplayStatics::ParseOption(Options, TEXT("Hero")))).Id);
+	}
 	
 	/*const FString& PlayerSessionId = UGameplayStatics::ParseOption(Options, "PlayerSessionId");
 	UE_LOG(LogMyServerGame, Log, TEXT("InitNewPlayer playersessionid: %s"), *PlayerSessionId);

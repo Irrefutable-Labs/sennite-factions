@@ -2,6 +2,7 @@
 
 #include "SennitePlayerState.h"
 #include "SenniteCharacter.h"
+#include "SenniteHeroes.h"
 #include "Net/UnrealNetwork.h"
 
 ASennitePlayerState::ASennitePlayerState() {
@@ -57,6 +58,30 @@ void ASennitePlayerState::GetLifetimeReplicatedProps(TArray< FLifetimeProperty >
 	DOREPLIFETIME(ASennitePlayerState, KillCount);
 	DOREPLIFETIME(ASennitePlayerState, FactionId);
 	DOREPLIFETIME(ASennitePlayerState, Wallet);
+	DOREPLIFETIME(ASennitePlayerState, HeroId);
+}
+
+void ASennitePlayerState::ServerChooseHero_Implementation(FName Id) {
+	SetHero(Id);
+}
+
+void ASennitePlayerState::SetHero(FName Id) {
+	if (!HasAuthority() || USenniteHeroes::Find(Id) == nullptr) {
+		return;
+	}
+	HeroId = Id;
+	// a player state goes out about once a second: a new hero is shown to everyone now
+	ForceNetUpdate();
+	if (ASenniteCharacter* Hero = GetPawn<ASenniteCharacter>()) {
+		Hero->SetHero(Id);
+	}
+}
+
+void ASennitePlayerState::CopyProperties(APlayerState* PlayerState) {
+	Super::CopyProperties(PlayerState);
+	if (ASennitePlayerState* Next = Cast<ASennitePlayerState>(PlayerState)) {
+		Next->HeroId = HeroId;
+	}
 }
 
 void ASennitePlayerState::StartOver() {

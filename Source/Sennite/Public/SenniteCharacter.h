@@ -77,39 +77,49 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
 	TSubclassOf<UThirdPersonAnimInstance> AnimInstanceClass;
 
-	/** The hero this character is: the skeletal mesh, with the materials it ships with. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** Which hero this character is (USenniteHeroes, DefaultGame.ini). The server sets it from the player's choice; every machine dresses the character from it. */
+	UPROPERTY(ReplicatedUsing = OnRep_HeroId)
+	FName HeroId;
+
+	/** On the server: be this hero. Its body, animation, size and hands; a weapon or item in hand is held anew. */
+	void SetHero(FName Id);
+
+	UFUNCTION()
+	void OnRep_HeroId();
+
+	/** The hero this character is now: the skeletal mesh, with the materials it ships with. From the hero's entry in the list. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FSoftObjectPath HeroMesh;
 
-	/** The hero's animation Blueprint class. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** The hero's animation Blueprint class. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FSoftClassPath HeroAnimClass;
 
-	/** The bone of the hero's skeleton a held weapon is fixed to. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** The bone of the hero's skeleton a held weapon is fixed to. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FName HeroWeaponBone;
 
-	/** How a held weapon is turned against that bone: its muzzle end (+X) and its top (+Z), in the bone's space. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** How a held weapon is turned against that bone: its muzzle end (+X) and its top (+Z), in the bone's space. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FRotator HeroGripRotation;
 
-	/** Where the hero's palm is from that bone, in the bone's space; a weapon's grip point sits here. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** Where the hero's palm is from that bone, in the bone's space; a weapon's grip point sits here. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FVector HeroPalmOffset;
 
-	/** The bones of the weapon that is part of the hero's own mesh; hidden while the hero holds a game weapon. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** The bones of the weapon that is part of the hero's own mesh; hidden while the hero holds a game weapon. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	TArray<FName> HeroBuiltInWeaponBones;
 
-	/** The bone a held healing item is fixed to, and where the palm is from it, in the bone's space. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** The bone a held healing item is fixed to, and where the palm is from it, in the bone's space. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FName HeroItemBone;
 
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FVector HeroItemPalmOffset;
 
-	/** The hero's own firing animation, played for every shot. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** The hero's own firing animation, played for every shot. None for a hero that ships with none. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FSoftObjectPath HeroFireMontage;
 
 	/** Fix a weapon to the hero's weapon bone, at the weapon's own grip. */
@@ -440,6 +450,9 @@ public:
 
 	virtual void PostInitializeComponents() override;
 
+	/** On the server: a player takes this character over, and it becomes the hero they chose. */
+	virtual void PossessedBy(AController* NewController) override;
+
 	virtual bool ReplicateSubobjects(class UActorChannel *Channel, class FOutBunch *Bunch, FReplicationFlags *RepFlags) override;
 
 	/* called when character touches something with its body */
@@ -673,6 +686,14 @@ public:
 	void OnRepSetSkin();
 
 private:
+	/** Dress the character as HeroId's hero: the mesh, its animation Blueprint, its firing animation, its capsule and its hands. */
+	void ApplyHero();
+
+	/** The hero the character was last dressed as, and the firing animation that gave it. */
+	FName DressedHero;
+	UPROPERTY()
+	TObjectPtr<UAnimMontage> DressedFire;
+
 	// Object creation can only happen after the character has finished being constructed
 	virtual void BeginPlay() override;
 };

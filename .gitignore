@@ -10,3 +10,4 @@ DerivedDataCache/
 .DS_Store
 # Fab hero packs: copied in by Tools/fetch_heroes.sh
 Content/Paragon*/
+Content/SciFITrooper_Man_03/

@@ -18,11 +18,13 @@ Add `-NoHotReloadFromIDE` when an Unreal editor is already open, or the build la
 Tools/fetch_heroes.sh
 ```
 
-copies the Fab hero pack the game uses (Paragon: Dekker) into `Content/`; the packs are not in this repository. Then build, and start the game on the test range:
+copies the Fab hero packs the game uses (Paragon: Dekker, Wraith, Crunch, Drongo, Howitzer, Rampage, Sevarog; and the Sci-Fi Trooper) into `Content/`; the packs are not in this repository. Then build, and start the game:
 
 ```bash
 "/Users/Shared/Epic Games/UE_5.8/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor" "$PWD/Sennite.uproject" -game -windowed -ResX=1280 -ResY=720
 ```
+
+It opens on the menu (the Menu map, `Tools/build_menu.py`), worked by tap or click: PLAY opens the test range; HEROES is the character select, the hero turning on the stage, `<` and `>` (or the arrow keys) through the list, CHOOSE to keep one; HOST A LOBBY opens a lobby others on the network join, showing the address to give them; JOIN A LOBBY takes that address on the screen's keypad or the keyboard. In the lobby every player's hero stands on the stage; the host taps START and everyone goes to the test range together, each as their own hero. Dekker and Wraith are free; the other heroes are bought with D-bucks in the publisher's shop, as skins are, and can be chosen once the wallet proves it owns them. The heroes and their hands are listed in `Config/DefaultGame.ini` under `[/Script/Sennite.SenniteHeroes]`. A map or an address on the command line goes straight there, as before.
 
 W A S D to move, Left Shift with W to run, Space to jump, the mouse to look. E opens a weapon crate the hero is beside. Walk over a weapon to pick it up; 2 and 3 switch between rifle and shotgun; left mouse button fires, and the rifle goes on firing while it is held; R reloads. X, C and F preview a wall, a ramp and a floor; left mouse button builds; right mouse button changes material; the same key again leaves build mode. Walking over a pack of bandages or potions adds it to what the hero carries; 4 and 5 hold bandages and potions; left mouse button uses one.
 
@@ -69,6 +71,24 @@ Tools/check_two_players.sh
 ```
 
 starts two copies of the game on this machine: one hosts the test range as a listen server, the other joins it over the loopback address, and each checks what it sees of the other. The joining player gets a hero, sees the host's, builds a wall the server keeps and charges for, walks and is left where they walked to, sees the host walk, and leaves; the host sees all of that from its side. Logs and screenshots in `Saved/Net/`.
+
+```bash
+Tools/check_menu.sh
+```
+
+checks the menu by taps on the screen: the game opens on it, HEROES shows each hero turning on the stage as itself, a bought hero cannot be chosen on a game with no shop, CHOOSE keeps a free hero in the profile on disk, and PLAY puts the player on the test range as that hero. Screenshots in `Saved/Menu/`.
+
+```bash
+Tools/check_lobby.sh
+```
+
+starts two copies of the game on the menu, each with its own profile. One taps HOST; the other taps JOIN, types the host's address on the keypad and joins, then chooses another hero in the lobby; the host sees it and taps START, and both reach the test range together, each as their own hero, seeing the other's. Logs and screenshots in `Saved/Lobby/`.
+
+```bash
+Tools/check_hero_hands.sh
+```
+
+becomes each hero of the list in turn holding the rifle: each holds it in the right hand pointing ahead, top up, with its own weapon hidden, and fires with its own firing animation. It logs each hero's measured grip and palm, which is where the hands in `DefaultGame.ini` come from. Bone lists and pictures in `Saved/HeroHands/`.
 
 ```bash
 Tools/check_combat.sh

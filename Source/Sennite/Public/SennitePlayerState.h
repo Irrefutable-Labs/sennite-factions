@@ -67,6 +67,23 @@ public:
 	UPROPERTY(Replicated)
 	FString Wallet;
 
+	/** Which hero this player is (USenniteHeroes): what they logged in with (Hero=), or chose in the lobby since. */
+	UPROPERTY(Replicated)
+	FName HeroId;
+
+	/**
+	 * This player chooses a hero. Their game lets them choose only a hero that is free or that their
+	 * wallet proved it owns; the server checks the hero is on the list, and dresses their character.
+	 */
+	UFUNCTION(Server, Reliable)
+	void ServerChooseHero(FName Id);
+
+	/** On the server: this player is this hero from now on, if the list has it. */
+	void SetHero(FName Id);
+
+	/** What a player keeps from one map to the next when the server travels: their hero. */
+	virtual void CopyProperties(APlayerState* PlayerState) override;
+
 	/** On the server: back to what a hero starts with. The weapons, rounds and healing items picked up are gone. */
 	void StartOver();
 

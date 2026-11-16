@@ -35,6 +35,14 @@ struct FSenniteSkinForSale
 	int32 Price = 0;
 };
 
+/** One hero the publisher's shop sells, and its price in D-bucks. */
+struct FSenniteHeroForSale
+{
+	FString Id;
+	FString Name;
+	int32 Price = 0;
+};
+
 /** One skin the wallet proved it owns: an object of which one exists. */
 struct FSenniteOwnedSkin
 {
@@ -241,6 +249,16 @@ public:
 	FString OnItsWay;
 
 	bool Owns(const FString& SkinId) const { return OwnedSkins.Contains(SkinId); }
+
+	/** The heroes the shop sells, and those the wallet proved it owns (by the shop's hero id). */
+	TArray<FSenniteHeroForSale> ShopHeroes;
+	TArray<FString> OwnedHeroes;
+	bool OwnsHero(const FString& HeroId) const { return OwnedHeroes.Contains(HeroId); }
+	const FSenniteHeroForSale* HeroForSale(const FString& HeroId) const { return ShopHeroes.FindByPredicate([&HeroId](const FSenniteHeroForSale& H) { return H.Id == HeroId; }); }
+	/** Buy a hero from the shop with D-bucks. */
+	void BuyHero(const FString& HeroId);
+	/** A hero the shop sold and gave that the wallet has not proved it owns yet: it is on its way. */
+	FString HeroOnItsWay;
 	/** Trade ERA for D-bucks through the publisher's vault. */
 	void BuyDBucks(const FString& InEra);
 	/** Buy a skin from the shop with D-bucks. */
@@ -357,8 +375,9 @@ private:
 	bool bPrizesAsked = false;
 	bool bShop = false;
 	bool bShopAsked = false;
-	/** The skin being bought by the request that has not settled yet. */
+	/** The skin, or the hero, being bought by the request that has not settled yet. */
 	FString BuyingSkin;
+	FString BuyingHero;
 	double NextArrival = 0.0;
 	int32 ArrivalProofs = 0;
 	/** Whether the wallet has been asked what it holds since it connected. */
