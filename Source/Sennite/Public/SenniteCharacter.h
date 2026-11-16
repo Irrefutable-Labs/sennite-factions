@@ -410,11 +410,8 @@ protected:
 	 */
 	void LookUpAtRate(float Rate);
 
-	/** Handler for when a touch input begins. */
-	void TouchStarted(ETouchIndex::Type FingerIndex, FVector Location);
-
-	/** Handler for when a touch input stops. */
-	void TouchStopped(ETouchIndex::Type FingerIndex, FVector Location);
+	/** The touch controls walk the hero as the walking keys do, with StartWalking and StopWalking. */
+	friend class USenniteTouchControls;
 
 protected:
 	// APawn interface

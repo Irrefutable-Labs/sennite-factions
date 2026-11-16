@@ -273,9 +273,7 @@ void ASenniteCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerI
 	PlayerInputComponent->BindAxis("LookUpRate", this, &ASenniteCharacter::LookUpAtRate);
 	PlayerInputComponent->BindAxis("BuildStructure", this, &ASenniteCharacter::BuildStructure);
 
-	// handle touch devices
-	PlayerInputComponent->BindTouch(IE_Pressed, this, &ASenniteCharacter::TouchStarted);
-	PlayerInputComponent->BindTouch(IE_Released, this, &ASenniteCharacter::TouchStopped);
+	// a device played by touch has its own controls, which press these same keys (SenniteTouch.h)
 
 	// VR headset functionality
 
@@ -592,16 +590,6 @@ float ASenniteCharacter::PlayAnimMontage(class UAnimMontage* AnimMontage, float 
 	return 0.0f;
 }
 
-
-void ASenniteCharacter::TouchStarted(ETouchIndex::Type FingerIndex, FVector Location)
-{
-	Jump();
-}
-
-void ASenniteCharacter::TouchStopped(ETouchIndex::Type FingerIndex, FVector Location)
-{
-	StopJumping();
-}
 
 void ASenniteCharacter::TurnAtRate(float Rate)
 {

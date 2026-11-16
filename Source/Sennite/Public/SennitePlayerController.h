@@ -10,6 +10,7 @@ class ASenniteSpectator;
 class AStormActor;
 class AGameMode;
 class ASennitePlayerState;
+class USenniteTouchControls;
 /**
  * 
  */
@@ -80,7 +81,21 @@ public:
 		return true;
 	}
 
+	/** On a device played by touch: the stick and buttons on the screen (SenniteTouch.h). None elsewhere. */
+	USenniteTouchControls* GetTouchControls();
+
+	/** A touch on the screen goes to the touch controls, when there are any. */
+	virtual bool InputTouch(const FTouchId TouchId, const ETouchType::Type Type, const FVector2D& TouchLocation, const float Force, const uint64 Timestamp) override;
+
+	/** The engine's own on-screen joysticks are not used: the touch controls are drawn on the HUD. */
+	virtual void CreateTouchInterface() override;
+
+	virtual void PlayerTick(float DeltaTime) override;
+
 private:
 	virtual void BeginPlay() override;
+
+	UPROPERTY()
+	TObjectPtr<USenniteTouchControls> TouchControls;
 
 };

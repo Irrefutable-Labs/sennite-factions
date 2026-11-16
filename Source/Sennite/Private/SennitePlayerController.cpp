@@ -5,6 +5,8 @@
 #include "SenniteCharacter.h"
 #include "SenniteSpectator.h"
 #include "SenniteMatch.h"
+#include "SenniteTouch.h"
+#include "SenniteBaseEditor.h"
 #include "Engine/Engine.h"
 #include "Net/UnrealNetwork.h"
 #include "StormActor.h"
@@ -45,6 +47,34 @@ FVector ASennitePlayerController::SpectatorStart() const {
 	FRotator ViewRotation;
 	GetPlayerViewPoint(ViewLocation, ViewRotation);
 	return ViewLocation;
+}
+
+USenniteTouchControls* ASennitePlayerController::GetTouchControls() {
+	if (TouchControls == nullptr && IsLocalPlayerController() && USenniteTouchControls::Wanted()) {
+		TouchControls = NewObject<USenniteTouchControls>(this);
+		TouchControls->Bind(this);
+	}
+	return TouchControls;
+}
+
+bool ASennitePlayerController::InputTouch(const FTouchId TouchId, const ETouchType::Type Type, const FVector2D& TouchLocation, const float Force, const uint64 Timestamp) {
+	// the planning view of a base has its own controls, and draws no touch controls over it
+	USenniteTouchControls* Controls = GetTouchControls();
+	if (Controls != nullptr && !ASenniteBaseEditor::IsPlanning(GetWorld())) {
+		return Controls->Touch(TouchId, Type, TouchLocation);
+	}
+	return Super::InputTouch(TouchId, Type, TouchLocation, Force, Timestamp);
+}
+
+void ASennitePlayerController::CreateTouchInterface() {
+}
+
+void ASennitePlayerController::PlayerTick(float DeltaTime) {
+	// the stick is read before the frame's input is: what it says moves the hero this frame
+	if (TouchControls != nullptr) {
+		TouchControls->Tick();
+	}
+	Super::PlayerTick(DeltaTime);
 }
 
 void ASennitePlayerController::Tick(float DeltaTime) {

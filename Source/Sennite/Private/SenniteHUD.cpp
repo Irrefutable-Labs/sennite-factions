@@ -12,6 +12,8 @@
 #include "SenniteCrate.h"
 #include "SenniteMatch.h"
 #include "SennitePlayerState.h"
+#include "SennitePlayerController.h"
+#include "SenniteTouch.h"
 #include "Engine/Font.h"
 #include "HealingActor.h"
 #include "StormActor.h"
@@ -29,6 +31,12 @@ void ASenniteHUD::DrawHUD()
 		DrawCrosshair();
 		DrawStatus();
 		DrawMatch();
+		// on a device played by touch, the stick and buttons over the rest
+		if (ASennitePlayerController* Player = Cast<ASennitePlayerController>(PlayerOwner)) {
+			if (USenniteTouchControls* Touch = Player->GetTouchControls()) {
+				Touch->Draw(Canvas);
+			}
+		}
 	}
 	ASenniteBaseEditor::DrawOn(this, Canvas);
 }
