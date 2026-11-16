@@ -15,7 +15,7 @@
 #include "SenniteCharacter.h"
 #include "SenniteGameMode.h"
 #include "SennitePlayerState.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "HAL/PlatformTime.h"
@@ -81,6 +81,7 @@ namespace
 			Test->TestTrue(FString::Printf(TEXT("The %s stands on the build grid where the preview was"), Kind), Piece->GetActorLocation().Equals(Where, 1.0));
 			Test->TestTrue(FString::Printf(TEXT("The %s is turned as the preview was"), Kind), FMath::Abs(FMath::FindDeltaAngleDegrees(Piece->GetActorRotation().Yaw, Yaw)) < 1.0);
 			Test->TestTrue(FString::Printf(TEXT("The %s has its shape"), Kind), Piece->PieceMesh->GetStaticMesh() != nullptr);
+			Test->TestEqual(FString::Printf(TEXT("The %s is made of its tiles, none cut"), Kind), Piece->PieceMesh->GetInstanceCount(), Piece->TileCount());
 			const FSoftObjectPath Face = FCString::Strcmp(Kind, TEXT("Floor")) == 0 ? Shared->FloorMaterial : Shared->TierMaterials[Material];
 			Test->TestEqual(FString::Printf(TEXT("The %s is faced with the panel for its material"), Kind), FSoftObjectPath(Piece->PieceMesh->GetMaterial(0)).ToString(), Face.ToString());
 			Test->TestEqual(FString::Printf(TEXT("The %s has the strength of its material"), Kind), Piece->Health, Shared->TierHealth[Material]);

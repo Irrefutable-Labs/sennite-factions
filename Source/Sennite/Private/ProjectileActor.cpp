@@ -100,15 +100,8 @@ void AProjectileActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActo
 			return;
 		}
 		bSpent = true;
-		// In a match a shot counts on a piece as it does on a hero: from another faction than the
-		// one that built it, while the match is being played. The piece stops the bullet either way.
-		const ASenniteMatch* Match = ASenniteMatch::Find(GetWorld());
-		if (Match == nullptr || Match->Harms(Shooter, Piece->FactionId)) {
-			Piece->Health -= Damage;
-			if (Piece->Health <= 0) {
-				Piece->Destroy();
-			}
-		}
+		// the piece stops the bullet whether the shot counts on it or not (ABuildingActor::TakeHit)
+		Piece->TakeHit(Damage, Shooter);
 		Destroy();
 		return;
 	}

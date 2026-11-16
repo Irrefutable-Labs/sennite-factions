@@ -263,6 +263,7 @@ void ASenniteCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerI
 	PlayerInputComponent->BindAction("Ironsights", IE_Released, this, &ASenniteCharacter::AimGunOut);
 	PlayerInputComponent->BindAction("OpenSettings", IE_Pressed, this, &ASenniteCharacter::OpenSettingsMenu);
 	PlayerInputComponent->BindAction("OpenCrate", IE_Pressed, this, &ASenniteCharacter::OpenCrate);
+	PlayerInputComponent->BindAction("EditPiece", IE_Pressed, this, &ASenniteCharacter::EditPiece);
 
 	// We have 2 versions of the rotation bindings to handle different kinds of devices differently
 	// "turn" handles devices that provide an absolute delta, such as a mouse.
@@ -403,8 +404,43 @@ void ASenniteCharacter::GetLifetimeReplicatedProps(TArray< FLifetimeProperty > &
 	DOREPLIFETIME(ASenniteCharacter, CurrentSkin);
 }
 
+namespace
+{
+	/** The tile of a piece, cut or not, that the player's view falls on, or INDEX_NONE. */
+	int32 AimedTile(const ASenniteCharacter* Hero, const ABuildingActor* Piece)
+	{
+		const AController* Own = Hero->GetController();
+		if (Own == nullptr || Piece == nullptr) {
+			return INDEX_NONE;
+		}
+		FVector Eye;
+		FRotator Look;
+		Own->GetPlayerViewPoint(Eye, Look);
+		double At = 0.0;
+		return Piece->TileUnderAim(Eye, Look.Vector(), Hero->MaxBuildReach + FVector::Dist(Eye, Hero->GetActorLocation()) + ABuildingActor::Cell, At);
+	}
+}
+
 void ASenniteCharacter::Tick(float DeltaTime) {
 	Super::Tick(DeltaTime);
+	// Editing a piece, on this player's own machine: a drag with the fire button held marks each tile
+	// the aim crosses alike; walking out of reach of the piece, or its fall, ends the edit unmade.
+	if (ABuildingActor* Editing = EditingPiece.Get()) {
+		if (Editing->IsActorBeingDestroyed() || FVector::Dist(Editing->GetActorLocation(), GetActorLocation()) > MaxBuildReach + ABuildingActor::Cell) {
+			CancelEdit();
+		}
+		else if (bEditDragging) {
+			const int32 Tile = AimedTile(this, Editing);
+			if (Tile != INDEX_NONE && Tile != EditDragLast) {
+				EditDragLast = Tile;
+				MarkEditTile(Tile, bEditDragCuts);
+			}
+		}
+	}
+	else if (!EditingPiece.IsExplicitlyNull()) {
+		EditingPiece = nullptr;
+		bEditDragging = false;
+	}
 	// The weapon that is part of the hero's own mesh gives way to a game weapon in the hand.
 	// CurrentWeapon is replicated, so every machine hides and shows it alike.
 	// In the storm means outside its safe circle: farther from the circle's centre than its radius.
@@ -802,7 +838,7 @@ void ASenniteCharacter::PreviewFloor() {
 }
 
 void ASenniteCharacter::BuildStructure(float Value) {
-	if (Value <= 0 || GetController() == nullptr) {
+	if (Value <= 0 || GetController() == nullptr || EditingPiece.IsValid()) {
 		return;
 	}
 	ASennitePlayerState* State = Cast<ASennitePlayerState>(GetController()->PlayerState);
@@ -850,10 +886,24 @@ void ASenniteCharacter::BuildStructure(float Value) {
 }
 
 void ASenniteCharacter::SwitchBuildingMaterial() {
+	if (EditingPiece.IsValid()) {
+		return;
+	}
 	ServerChangeBuildingMaterial();
 }
 
 void ASenniteCharacter::ShootGun() {
+	// while editing a piece the fire button marks tiles, and fires nothing
+	if (ABuildingActor* Editing = EditingPiece.Get()) {
+		const int32 Tile = AimedTile(this, Editing);
+		if (Tile != INDEX_NONE) {
+			bEditDragCuts = (EditCut & (1 << Tile)) == 0;
+			MarkEditTile(Tile, bEditDragCuts);
+			bEditDragging = true;
+			EditDragLast = Tile;
+		}
+		return;
+	}
 	ServerFireWeapon();
 	// The rifle goes on firing while the button is held: a shot is asked for again a little slower
 	// than the server lets one out (0.233 s), so every one asked for is fired.
@@ -864,7 +914,7 @@ void ASenniteCharacter::ShootGun() {
 
 void ASenniteCharacter::FireWhileHeld() {
 	const ASennitePlayerState* State = GetPlayerState<ASennitePlayerState>();
-	if (CurrentWeaponType != 1 || CurrentWeapon == nullptr || State == nullptr || State->InBuildMode) {
+	if (CurrentWeaponType != 1 || CurrentWeapon == nullptr || State == nullptr || State->InBuildMode || EditingPiece.IsValid()) {
 		StopShooting();
 		return;
 	}
@@ -873,9 +923,13 @@ void ASenniteCharacter::FireWhileHeld() {
 
 void ASenniteCharacter::StopShooting() {
 	GetWorldTimerManager().ClearTimer(HeldFireTimer);
+	bEditDragging = false;
 }
 
 void ASenniteCharacter::UseHealingItem() {
+	if (EditingPiece.IsValid()) {
+		return;
+	}
 	ServerUseHealingItem(CurrentHealingItemType);
 }
 
@@ -884,6 +938,12 @@ void ASenniteCharacter::Reload() {
 }
 
 void ASenniteCharacter::AimGunIn() {
+	// while editing a piece the aim button puts every tile back and finishes
+	if (EditingPiece.IsValid()) {
+		EditCut = 0;
+		FinishEdit();
+		return;
+	}
 	ServerAimDownSights();
 }
 
@@ -1202,6 +1262,7 @@ void ASenniteCharacter::ServerBuildStructure_Implementation(TSubclassOf<ABuildin
 			else {
 				State->MaterialCounts[MaterialType] -= BuildingPieceCost;
 				Piece->FactionId = State->FactionId;
+				Piece->Builder = State;
 			}
 		}
 	}
@@ -2366,5 +2427,173 @@ void ASenniteCharacter::OnRepSetSkin() {
 	else if (MaterialOrMaterialInstance == 1 && SkinMaterialInstances.IsValidIndex(CurrentSkin)) {
 		// assign UMaterialInstance
 		CharacterMesh->SetMaterial(0, SkinMaterialInstances[CurrentSkin]);
+	}
+}
+void ASenniteCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason) {
+	// a hero that goes mid-edit leaves the piece as the server has it
+	CancelEdit();
+	Super::EndPlay(EndPlayReason);
+}
+
+ABuildingActor* ASenniteCharacter::EditablePieceUnderAim(int32& OutTile) const {
+	OutTile = INDEX_NONE;
+	const AController* Own = GetController();
+	if (Own == nullptr) {
+		return nullptr;
+	}
+	FVector Eye;
+	FRotator Look;
+	Own->GetPlayerViewPoint(Eye, Look);
+	// the nearest piece of the player's side whose face the view crosses, a cut tile's place included
+	double Nearest = MaxBuildReach + FVector::Dist(Eye, GetActorLocation()) + ABuildingActor::Cell;
+	ABuildingActor* Found = nullptr;
+	for (TActorIterator<ABuildingActor> It(GetWorld()); It; ++It) {
+		ABuildingActor* Piece = *It;
+		if (Piece->IsPreview || Piece->IsActorBeingDestroyed() || ClientSpawnedStructures.Contains(Piece) || !Piece->MayBeEditedBy(GetPlayerState())
+			|| FVector::Dist(Piece->GetActorLocation(), GetActorLocation()) > MaxBuildReach + ABuildingActor::Cell) {
+			continue;
+		}
+		double At = 0.0;
+		const int32 Tile = Piece->TileUnderAim(Eye, Look.Vector(), Nearest, At);
+		if (Tile != INDEX_NONE && At < Nearest) {
+			Nearest = At;
+			Found = Piece;
+			OutTile = Tile;
+		}
+	}
+	return Found;
+}
+
+ABuildingActor* ASenniteCharacter::PieceInSight() const {
+	const AController* Own = GetController();
+	if (Own == nullptr) {
+		return nullptr;
+	}
+	FVector Eye;
+	FRotator Look;
+	Own->GetPlayerViewPoint(Eye, Look);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(PieceInSight), false, this);
+	Params.AddIgnoredActor(CurrentWeapon);
+	Params.AddIgnoredActor(CurrentHealingItem);
+	FHitResult Hit;
+	if (!GetWorld()->LineTraceSingleByChannel(Hit, Eye, Eye + Look.Vector() * PieceSightReach, ECC_Visibility, Params)) {
+		return nullptr;
+	}
+	ABuildingActor* Piece = Cast<ABuildingActor>(Hit.GetActor());
+	return Piece != nullptr && !Piece->IsPreview && !Piece->IsActorBeingDestroyed() ? Piece : nullptr;
+}
+
+void ASenniteCharacter::EditPiece() {
+	if (EditingPiece.IsValid()) {
+		FinishEdit();
+		return;
+	}
+	int32 Tile = INDEX_NONE;
+	ABuildingActor* Piece = EditablePieceUnderAim(Tile);
+	if (Piece == nullptr) {
+		return;
+	}
+	StopShooting();
+	EditingPiece = Piece;
+	EditCut = Piece->Cut;
+	EditDragLast = INDEX_NONE;
+	Piece->EditingHere = this;
+	Piece->ShowCut(EditCut, EditCut);
+}
+
+void ASenniteCharacter::MarkEditTile(int32 Tile, bool bCut) {
+	ABuildingActor* Piece = EditingPiece.Get();
+	if (Piece == nullptr || Tile < 0 || Tile >= Piece->TileCount()) {
+		return;
+	}
+	const int32 Next = bCut ? (EditCut | (1 << Tile)) : (EditCut & ~(1 << Tile));
+	// at least one tile stays
+	if (Next == Piece->AllTiles()) {
+		return;
+	}
+	EditCut = Next;
+	Piece->ShowCut(EditCut, EditCut);
+}
+
+void ASenniteCharacter::FinishEdit() {
+	ABuildingActor* Piece = EditingPiece.Get();
+	EditingPiece = nullptr;
+	bEditDragging = false;
+	if (Piece == nullptr) {
+		return;
+	}
+	Piece->EditingHere = nullptr;
+	// shown at once as it will be; the server makes it so for everyone, or refuses and it goes back
+	Piece->ShowCut(EditCut, 0);
+	if (EditCut != Piece->Cut) {
+		ServerEditPiece(Piece, EditCut);
+	}
+}
+
+void ASenniteCharacter::CancelEdit() {
+	ABuildingActor* Piece = EditingPiece.Get();
+	EditingPiece = nullptr;
+	bEditDragging = false;
+	if (Piece != nullptr) {
+		Piece->EditingHere = nullptr;
+		Piece->ShowCut(Piece->Cut, 0);
+	}
+}
+
+bool ASenniteCharacter::MayEditPiece(const ABuildingActor* Piece, int32 NewCut) const {
+	if (!IsValid(Piece) || Piece->IsPreview || Piece->IsActorBeingDestroyed() || Health <= 0.0f) {
+		return false;
+	}
+	// a piece of the player's own side, within reach, keeping at least one tile
+	if (!Piece->MayBeEditedBy(GetPlayerState()) || FVector::Dist(Piece->GetActorLocation(), GetActorLocation()) > MaxBuildReach + ABuildingActor::Cell) {
+		return false;
+	}
+	const int32 All = Piece->AllTiles();
+	if ((NewCut & ~All) != 0 || NewCut == All) {
+		return false;
+	}
+	// and no tile put back into anyone standing where it goes
+	const int32 Back = Piece->Cut & ~NewCut;
+	const FTransform Frame = Piece->GetActorTransform();
+	for (int32 Tile = 0; Tile < Piece->TileCount(); ++Tile) {
+		if ((Back & (1 << Tile)) == 0) {
+			continue;
+		}
+		const FTransform At = Piece->TileTransform(Tile, false) * Frame;
+		if (GetWorld()->OverlapAnyTestByObjectType(At.GetLocation(), At.GetRotation(), FCollisionObjectQueryParams(ECC_Pawn),
+			FCollisionShape::MakeBox(At.GetScale3D() * 50.0))) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void ASenniteCharacter::ServerEditPiece_Implementation(ABuildingActor* Piece, int32 NewCut) {
+	if (!MayEditPiece(Piece, NewCut)) {
+		if (IsValid(Piece)) {
+			ClientEditRefused(Piece);
+		}
+		return;
+	}
+	Piece->Cut = NewCut;
+	if (!Piece->EditingHere.IsValid()) {
+		Piece->ShowCut(NewCut, 0);
+	}
+}
+
+bool ASenniteCharacter::ServerEditPiece_Validate(ABuildingActor* Piece, int32 NewCut) {
+	return true;
+}
+
+void ASenniteCharacter::ClientEditRefused_Implementation(ABuildingActor* Piece) {
+	if (IsValid(Piece) && !Piece->EditingHere.IsValid()) {
+		Piece->ShowCut(Piece->Cut, 0);
+	}
+}
+
+void ASenniteCharacter::ClientDrawPieceHit_Implementation(float Damage) {
+	const APlayerController* Own = Cast<APlayerController>(GetController());
+	if (ASenniteHUD* Hud = Own != nullptr ? Cast<ASenniteHUD>(Own->GetHUD()) : nullptr) {
+		Hud->DrawPieceHit(Damage);
 	}
 }
