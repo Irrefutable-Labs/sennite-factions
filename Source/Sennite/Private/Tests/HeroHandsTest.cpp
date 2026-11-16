@@ -1,6 +1,6 @@
 // Hero hands check. Run in the game on the test range: the hero walks over the rifle and the shotgun,
-// takes the rifle in hand, and then becomes each hero of the list in turn, the way a player's choice
-// reaches the server (ASennitePlayerState::ServerChooseHero). As each hero, standing:
+// takes the rifle in hand, and then becomes each hero of the list in turn, as the server makes a
+// player the hero they chose (ASennitePlayerState::SetHero; this game is its own server). As each hero:
 // - the rifle is fixed to the hero's weapon bone, in the right hand, pointing ahead of them;
 // - the hero's own built-in weapon, if it has one, is hidden;
 // - a pull of the trigger plays the hero's own firing animation, if it ships with one.
@@ -118,8 +118,8 @@ namespace
 			return false;
 
 		case EPhase::Become:
-			// the player's choice, as the lobby sends it
-			State->ServerChooseHero(Heroes[HeroIndex].Id);
+			// the hero, as the server sets it from a player's choice
+			State->SetHero(Heroes[HeroIndex].Id);
 			Enter(EPhase::Measure, World);
 			return false;
 

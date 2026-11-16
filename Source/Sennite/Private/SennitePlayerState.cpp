@@ -3,6 +3,7 @@
 #include "SennitePlayerState.h"
 #include "SenniteCharacter.h"
 #include "SenniteHeroes.h"
+#include "SenniteMenu.h"
 #include "Net/UnrealNetwork.h"
 
 ASennitePlayerState::ASennitePlayerState() {
@@ -62,11 +63,18 @@ void ASennitePlayerState::GetLifetimeReplicatedProps(TArray< FLifetimeProperty >
 }
 
 void ASennitePlayerState::ServerChooseHero_Implementation(FName Id) {
+	// A player changes hero in the lobby, where nobody has a body yet; in play a change would have every
+	// machine load and put on another hero, so it is not taken there. Nor more than twice a second.
+	const UWorld* World = GetWorld();
+	if (World == nullptr || World->GetGameState<ASenniteLobbyState>() == nullptr || World->GetRealTimeSeconds() < NextHeroChoice) {
+		return;
+	}
+	NextHeroChoice = World->GetRealTimeSeconds() + 0.5;
 	SetHero(Id);
 }
 
 void ASennitePlayerState::SetHero(FName Id) {
-	if (!HasAuthority() || USenniteHeroes::Find(Id) == nullptr) {
+	if (!HasAuthority() || USenniteHeroes::Find(Id) == nullptr || Id == HeroId) {
 		return;
 	}
 	HeroId = Id;

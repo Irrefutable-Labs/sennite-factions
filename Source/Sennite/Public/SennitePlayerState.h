@@ -72,11 +72,15 @@ public:
 	FName HeroId;
 
 	/**
-	 * This player chooses a hero. Their game lets them choose only a hero that is free or that their
-	 * wallet proved it owns; the server checks the hero is on the list, and dresses their character.
+	 * This player chooses a hero, in the lobby. Their game lets them choose only a hero that is free or
+	 * that their wallet proved it owns; the server checks the hero is on the list, takes the choice only
+	 * in a lobby and not more than twice a second, and shows it to everyone.
 	 */
 	UFUNCTION(Server, Reliable)
 	void ServerChooseHero(FName Id);
+
+	/** When, on the server's clock, this player's next choice of hero is taken. */
+	double NextHeroChoice = 0.0;
 
 	/** On the server: this player is this hero from now on, if the list has it. */
 	void SetHero(FName Id);
