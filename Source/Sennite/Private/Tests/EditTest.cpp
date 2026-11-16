@@ -420,6 +420,13 @@ namespace
 				return false;
 			}
 			Test->TestEqual(TEXT("The wall falls when it has taken its strength"), WallsStanding(World), 0);
+			{
+				int32 Pieces = 0;
+				for (TActorIterator<ASennitePieceRubble> It(World); It; ++It) {
+					Pieces += It->Tiles->GetInstanceCount();
+				}
+				Test->TestEqual(TEXT("The fallen wall breaks into its nine tiles"), Pieces, 9);
+			}
 			GameCheck::Shot(TEXT("Editing"), TEXT("fallen.png"));
 			UE_LOG(LogEditCheck, Display, TEXT("GAMECHECK finished"));
 			Phase = EPhase::Done;

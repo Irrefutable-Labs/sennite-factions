@@ -376,7 +376,6 @@ bool ASenniteCharacter::ReplicateSubobjects(class UActorChannel *Channel, class 
 void ASenniteCharacter::GetLifetimeReplicatedProps(TArray< FLifetimeProperty > & OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	DOREPLIFETIME(ASenniteCharacter, BuildingPreview);
 	DOREPLIFETIME(ASenniteCharacter, CurrentBuildingMaterial);
 	DOREPLIFETIME(ASenniteCharacter, CurrentHealingItem);
 	DOREPLIFETIME(ASenniteCharacter, CurrentHealingItemType);
@@ -477,31 +476,30 @@ void ASenniteCharacter::Tick(float DeltaTime) {
 		}
 	}
 	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString("Tick mode ") + FString::FromInt(GetNetMode()));
-	if (HasAuthority()) {
-		// TODO: building preview should only be spawned client side
-		if (GetController()) {
-			ASennitePlayerState* State = Cast<ASennitePlayerState>(GetController()->PlayerState);
-			if (State) {
-				// the preview shows where the next piece would go; it follows the player and changes with the kind and material
-				const TArray<TSubclassOf<ABuildingActor>>* Previews = State->InBuildMode ? BuildingClassesOf(State->BuildMode, true) : nullptr;
-				TSubclassOf<ABuildingActor> PreviewClass = Previews != nullptr && Previews->IsValidIndex(CurrentBuildingMaterial) ? (*Previews)[CurrentBuildingMaterial] : nullptr;
-				if (BuildingPreview != nullptr && BuildingPreview->GetClass() != PreviewClass) {
-					BuildingPreview->Destroy();
-					BuildingPreview = nullptr;
-				}
-				if (PreviewClass != nullptr) {
-					FVector GridLocation;
-					FRotator GridRotation;
-					BuildPlacement(State->BuildMode, GridLocation, GridRotation);
-					if (BuildingPreview == nullptr) {
-						BuildingPreview = GetWorld()->SpawnActor<ABuildingActor>(PreviewClass, GridLocation, GridRotation);
-					}
-					else {
-						BuildingPreview->SetActorLocationAndRotation(GridLocation, GridRotation);
-					}
-				}
+	// The preview shows where the next piece would go: drawn on the building player's own machine only,
+	// where it follows them every frame; it changes with the kind and the material, and goes when they
+	// leave build mode.
+	if (IsLocallyControlled()) {
+		const ASennitePlayerState* State = GetPlayerState<ASennitePlayerState>();
+		const TArray<TSubclassOf<ABuildingActor>>* Previews = State != nullptr && State->InBuildMode ? BuildingClassesOf(State->BuildMode, true) : nullptr;
+		TSubclassOf<ABuildingActor> PreviewClass = Previews != nullptr && Previews->IsValidIndex(CurrentBuildingMaterial) ? (*Previews)[CurrentBuildingMaterial] : nullptr;
+		if (BuildingPreview != nullptr && BuildingPreview->GetClass() != PreviewClass) {
+			BuildingPreview->Destroy();
+			BuildingPreview = nullptr;
+		}
+		if (PreviewClass != nullptr) {
+			FVector GridLocation;
+			FRotator GridRotation;
+			BuildPlacement(State->BuildMode, GridLocation, GridRotation);
+			if (BuildingPreview == nullptr) {
+				BuildingPreview = GetWorld()->SpawnActor<ABuildingActor>(PreviewClass, GridLocation, GridRotation);
+			}
+			else {
+				BuildingPreview->SetActorLocationAndRotation(GridLocation, GridRotation);
 			}
 		}
+	}
+	if (HasAuthority()) {
 		FRotator ControlRotation = GetControlRotation();
 		FRotator ActorRotation = GetActorRotation();
 
@@ -2430,8 +2428,12 @@ void ASenniteCharacter::OnRepSetSkin() {
 	}
 }
 void ASenniteCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason) {
-	// a hero that goes mid-edit leaves the piece as the server has it
+	// a hero that goes mid-edit leaves the piece as the server has it, and takes its preview with it
 	CancelEdit();
+	if (BuildingPreview != nullptr) {
+		BuildingPreview->Destroy();
+		BuildingPreview = nullptr;
+	}
 	Super::EndPlay(EndPlayReason);
 }
 

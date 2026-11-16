@@ -14,6 +14,8 @@
 class APlayerState;
 class ASenniteCharacter;
 class UInstancedStaticMeshComponent;
+class UMaterialInterface;
+class UStaticMesh;
 
 UCLASS(config=Game)
 class SENNITE_API ABuildingActor : public AActor
@@ -126,6 +128,9 @@ public:
 
 	virtual void PreInitializeComponents() override;
 
+	/** A piece that falls breaks into its tiles where it stood (ASennitePieceRubble), on every machine that draws. */
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 protected:
 	/** Called by each piece class's constructor: what it is, what it is made of, and whether it is only a preview. */
 	void SetPiece(const TCHAR* Kind, int32 Material, bool bPreview);
@@ -144,4 +149,38 @@ public:
 	{
 		return true;
 	}
+};
+
+/**
+ * What is left of a fallen piece for a moment: its tiles as they last stood, tumbling down and
+ * shrinking away. Drawn by each machine for itself; it stops nothing and is gone in a second or two.
+ */
+UCLASS()
+class SENNITE_API ASennitePieceRubble : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ASennitePieceRubble();
+
+	/** Lay out the tiles of a piece, in the world, and send each off its own way. */
+	void Scatter(UStaticMesh* Shape, UMaterialInterface* Face, const TArray<FTransform>& Tiles, int32 Seed);
+
+	virtual void Tick(float DeltaSeconds) override;
+
+	/** How long the tiles fall before they are gone. */
+	static constexpr float Seconds = 1.4f;
+
+	UPROPERTY(VisibleAnywhere, Category = "Mesh")
+	UInstancedStaticMeshComponent* Tiles;
+
+private:
+	struct FFlying
+	{
+		FTransform Start;
+		FVector Velocity;
+		FVector Spin;
+	};
+	TArray<FFlying> Flying;
+	float Age = 0.0f;
 };

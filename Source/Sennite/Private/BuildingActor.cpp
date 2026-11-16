@@ -32,6 +32,8 @@ void ABuildingActor::SetPiece(const TCHAR* Kind, int32 Material, bool bPreview)
 	StructureType = Kind;
 	MaterialType = Material;
 	IsPreview = bPreview;
+	// a preview is drawn by the building player's own machine for them alone: it is never sent
+	SetReplicates(!IsPreview);
 
 	if (IsPreview) {
 		// a preview is seen and nothing else: nothing stands on it, aim and the camera pass through it
@@ -269,6 +271,75 @@ void ABuildingActor::PreInitializeComponents()
 		Health = Shared->TierHealth[MaterialType];
 	}
 	ShowCut(Cut, 0);
+}
+
+void ABuildingActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// It fell: on the server because its health ran out, on another machine because the server took
+	// it away. A player's own first copy of a piece, replaced by the server's, did not fall.
+	const bool bFell = EndPlayReason == EEndPlayReason::Destroyed && !IsPreview
+		&& (HasAuthority() ? Health <= 0.0f : GetLocalRole() == ROLE_SimulatedProxy);
+	if (bFell && GetNetMode() != NM_DedicatedServer && GetWorld() != nullptr && PieceMesh->GetInstanceCount() > 0) {
+		TArray<FTransform> Laid;
+		for (int32 Each = 0; Each < PieceMesh->GetInstanceCount(); ++Each) {
+			FTransform Tile;
+			if (PieceMesh->GetInstanceTransform(Each, Tile, true)) {
+				Laid.Add(Tile);
+			}
+		}
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		if (ASennitePieceRubble* Rubble = GetWorld()->SpawnActor<ASennitePieceRubble>(GetActorLocation(), FRotator::ZeroRotator, Params)) {
+			Rubble->Scatter(PieceMesh->GetStaticMesh(), PieceMesh->GetMaterial(0), Laid, GetTypeHash(FIntVector(GetActorLocation() / 10.0)));
+		}
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
+ASennitePieceRubble::ASennitePieceRubble()
+{
+	PrimaryActorTick.bCanEverTick = true;
+	bReplicates = false;
+	Tiles = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("Tiles"));
+	RootComponent = Tiles;
+	Tiles->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Tiles->SetCanEverAffectNavigation(false);
+	Tiles->SetMobility(EComponentMobility::Movable);
+}
+
+void ASennitePieceRubble::Scatter(UStaticMesh* Shape, UMaterialInterface* Face, const TArray<FTransform>& Laid, int32 Seed)
+{
+	Tiles->SetStaticMesh(Shape);
+	Tiles->SetMaterial(0, Face);
+	FRandomStream Fling(Seed);
+	const FVector Middle = GetActorLocation() + FVector(0.0, 0.0, ABuildingActor::Cell * 0.4);
+	for (const FTransform& Tile : Laid) {
+		// out from the piece's middle, a little up, turning
+		const FVector Out = (Tile.GetLocation() - Middle).GetSafeNormal2D();
+		FFlying One;
+		One.Start = Tile;
+		One.Velocity = Out * Fling.FRandRange(120.0f, 320.0f) + FVector(Fling.FRandRange(-60.0f, 60.0f), Fling.FRandRange(-60.0f, 60.0f), Fling.FRandRange(80.0f, 260.0f));
+		One.Spin = FVector(Fling.FRandRange(-200.0f, 200.0f), Fling.FRandRange(-200.0f, 200.0f), Fling.FRandRange(-120.0f, 120.0f));
+		Flying.Add(One);
+		Tiles->AddInstance(Tile, true);
+	}
+}
+
+void ASennitePieceRubble::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	Age += DeltaSeconds;
+	if (Age >= Seconds) {
+		Destroy();
+		return;
+	}
+	const float Left = 1.0f - Age / Seconds;
+	for (int32 Each = 0; Each < Flying.Num(); ++Each) {
+		const FFlying& One = Flying[Each];
+		const FVector At = One.Start.GetLocation() + One.Velocity * Age + FVector(0.0, 0.0, -490.0) * Age * Age;
+		const FQuat Turned = FQuat(FRotator(One.Spin.X * Age, One.Spin.Z * Age, One.Spin.Y * Age)) * One.Start.GetRotation();
+		Tiles->UpdateInstanceTransform(Each, FTransform(Turned, At, One.Start.GetScale3D() * FMath::Max(0.05f, Left)), true, Each == Flying.Num() - 1, true);
+	}
 }
 
 void ABuildingActor::GetLifetimeReplicatedProps(TArray< FLifetimeProperty > & OutLifetimeProps) const

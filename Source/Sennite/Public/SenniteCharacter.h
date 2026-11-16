@@ -262,8 +262,8 @@ public:
 	UPROPERTY(Replicated)
 	AStormActor* CurrentStorm;
 
-	/* Current preview of wall to be built in build mode */
-	UPROPERTY(Replicated)
+	/** Where the next piece would go, drawn on this player's own machine only while they are in build mode. */
+	UPROPERTY(Transient)
 	ABuildingActor* BuildingPreview;
 
 	/* Anim instance properties */
