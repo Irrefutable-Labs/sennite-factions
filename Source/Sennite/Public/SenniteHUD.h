@@ -32,6 +32,10 @@ struct FSenniteHudReadout
 	bool bSpectating = false;
 	bool bInStorm = false;
 	float StormDamage = 0.0f;
+	bool bEditing = false;
+	FString PieceName;
+	float PieceHealth = 0.0f;
+	float PieceMax = 0.0f;
 };
 
 /**
@@ -53,6 +57,9 @@ public:
 	void DrawCrosshair();
 
 	void DrawHitMarker();
+
+	/** A shot of this player's took Damage off a built piece: the number shows by the aim for a moment. */
+	void DrawPieceHit(float Damage);
 
 	void DrawGameUI();
 
@@ -85,6 +92,8 @@ private:
 	/** Until when, by the world's clock, the hit marker and the hurt flash are drawn. */
 	double HitMarkerUntil = 0.0;
 	double HurtUntil = 0.0;
+	double PieceHitUntil = 0.0;
+	float PieceHitDamage = 0.0f;
 
 	UPROPERTY(EditAnywhere, Category = "Health")
 	TSubclassOf<UUserWidget> HealthWidgetClass;

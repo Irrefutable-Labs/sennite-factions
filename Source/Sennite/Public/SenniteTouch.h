@@ -74,9 +74,9 @@ private:
 		FVector2D Last = FVector2D::ZeroVector;
 	};
 
-	/** Which buttons show now: OPEN only beside a closed crate, the rest while the player has a hero. */
+	/** Which buttons show now: OPEN only beside a closed crate, EDIT only by a piece to edit or while editing, the rest while the player has a hero. */
 	bool Shows(const FButton& Button) const;
-	/** The label a button carries now (FIRE becomes BUILD in build mode, AIM becomes MAT, ...). */
+	/** The label a button carries now (FIRE becomes BUILD in build mode and TILE while editing, AIM becomes MAT or RESET, EDIT becomes DONE, ...). */
 	FString LabelOf(const FButton& Button) const;
 	FVector2D Centre(const FButton& Button, const FVector2D& Viewport) const;
 	bool Hits(const FButton& Button, const FVector2D& Viewport, const FVector2D& At) const;

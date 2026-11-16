@@ -23,6 +23,7 @@
 #include "SenniteHUD.h"
 #include "SennitePlayerState.h"
 #include "Animation/AnimInstance.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"

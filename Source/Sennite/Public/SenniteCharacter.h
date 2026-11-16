@@ -190,6 +190,48 @@ public:
 	/** The building material in use: 0, 1 or 2, weakest first. */
 	int GetCurrentBuildingMaterial() const { return CurrentBuildingMaterial; }
 
+	/**
+	 * Editing a built piece (G). G on a piece of the player's own side, aimed at and within reach,
+	 * starts editing it; while editing, the fire button marks the tile under the aim to be cut out or
+	 * put back (dragging across tiles marks them alike), the aim button puts every tile back and
+	 * finishes, and G again finishes. The server makes the change for everyone, or refuses it.
+	 */
+	UFUNCTION()
+	void EditPiece();
+
+	/** The piece this player is editing on this machine, or null. */
+	ABuildingActor* GetEditingPiece() const { return EditingPiece.Get(); }
+
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	/** The tiles marked to be cut in the piece being edited. */
+	int32 GetEditCut() const { return EditCut; }
+
+	/** The built piece of this player's side the aim falls on within reach, and the tile it falls on; null if none. */
+	ABuildingActor* EditablePieceUnderAim(int32& OutTile) const;
+
+	/** The built piece the camera looks at within sight, for the HUD; null if none. */
+	ABuildingActor* PieceInSight() const;
+
+	/** On the server: change a piece's cut tiles, if this player may and nothing is in the way. */
+	UFUNCTION(Server, Reliable, WithValidation)
+	void ServerEditPiece(ABuildingActor* Piece, int32 NewCut);
+
+	/** On the server: whether this player's edit of a piece would be made. */
+	bool MayEditPiece(const ABuildingActor* Piece, int32 NewCut) const;
+
+	/** The server refused an edit: show the piece as it is. */
+	UFUNCTION(Client, Reliable)
+	void ClientEditRefused(ABuildingActor* Piece);
+
+	/** A shot of this player's took damage off a built piece. */
+	UFUNCTION(Client, Reliable)
+	void ClientDrawPieceHit(float Damage);
+
+	/** How far from the camera a piece is named on the HUD. */
+	UPROPERTY(EditDefaultsOnly, Category = "Building")
+	float PieceSightReach = 3000.0f;
+
 	UFUNCTION(BlueprintPure, Category = "Material")
 	int GetWoodMaterialCount();
 
@@ -220,8 +262,8 @@ public:
 	UPROPERTY(Replicated)
 	AStormActor* CurrentStorm;
 
-	/* Current preview of wall to be built in build mode */
-	UPROPERTY(Replicated)
+	/** Where the next piece would go, drawn on this player's own machine only while they are in build mode. */
+	UPROPERTY(Transient)
 	ABuildingActor* BuildingPreview;
 
 	/* Anim instance properties */
@@ -581,6 +623,22 @@ public:
 
 	/** The piece classes of a kind: built pieces, or their previews. Null for a kind there is none of. */
 	const TArray<TSubclassOf<ABuildingActor>>* BuildingClassesOf(const FString& PieceKind, bool bPreview) const;
+
+	/** Editing on this machine: the piece, the tiles marked to cut, and a drag across tiles that marks them alike. */
+	TWeakObjectPtr<ABuildingActor> EditingPiece;
+	int32 EditCut = 0;
+	bool bEditDragging = false;
+	bool bEditDragCuts = false;
+	int32 EditDragLast = INDEX_NONE;
+
+	/** Mark a tile of the piece being edited, keeping at least one tile. */
+	void MarkEditTile(int32 Tile, bool bCut);
+
+	/** Send the edit to the server and stop editing. */
+	void FinishEdit();
+
+	/** Stop editing without a change. */
+	void CancelEdit();
 
 	/** The last build this player asked for, so holding the button does not ask for the same piece every frame. */
 	FVector LastBuildLocation = FVector(TNumericLimits<double>::Max());

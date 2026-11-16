@@ -15,6 +15,7 @@
 #include "SennitePlayerController.h"
 #include "SenniteTouch.h"
 #include "Engine/Font.h"
+#include "BuildingActor.h"
 #include "HealingActor.h"
 #include "StormActor.h"
 #include "WeaponActor.h"
@@ -82,6 +83,12 @@ FSenniteHudReadout ASenniteHUD::ReadState() const
 	if (const AStormActor* Storm = Hero->CurrentStorm) {
 		Readout.bInStorm = Hero->InStorm;
 		Readout.StormDamage = Storm->Damage;
+	}
+	Readout.bEditing = Hero->GetEditingPiece() != nullptr;
+	if (const ABuildingActor* Piece = Hero->PieceInSight()) {
+		Readout.PieceName = Piece->Describe();
+		Readout.PieceHealth = Piece->Health;
+		Readout.PieceMax = Piece->MaxHealth();
 	}
 	return Readout;
 }
@@ -153,6 +160,25 @@ void ASenniteHUD::DrawStatus()
 			DrawLine(X + Way.X * In, Y + Way.Y * In, X + Way.X * Out, Y + Way.Y * Out, White, 2.5f * S);
 		}
 		Drawing.Add(TEXT("hitmarker=1"));
+	}
+	// just hit a built piece: what it took, by the aim
+	if (Clock < PieceHitUntil) {
+		Label(TEXT("piecehit"), FString::FromInt(FMath::RoundToInt(PieceHitDamage)), W * 0.5f + 14.0f * S, H * 0.5f - 30.0f * S, 14, FLinearColor(0.55f, 0.8f, 1.0f));
+	}
+	// a built piece in sight: what it is and what it has left
+	if (!Now.PieceName.IsEmpty()) {
+		const float PieceW = 120.0f * S;
+		const float PieceX = W * 0.5f - PieceW * 0.5f;
+		const float PieceY = H * 0.5f + 26.0f * S;
+		const float Left = Now.PieceMax > 0.0f ? Now.PieceHealth / Now.PieceMax : 0.0f;
+		Bar(PieceX, PieceY, PieceW, 5.0f * S, Left, Left > 0.5f ? FLinearColor(0.55f, 0.8f, 1.0f) : Left > 0.25f ? FLinearColor(1.0f, 0.7f, 0.1f) : FLinearColor(0.9f, 0.15f, 0.1f));
+		Label(TEXT("pieceaim"), FString::Printf(TEXT("%s %d/%d"), *Now.PieceName, FMath::RoundToInt(Now.PieceHealth), FMath::RoundToInt(Now.PieceMax)),
+			PieceX, PieceY + 8.0f * S, 10, FLinearColor(1.0f, 1.0f, 1.0f, 0.85f));
+	}
+	// editing a piece: what the buttons do
+	if (Now.bEditing) {
+		DrawRect(FLinearColor(0.0f, 0.0f, 0.0f, 0.35f), W * 0.5f - 200.0f * S, H * 0.70f, 400.0f * S, 34.0f * S);
+		Label(TEXT("edit"), TEXT("EDITING   FIRE: CUT OR PUT BACK A TILE   AIM: RESET   G: DONE"), W * 0.5f - 188.0f * S, H * 0.70f + 9.0f * S, 11, FLinearColor::White);
 	}
 
 	const FLinearColor Plate(0.0f, 0.0f, 0.0f, 0.35f);
@@ -333,6 +359,12 @@ void ASenniteHUD::DrawHitMarker() {
 			// TODO for later: Implement your own UUserWidget class to retrieve animation from a blueprint and play the animation here
 		}
 	}
+}
+
+void ASenniteHUD::DrawPieceHit(float Damage) {
+	// drawn on the canvas for a little under half a second (DrawStatus)
+	PieceHitUntil = GetWorld()->GetTimeSeconds() + 0.45;
+	PieceHitDamage = Damage;
 }
 
 void ASenniteHUD::DrawBloodSplash() {

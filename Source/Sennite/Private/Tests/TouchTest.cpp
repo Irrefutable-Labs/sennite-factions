@@ -3,9 +3,10 @@
 // on the right turns the hero to face the weapons; the stick walks her over the rifle and the
 // shotgun; the slots along the bottom change what she holds; FIRE held keeps the rifle firing, and
 // RELOAD, with no rounds to spare on the test range, leaves it as it is; JUMP jumps and fires
-// nothing; WALL, MAT, FIRE, RAMP and FLOOR build; then she turns, runs with the stick pushed all
-// the way to the bandages and potions, drinks a potion with POTION and USE, and takes a bandage in
-// hand with BANDAGE. The controls are drawn on the HUD and say what each button does now.
+// nothing; WALL, MAT, FIRE, RAMP and FLOOR build; EDIT, TILE and DONE cut a tile out of the wall
+// she built; then she turns, runs with the stick pushed all the way to the bandages and potions,
+// drinks a potion with POTION and USE, and takes a bandage in hand with BANDAGE. The controls are
+// drawn on the HUD and say what each button does now.
 //
 // Tools/check_touch.sh runs this and reads the result.
 
@@ -57,7 +58,7 @@ namespace
 
 	private:
 		enum class EPhase {
-			WaitForPawn, FaceWeapons, WalkOver, Stop, Slots, Jump, HoldFire, Reload, Build, FaceItems, RunToBandage, FaceDrink, RunToPotion, Drink, Bandage, Done
+			WaitForPawn, FaceWeapons, WalkOver, Stop, Slots, Jump, HoldFire, Reload, Build, Edit, FaceItems, RunToBandage, FaceDrink, RunToPotion, Drink, Bandage, Done
 		};
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; }
@@ -145,6 +146,8 @@ namespace
 		bool bSawWalking = false;
 		bool bSawRunning = false;
 		double TopZ = 0.0;
+		TWeakObjectPtr<ABuildingActor> Piece;
+		int32 CutMark = 0;
 	};
 
 	bool FTouchRun::Update()
@@ -347,6 +350,43 @@ namespace
 				if (Elapsed(World) < 6.0) { return false; }
 				Test->TestFalse(TEXT("RIFLE leaves build mode"), State->InBuildMode);
 				UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK build: %d pieces stand"), Built(World));
+				Enter(EPhase::Edit, World);
+				return false;
+			}
+
+		case EPhase::Edit:
+			// the wall she built is in sight: EDIT, then FIRE (now TILE) marks the tile in sight, and DONE cuts it
+			switch (Step) {
+			case 0:
+				if (Elapsed(World) < 0.5) { return false; }
+				Test->TestTrue(TEXT("Facing her own wall, there is an EDIT button"), Drawn(TEXT("EDIT=EDIT")));
+				Step = 1; Press(TEXT("EDIT"));
+				return false;
+			case 1: if (Elapsed(World) > 0.65) { Step = 2; Lift(TEXT("EDIT")); } return false;
+			case 2:
+				if (Elapsed(World) < 1.3) { return false; }
+				Piece = Hero->GetEditingPiece();
+				if (!Piece.IsValid()) {
+					return Fail(TEXT("EDIT did not start editing the wall in sight"));
+				}
+				CutMark = Piece->Cut;
+				Test->TestTrue(TEXT("While editing, FIRE says TILE, AIM says RESET and EDIT says DONE"), Drawn(TEXT("FIRE=TILE")) && Drawn(TEXT("AIM=RESET")) && Drawn(TEXT("EDIT=DONE")));
+				Step = 3; Press(TEXT("FIRE"));
+				return false;
+			case 3: if (Elapsed(World) > 1.45) { Step = 4; Lift(TEXT("FIRE")); } return false;
+			case 4:
+				if (Elapsed(World) < 2.1) { return false; }
+				Test->TestTrue(TEXT("TILE marks the tile in sight"), Hero->GetEditCut() != CutMark);
+				CutMark = Hero->GetEditCut();
+				GameCheck::Shot(TEXT("Touch"), TEXT("editing.png"));
+				Step = 5; Press(TEXT("EDIT"));
+				return false;
+			case 5: if (Elapsed(World) > 2.25) { Step = 6; Lift(TEXT("EDIT")); } return false;
+			default:
+				if (Elapsed(World) < 3.2) { return false; }
+				Test->TestTrue(TEXT("DONE finishes the edit"), Hero->GetEditingPiece() == nullptr);
+				Test->TestTrue(TEXT("DONE cuts the marked tile out of the wall"), Piece.IsValid() && Piece->Cut == CutMark);
+				UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK edit: wall cut %d"), Piece.IsValid() ? Piece->Cut : -1);
 				Enter(EPhase::FaceItems, World);
 				return false;
 			}

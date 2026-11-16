@@ -47,7 +47,8 @@ const TArray<USenniteTouchControls::FButton>& USenniteTouchControls::Buttons()
 		{ TEXT("RELOAD"), EKeys::R, FVector2D(-245.0, -265.0), 32.0f, false },
 		{ TEXT("AIM"), EKeys::RightMouseButton, FVector2D(-225.0, -360.0), 32.0f, false },
 		{ TEXT("OPEN"), EKeys::E, FVector2D(-385.0, -160.0), 34.0f, false },
-		// building, top right under the kills; the piece-edit button (key G) goes at (-365, 92), the left end of this row
+		// building, top right under the kills: EDIT (G) at the left end, beside a piece of the player's side or while editing one
+		{ TEXT("EDIT"), EKeys::G, FVector2D(-365.0, 92.0), 26.0f, false },
 		{ TEXT("WALL"), EKeys::X, FVector2D(-300.0, 92.0), 26.0f, false },
 		{ TEXT("RAMP"), EKeys::C, FVector2D(-235.0, 92.0), 26.0f, false },
 		{ TEXT("FLOOR"), EKeys::F, FVector2D(-170.0, 92.0), 26.0f, false },
@@ -113,6 +114,11 @@ bool USenniteTouchControls::Shows(const FButton& Button) const
 		const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
 		return ASenniteCrate::Nearest(Hero->GetWorld(), Hero->GetActorLocation(), Rules->Reach + Rules->Across, true) != nullptr;
 	}
+	if (Button.Key == EKeys::G) {
+		// what G would start editing, or the edit G would finish
+		int32 Tile = INDEX_NONE;
+		return Hero->GetEditingPiece() != nullptr || Hero->EditablePieceUnderAim(Tile) != nullptr;
+	}
 	return true;
 }
 
@@ -121,6 +127,18 @@ FString USenniteTouchControls::LabelOf(const FButton& Button) const
 	const ASenniteCharacter* Hero = Controller ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
 	const ASennitePlayerState* State = Controller ? Controller->GetPlayerState<ASennitePlayerState>() : nullptr;
 	const bool bBuilding = State != nullptr && State->InBuildMode;
+	// editing a piece: FIRE marks the tile in sight, AIM puts every tile back, EDIT finishes
+	if (Hero != nullptr && Hero->GetEditingPiece() != nullptr) {
+		if (Button.Key == EKeys::LeftMouseButton) {
+			return TEXT("TILE");
+		}
+		if (Button.Key == EKeys::RightMouseButton) {
+			return TEXT("RESET");
+		}
+		if (Button.Key == EKeys::G) {
+			return TEXT("DONE");
+		}
+	}
 	if (Button.Key == EKeys::LeftMouseButton && Hero != nullptr) {
 		if (bBuilding) {
 			return TEXT("BUILD");
@@ -380,6 +398,9 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 			const int32 Kind = Button.Key == EKeys::Four ? 0 : 1;
 			bHave = State->HealingItemCounts.IsValidIndex(Kind) && State->HealingItemCounts[Kind] > 0;
 			bInHand = Hero->CurrentHealingItem != nullptr && Hero->CurrentHealingItem->HealingType == Kind;
+		}
+		else if (Button.Key == EKeys::G) {
+			bInHand = Hero->GetEditingPiece() != nullptr;
 		}
 		else if (Button.Key == EKeys::X || Button.Key == EKeys::C || Button.Key == EKeys::F) {
 			bInHand = State->InBuildMode && State->BuildMode.Equals(Button.Name, ESearchCase::IgnoreCase);
