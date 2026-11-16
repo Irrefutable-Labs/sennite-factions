@@ -457,12 +457,13 @@ export class Publisher {
    * What the wallet on `connection` owns, by object id, from a proof the
    * wallet gives and the publisher's account verifies (spec 10.2: a holding
    * counts only once it is proven, never on a client's say-so). It covers the
-   * resources, D-bucks, ERA and every skin the shop has sold. Undefined when
+   * resources, D-bucks, ERA and every skin and hero the shop has sold. Undefined when
    * no proof was established.
    */
   async proven(connection: Connection): Promise<Map<string, bigint> | undefined> {
-    // a proof covers the objects it is asked about: the skins are asked about one by one, each by its object id
-    const asked = [...this.options.catalogue.resources, this.shop.symbol, "ERA", ...Object.keys(this.options.store.data.shop.skins)];
+    // a proof covers the objects it is asked about: the skins and heroes are asked about one by one, each by its object id
+    const { skins, heroes } = this.options.store.data.shop;
+    const asked = [...this.options.catalogue.resources, this.shop.symbol, "ERA", ...Object.keys(skins), ...Object.keys(heroes)];
     // A proof stands only while the wallet has not moved on from the position it was made at. A
     // wallet that takes something in just after answering leaves a proof that establishes nothing:
     // that is no answer about what it holds, so the wallet is asked again.
@@ -496,7 +497,7 @@ export class Publisher {
     return proven === undefined ? undefined : this.materialsAmong(proven);
   }
 
-  /** Everything the game shows of a wallet, from one proof: its materials, its D-bucks and ERA, and its skins. */
+  /** Everything the game shows of a wallet, from one proof: its materials, its D-bucks and ERA, its skins and its heroes. */
   async holdings(connection: Connection): Promise<({ materials: Record<string, number> } & Purse) | undefined> {
     const proven = await this.proven(connection);
     if (proven === undefined) return undefined;

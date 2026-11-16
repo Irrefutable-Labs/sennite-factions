@@ -6,6 +6,7 @@
  * ERA. A player's wallet trades ERA for D-bucks through that vault, pays D-bucks to the shop, and
  * is given a skin: an object of which one exists. The player then sells it on to another player,
  * wallet to wallet, with the game no party to the sale. Who owns the skin is what a wallet proves.
+ * A hero is sold the same way.
  *
  * Every balance here is read from the wallet's own account.
  *
@@ -145,5 +146,29 @@ describe("D-bucks and the shop", () => {
     // Next time each of them is in the game, it asks the wallet what it owns: the skin is the buyer's.
     expect((await purse("bob")).skins).toEqual([{ skinId: "magma", name: "Dekker Magma", object: skin.object, serial: 1 }]);
     expect((await purse("alice")).skins).toEqual([]);
+  });
+
+  it("the shop sells a hero for D-bucks as it sells a skin: one object, issued once paid, the wallet's", async () => {
+    const price = BigInt(s.publisher.shop.hero("crunch").price);
+    const [dbucksBefore, takings] = [await dbucksOf("alice"), await publishers(DBUCKS)];
+    expect(dbucksBefore).toBeGreaterThanOrEqual(price);
+    const sold = await s.publisher.shop.buyHero(player(s, "alice").connection, "crunch");
+    if (!sold.ok) throw new Error(sold.why);
+    expect(sold.hero).toMatchObject({ heroId: "crunch", name: "Crunch", serial: 2 });
+
+    expect(dbucksBefore - (await dbucksOf("alice"))).toBe(price);
+    await until("the publisher's account holds the proceeds", 240_000, async () => ((await publishers(DBUCKS)) === takings + price ? true : null));
+    const owned = await until("alice's wallet holds the hero", 240_000, async () => {
+      return (await player(s, "alice").wallet.owned()).find((o) => o.object.id === sold.hero.object && o.amount === 1n);
+    });
+    expect(owned.object).toMatchObject({ kind: "unique", supply: "1" });
+    expect((await purse("alice")).heroes).toEqual([{ heroId: "crunch", name: "Crunch", object: owned.object.id, serial: 2 }]);
+    expect((await purse("bob")).heroes).toEqual([]);
+  });
+
+  it("the shop sells no free hero and no hero it does not list", async () => {
+    // Dekker and Wraith are free in the game (Config/DefaultGame.ini): the shop does not sell them.
+    expect(() => s.publisher.shop.hero("dekker")).toThrow(/no hero/);
+    expect(() => s.publisher.shop.hero("wraith")).toThrow(/no hero/);
   });
 });

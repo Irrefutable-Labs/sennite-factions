@@ -30,6 +30,14 @@ export interface SkinForSale {
   price: string;
 }
 
+/** A hero the publisher's shop sells: each one sold is an object of which one exists, as a skin is. The game's free heroes are not sold. */
+export interface HeroForSale {
+  id: string;
+  name: string;
+  /** Its price in D-bucks, in whole units. */
+  price: string;
+}
+
 /** The game's currency, the publisher's vault that sells it for ERA, and the shop (spec 10.5). */
 export interface ShopWorld {
   /** D-bucks: an object the publisher's account issues with a fixed maximum supply. */
@@ -39,6 +47,7 @@ export interface ShopWorld {
   /** What the grant lets the game ask for without asking the player again. */
   grant: { era: { perRequest: string; total: string }; dbucks: { perRequest: string; total: string } };
   skins: SkinForSale[];
+  heroes: HeroForSale[];
 }
 
 /**
@@ -70,6 +79,8 @@ export function loadWorld(dir: string = WORLD_DIR): World {
   }
   const shop = JSON.parse(new TextDecoder().decode(bytes("shop.json"))) as ShopWorld;
   if (new Set(shop.skins.map((k) => k.id)).size !== shop.skins.length) throw new Error("the shop lists a skin twice");
+  shop.heroes ??= [];
+  if (new Set(shop.heroes.map((h) => h.id)).size !== shop.heroes.length) throw new Error("the shop lists a hero twice");
   const matches = JSON.parse(new TextDecoder().decode(bytes("matches.json"))) as MatchWorld;
   for (const [resource, amount] of Object.entries(matches.prize)) {
     if (!catalogue.resources.includes(resource)) throw new Error(`a match's prize names ${resource}, which is not a resource`);

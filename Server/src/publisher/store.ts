@@ -78,12 +78,23 @@ export interface SoldSkin {
   symbol: string;
 }
 
+/** A hero the shop sold: the one object issued for it. */
+export interface SoldHero {
+  /** Which hero of the shop it is. */
+  heroId: string;
+  /** Its number among everything the shop has sold, and the symbol it was issued under. */
+  serial: number;
+  symbol: string;
+}
+
 /** The shop's own record (spec 10.5). Who owns what is never here: a wallet proves that. */
 export interface ShopRecord {
-  /** How many skins the shop has sold. */
+  /** How many skins and heroes the shop has sold. */
   serial: number;
   /** object id (Base32 Crockford) -> the skin it is */
   skins: Record<string, SoldSkin>;
+  /** object id (Base32 Crockford) -> the hero it is */
+  heroes: Record<string, SoldHero>;
   /** payment (lowercase hex of the accepted transfer's id) -> the object it bought. A payment buys once. */
   paid: Record<string, string>;
 }
@@ -133,7 +144,7 @@ export interface StoreData {
   matches: Record<string, MatchRecord>;
 }
 
-const empty = (): StoreData => ({ asked: {}, factions: {}, players: {}, shop: { serial: 0, skins: {}, paid: {} }, matches: {} });
+const empty = (): StoreData => ({ asked: {}, factions: {}, players: {}, shop: { serial: 0, skins: {}, heroes: {}, paid: {} }, matches: {} });
 
 export class Store {
   readonly data: StoreData;
@@ -141,6 +152,8 @@ export class Store {
   /** A store kept in `file`, or in memory when no file is named. */
   constructor(private readonly file?: string) {
     this.data = file !== undefined && existsSync(file) ? { ...empty(), ...(JSON.parse(readFileSync(file, "utf8")) as StoreData) } : empty();
+    // a record written before the shop sold heroes has none
+    this.data.shop = { ...empty().shop, ...this.data.shop };
   }
 
   /** Write the record to its file: a whole new file, renamed into place. */

@@ -10,5 +10,13 @@
     { "id": "energized", "name": "Dekker Energized", "price": "800" },
     { "id": "frost", "name": "Dekker Frost", "price": "600" },
     { "id": "valentine", "name": "Dekker Valentine", "price": "600" }
+  ],
+  "heroes": [
+    { "id": "crunch", "name": "Crunch", "price": "1200" },
+    { "id": "drongo", "name": "Drongo", "price": "1200" },
+    { "id": "howitzer", "name": "Howitzer", "price": "1200" },
+    { "id": "rampage", "name": "Rampage", "price": "1200" },
+    { "id": "sevarog", "name": "Sevarog", "price": "1200" },
+    { "id": "trooper", "name": "Sci-Fi Trooper", "price": "1200" }
   ]
 }

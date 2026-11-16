@@ -347,10 +347,10 @@ export class Service {
       return { status: 200, body: { prizes: await publisher.matches.waiting(hex(connection.opponent.signingKey)) } };
     }
 
-    // The shop: the game's currency and the skins the publisher sells for it (spec 10.5).
+    // The shop: the game's currency and the skins and heroes the publisher sells for it (spec 10.5).
     if (is("GET", "shop")) {
       const shop = publisher.shop.world;
-      return { status: 200, body: { currency: { symbol: shop.currency.symbol, name: shop.currency.name }, skins: shop.skins } };
+      return { status: 200, body: { currency: { symbol: shop.currency.symbol, name: shop.currency.name }, skins: shop.skins, heroes: shop.heroes } };
     }
 
     // The wallet trades ERA for D-bucks through the publisher's vault, at the price the vault's reserves set.
@@ -380,6 +380,20 @@ export class Service {
         body: this.start(player, async () => {
           const sold = await publisher.shop.buySkin(connection, skin.id);
           return sold.ok ? { ok: true, message: `${sold.skin.name} #${sold.skin.serial} is the wallet's` } : { ok: false, message: sold.why };
+        }),
+      };
+    }
+
+    // The wallet buys a hero, as it buys a skin.
+    if (is("POST", "shop", "heroes")) {
+      const player = this.player(req);
+      const connection = await this.connected(player);
+      const hero = publisher.shop.hero(text((await body(req)).heroId, "heroId"));
+      return {
+        status: 202,
+        body: this.start(player, async () => {
+          const sold = await publisher.shop.buyHero(connection, hero.id);
+          return sold.ok ? { ok: true, message: `${sold.hero.name} #${sold.hero.serial} is the wallet's` } : { ok: false, message: sold.why };
         }),
       };
     }
