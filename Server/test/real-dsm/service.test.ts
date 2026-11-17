@@ -258,8 +258,12 @@ describe("the game's side of the publisher's server", () => {
     expect((await call("GET", `/hero-passes/${second.body.pass}`)).status).toBe(404);
     expect((await call("GET", `/hero-passes/${third.body.pass}`)).status).toBe(200);
 
-    // A game with no wallet connected gets no pass.
-    const stranger = (await call("POST", "/players")).body.player as string;
-    expect((await call("POST", "/players/me/hero-pass", stranger)).status).toBe(409);
+    // A game with no wallet connected gets no pass. (The tests before asked this address for its ten connect
+    // codes of the minute: the minute is waited out first.)
+    await new Promise((resolve) => setTimeout(resolve, 61_000));
+    const made = await call("POST", "/players");
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const refused = await call("POST", "/players/me/hero-pass", made.body.player as string);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(409);
   });
 });
