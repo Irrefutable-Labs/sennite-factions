@@ -87,6 +87,22 @@ export interface SoldHero {
   symbol: string;
 }
 
+/**
+ * A sale paid for and not yet finished: the payment is taken, and the item is
+ * to be issued (if `object` is empty) and given to the buyer. A sale stays here
+ * until the item is given, so a sale cut off part way is finished later.
+ */
+export interface PendingSale {
+  kind: "skin" | "hero";
+  itemId: string;
+  serial: number;
+  symbol: string;
+  /** The buyer's wallet: its signing key (lowercase hex). */
+  buyer: string;
+  /** The object issued for it (Base32 Crockford); empty until it is issued. */
+  object: string;
+}
+
 /** The shop's own record (spec 10.5). Who owns what is never here: a wallet proves that. */
 export interface ShopRecord {
   /** How many skins and heroes the shop has sold. */
@@ -97,6 +113,8 @@ export interface ShopRecord {
   heroes: Record<string, SoldHero>;
   /** payment (lowercase hex of the accepted transfer's id) -> the object it bought. A payment buys once. */
   paid: Record<string, string>;
+  /** payment -> the sale it pays for, while the item has not been given. */
+  pending: Record<string, PendingSale>;
 }
 
 /** One member's share of a match's prize (spec 10.6): an escrow vault the publisher's account locks. */
@@ -144,7 +162,7 @@ export interface StoreData {
   matches: Record<string, MatchRecord>;
 }
 
-const empty = (): StoreData => ({ asked: {}, factions: {}, players: {}, shop: { serial: 0, skins: {}, heroes: {}, paid: {} }, matches: {} });
+const empty = (): StoreData => ({ asked: {}, factions: {}, players: {}, shop: { serial: 0, skins: {}, heroes: {}, paid: {}, pending: {} }, matches: {} });
 
 export class Store {
   readonly data: StoreData;
@@ -152,7 +170,7 @@ export class Store {
   /** A store kept in `file`, or in memory when no file is named. */
   constructor(private readonly file?: string) {
     this.data = file !== undefined && existsSync(file) ? { ...empty(), ...(JSON.parse(readFileSync(file, "utf8")) as StoreData) } : empty();
-    // a record written before the shop sold heroes has none
+    // a record written before the shop sold heroes, or kept sales pending, has none
     this.data.shop = { ...empty().shop, ...this.data.shop };
   }
 

@@ -34,6 +34,8 @@ import type { Economy, MatchWorld, ShopWorld } from "./world.js";
 
 /** How many times a wallet is asked for a proof before the game says it proved nothing. */
 const PROOF_ATTEMPTS = 5;
+/** The most objects one proof asks about. */
+const PROOF_BATCH = 32;
 /** How long an answered proof is given to be established before the wallet is asked again. */
 const PROOF_SETTLE_MS = 2_000;
 
@@ -461,9 +463,22 @@ export class Publisher {
    * no proof was established.
    */
   async proven(connection: Connection): Promise<Map<string, bigint> | undefined> {
-    // a proof covers the objects it is asked about: the skins and heroes are asked about one by one, each by its object id
+    // a proof covers the objects it is asked about: the skins and heroes are asked about one by one, each by its
+    // object id. Everything the shop ever sold is asked about, so the asking is cut into proofs of PROOF_BATCH
+    // objects each, and what they prove is put together: no one proof grows with the shop's sales.
     const { skins, heroes } = this.options.store.data.shop;
-    const asked = [...this.options.catalogue.resources, this.shop.symbol, "ERA", ...Object.keys(skins), ...Object.keys(heroes)];
+    const all = [...this.options.catalogue.resources, this.shop.symbol, "ERA", ...Object.keys(skins), ...Object.keys(heroes)];
+    const owned = new Map<string, bigint>();
+    for (let at = 0; at < all.length; at += PROOF_BATCH) {
+      const part = await this.proveSome(connection, all.slice(at, at + PROOF_BATCH));
+      if (part === undefined) return undefined;
+      for (const [object, amount] of part) owned.set(object, amount);
+    }
+    return owned;
+  }
+
+  /** One proof, of what the wallet owns of `asked`. Undefined when none was established. */
+  private async proveSome(connection: Connection, asked: string[]): Promise<Map<string, bigint> | undefined> {
     // A proof stands only while the wallet has not moved on from the position it was made at. A
     // wallet that takes something in just after answering leaves a proof that establishes nothing:
     // that is no answer about what it holds, so the wallet is asked again.

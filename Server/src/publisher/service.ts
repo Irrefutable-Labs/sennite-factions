@@ -65,6 +65,10 @@ const BASE_FRESH_MS = 1000;
 const TICKET_MS = 2 * 60 * 1000;
 /** The most tickets kept at once. */
 const MAX_TICKETS = 10_000;
+/** How long a hero pass is good for. It can be shown any number of times until then. */
+const PASS_MS = 60 * 60 * 1000;
+/** The most hero passes kept at once. */
+const MAX_PASSES = 10_000;
 
 /** A wallet's way into one match: who it is and which of the match's factions it plays for. */
 interface Ticket {
@@ -106,6 +110,10 @@ export class Service {
   readonly #bases = new Map<string, { at: number; base: Awaited<ReturnType<Publisher["base"]>> }>();
   /** Tickets into matches that no match server has taken yet. Kept in memory: a game asks again. */
   readonly #tickets = new Map<string, Ticket>();
+  /** The heroes each wallet (by signing key) proved it owns, at its last proof here. Kept in memory: a game proves again on connecting. */
+  readonly #provenHeroes = new Map<string, string[]>();
+  /** Hero passes: pass -> the wallet it speaks for, and until when. One live pass per wallet. */
+  readonly #passes = new Map<string, { signingKey: string; until: number }>();
 
   constructor(private readonly options: ServiceOptions) {}
 
@@ -398,6 +406,27 @@ export class Service {
       };
     }
 
+    // A hero pass for the player's game to show the game servers it joins: any of them can ask here which
+    // heroes the wallet proved it owns at its last proof, and nothing else about the wallet. A new pass
+    // replaces the wallet's last one.
+    if (is("POST", "players", "me", "hero-pass")) {
+      const connection = await this.connected(this.player(req));
+      const signingKey = hex(connection.opponent.signingKey);
+      const now = Date.now();
+      for (const [held, p] of this.#passes) if (p.until < now || p.signingKey === signingKey) this.#passes.delete(held);
+      if (this.#passes.size >= MAX_PASSES) throw new HttpError(429, "too many hero passes are out: try again in a moment");
+      const pass = hex(randomBytes(16));
+      this.#passes.set(pass, { signingKey, until: now + PASS_MS });
+      return { status: 201, body: { pass, seconds: PASS_MS / 1000 } };
+    }
+
+    // A game server asks what a hero pass a joining game showed it speaks for: the heroes the wallet proved it owns.
+    if (is("GET", "hero-passes", null) && b !== undefined) {
+      const held = this.#passes.get(b);
+      if (held === undefined || held.until < Date.now()) throw new HttpError(404, "that is no hero pass");
+      return { status: 200, body: { heroes: this.#provenHeroes.get(held.signingKey) ?? [] } };
+    }
+
     // The wallets connected to the game that are in no faction: who a member can invite.
     if (is("GET", "players", "free")) {
       const caller = await this.connected(this.player(req));
@@ -420,6 +449,7 @@ export class Service {
         status: 202,
         body: this.start(player, async () => {
           const holdings = await publisher.holdings(connection);
+          if (holdings !== undefined) this.#provenHeroes.set(hex(connection.opponent.signingKey), holdings.heroes.map((h) => h.heroId));
           return holdings === undefined
             ? { ok: false, message: "the wallet proved nothing about what it holds" }
             : { ok: true, message: "the wallet proved what it holds", data: { ...holdings } };
