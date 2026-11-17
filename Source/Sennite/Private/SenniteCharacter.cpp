@@ -12,6 +12,8 @@
 #include "SenniteBuildings.h"
 #include "SenniteHealing.h"
 #include "SenniteCrate.h"
+#include "SenniteGameInstance.h"
+#include "SenniteHeroes.h"
 #include "SenniteMatch.h"
 #include "Animation/AnimMontage.h"
 #include "EngineUtils.h"
@@ -122,8 +124,8 @@ ASenniteCharacter::ASenniteCharacter()
 	JustReloadedShotgun = false;
 	KillCount = 0;*/
 
-	// The hero's mesh and animation Blueprint are named in DefaultGame.ini (HeroMesh, HeroAnimClass) and put on
-	// the Mesh component in PreInitializeComponents. The heroes are authored facing +Y with their feet at the
+	// The hero's mesh and animation Blueprint come from the hero's entry in the list (USenniteHeroes) and are
+	// put on the Mesh component in ApplyHero. The heroes are authored facing +Y with their feet at the
 	// origin, so the mesh sits at the bottom of the capsule, turned to face the capsule's forward.
 	GetMesh()->SetRelativeLocationAndRotation(FVector(0.0f, 0.0f, -97.0f), FRotator(0.0f, -90.0f, 0.0f));
 
@@ -203,30 +205,90 @@ void ASenniteCharacter::AttachWeaponToHand(AWeaponActor* Weapon)
 void ASenniteCharacter::PreInitializeComponents()
 {
 	Super::PreInitializeComponents();
+	// the hero the server named, or until it has, the default hero
+	ApplyHero();
+}
 
-	USkeletalMeshComponent* HeroComponent = GetMesh();
-	if (HeroComponent == nullptr) {
+void ASenniteCharacter::SetHero(FName Id)
+{
+	if (!HasAuthority() || USenniteHeroes::Find(Id) == nullptr || Id == HeroId) {
 		return;
 	}
+	HeroId = Id;
+	ApplyHero();
+}
+
+void ASenniteCharacter::OnRep_HeroId()
+{
+	ApplyHero();
+}
+
+void ASenniteCharacter::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+	if (const ASennitePlayerState* State = NewController != nullptr ? NewController->GetPlayerState<ASennitePlayerState>() : nullptr) {
+		SetHero(State->HeroId);
+	}
+}
+
+void ASenniteCharacter::ApplyHero()
+{
+	const FSenniteHero& Hero = USenniteHeroes::FindOrDefault(HeroId);
+	USkeletalMeshComponent* Body = GetMesh();
+	if (Body == nullptr || (Hero.Id == DressedHero && Body->GetSkeletalMeshAsset() != nullptr)) {
+		return;
+	}
+	DressedHero = Hero.Id;
+	HeroMesh = Hero.Mesh;
+	HeroAnimClass = Hero.AnimClass;
+	HeroFireMontage = Hero.FireMontage;
+	HeroWeaponBone = Hero.WeaponBone;
+	HeroGripRotation = Hero.GripRotation;
+	HeroPalmOffset = Hero.PalmOffset;
+	HeroBuiltInWeaponBones = Hero.BuiltInWeaponBones;
+	HeroItemBone = Hero.ItemBone;
+	HeroItemPalmOffset = Hero.ItemPalmOffset;
+
 	if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(HeroMesh.TryLoad())) {
-		HeroComponent->SetSkeletalMeshAsset(Mesh);
+		Body->SetSkeletalMeshAsset(Mesh);
 	}
 	else {
 		UE_LOG(LogSenniteCharacter, Error, TEXT("Hero mesh '%s' did not load; the character has no body"), *HeroMesh.ToString());
 	}
 	if (UClass* AnimClass = HeroAnimClass.TryLoadClass<UAnimInstance>()) {
-		HeroComponent->SetAnimInstanceClass(AnimClass);
+		Body->SetAnimInstanceClass(AnimClass);
 	}
 	else {
 		UE_LOG(LogSenniteCharacter, Error, TEXT("Hero animation class '%s' did not load; the character will not animate"), *HeroAnimClass.ToString());
 	}
+	// the new mesh shows every bone: the built-in weapon is hidden again by Tick while a game weapon is held
+	bBuiltInWeaponHidden = false;
+	// the feet on the floor of the capsule, the face to the capsule's forward
+	Body->SetRelativeLocation(FVector(0.0f, 0.0f, -Hero.MeshDrop));
+
 	// every shot plays the hero's own firing animation, where no other was given
-	if (UAnimMontage* Fire = Cast<UAnimMontage>(HeroFireMontage.TryLoad())) {
-		for (UAnimMontage** Slot : { &RifleHipShootingAnimation, &RifleIronsightsShootingAnimation, &ShotgunHipShootingAnimation, &ShotgunIronsightsShootingAnimation }) {
-			if (*Slot == nullptr) {
-				*Slot = Fire;
-			}
+	UAnimMontage* Fire = HeroFireMontage.IsNull() ? nullptr : Cast<UAnimMontage>(HeroFireMontage.TryLoad());
+	if (!HeroFireMontage.IsNull() && Fire == nullptr) {
+		UE_LOG(LogSenniteCharacter, Error, TEXT("Hero firing animation '%s' did not load"), *HeroFireMontage.ToString());
+	}
+	for (UAnimMontage** Slot : { &RifleHipShootingAnimation, &RifleIronsightsShootingAnimation, &ShotgunHipShootingAnimation, &ShotgunIronsightsShootingAnimation }) {
+		if (*Slot == nullptr || *Slot == DressedFire) {
+			*Slot = Fire;
 		}
+	}
+	DressedFire = Fire;
+
+	// what is in hand is held anew, in this hero's hand
+	if (CurrentWeapon != nullptr) {
+		AttachWeaponToHand(CurrentWeapon);
+	}
+	if (CurrentHealingItem != nullptr && CurrentHealingItem->ItemMesh != nullptr) {
+		CurrentHealingItem->ItemMesh->AttachToComponent(Body, FAttachmentTransformRules(EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::KeepWorld, true), HeroItemBone);
+		CurrentHealingItem->ItemMesh->SetRelativeLocation(HeroItemPalmOffset);
+	}
+	// a hero seen once stays loaded, so the next one of it does not stall the game
+	if (USenniteGameInstance* Game = GetGameInstance<USenniteGameInstance>()) {
+		Game->KeepHero(Hero.Id);
 	}
 }
 
@@ -399,6 +461,7 @@ void ASenniteCharacter::GetLifetimeReplicatedProps(TArray< FLifetimeProperty > &
 	DOREPLIFETIME(ASenniteCharacter, SkinInitialized);
 	DOREPLIFETIME(ASenniteCharacter, MaterialOrMaterialInstance);
 	DOREPLIFETIME(ASenniteCharacter, CurrentSkin);
+	DOREPLIFETIME(ASenniteCharacter, HeroId);
 }
 
 namespace

@@ -19,6 +19,7 @@
 #include "BuildingActor.h"
 #include "GameCheck.h"
 #include "SenniteCharacter.h"
+#include "SenniteHeroes.h"
 #include "SenniteGameMode.h"
 #include "SenniteHUD.h"
 #include "SennitePlayerState.h"
@@ -65,7 +66,7 @@ namespace
 	bool HasHeroBody(const ASenniteCharacter* Hero)
 	{
 		const USkeletalMeshComponent* Mesh = Hero->GetMesh();
-		return Mesh->GetSkeletalMeshAsset() != nullptr && FSoftObjectPath(Mesh->GetSkeletalMeshAsset()).ToString() == GetDefault<ASenniteCharacter>()->HeroMesh.ToString()
+		return Mesh->GetSkeletalMeshAsset() != nullptr && FSoftObjectPath(Mesh->GetSkeletalMeshAsset()).ToString() == USenniteHeroes::FindOrDefault(Hero->HeroId).Mesh.ToString()
 			&& Mesh->GetAnimInstance() != nullptr;
 	}
 

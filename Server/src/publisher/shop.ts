@@ -6,7 +6,8 @@
 // shop sells skins for D-bucks: the wallet sends the price, the publisher's
 // account accepts it, and only then issues the skin, an object of which one
 // exists, and gives it to the wallet. From there the skin is the player's:
-// they can send it to anyone, and the game has no say.
+// they can send it to anyone, and the game has no say. A hero is sold the
+// same way: an object of which one exists, the wallet's to keep or send.
 //
 // The shop records what it issued and which payment bought it. It never
 // records who owns a skin: that is what a wallet proves.
@@ -15,13 +16,22 @@ import { ask, grant, type AppAccount, type Connection, type Grant, type ObjectIn
 import { hex } from "../faction/canonical.js";
 import { Refused } from "./refused.js";
 import type { Store } from "./store.js";
-import type { ShopWorld, SkinForSale } from "./world.js";
+import type { HeroForSale, ShopWorld, SkinForSale } from "./world.js";
 
 const VAULT_LABEL = "sennite d-bucks";
 
 /** A skin a wallet proved it owns. */
 export interface OwnedSkin {
   skinId: string;
+  name: string;
+  /** The object's id, as people read it. */
+  object: string;
+  serial: number;
+}
+
+/** A hero a wallet proved it owns. */
+export interface OwnedHero {
+  heroId: string;
   name: string;
   /** The object's id, as people read it. */
   object: string;
@@ -35,6 +45,7 @@ export interface Purse {
   /** ERA, as the account renders it. */
   era: string;
   skins: OwnedSkin[];
+  heroes: OwnedHero[];
 }
 
 export class Shop {
@@ -84,6 +95,12 @@ export class Shop {
     return found;
   }
 
+  hero(heroId: string): HeroForSale {
+    const found = this.world.heroes.find((h) => h.id === heroId);
+    if (found === undefined) throw new Refused(`the shop has no hero ${heroId}`);
+    return found;
+  }
+
   /** What the vault would give in D-bucks for `era` now: information from the vault's public state, never a fact. */
   async price(connection: Connection, era: string): Promise<number> {
     const quoted = await this.app.wait(await this.app.request(connection, ask.price("ERA", this.symbol, era)));
@@ -113,26 +130,92 @@ export class Shop {
    */
   async buySkin(connection: Connection, skinId: string): Promise<{ ok: true; skin: OwnedSkin } | { ok: false; why: string }> {
     const skin = this.skin(skinId);
-    const paid = await this.app.wait(await this.app.request(connection, ask.send(this.symbol, skin.price, `skin: ${skin.name}`)));
+    const sold = await this.sell(connection, skin, "skin", "SK", (object, serial, symbol) => {
+      this.store.data.shop.skins[object] = { skinId: skin.id, serial, symbol };
+    });
+    return sold.ok ? { ok: true, skin: { skinId: skin.id, name: skin.name, object: sold.object, serial: sold.serial } } : sold;
+  }
+
+  /** Sell a hero, as a skin is sold: paid for first, then issued, one of it, and given. */
+  async buyHero(connection: Connection, heroId: string): Promise<{ ok: true; hero: OwnedHero } | { ok: false; why: string }> {
+    const hero = this.hero(heroId);
+    const sold = await this.sell(connection, hero, "hero", "HR", (object, serial, symbol) => {
+      this.store.data.shop.heroes[object] = { heroId: hero.id, serial, symbol };
+    });
+    return sold.ok ? { ok: true, hero: { heroId: hero.id, name: hero.name, object: sold.object, serial: sold.serial } } : sold;
+  }
+
+  /**
+   * The wallet sends the item's price in D-bucks; once the publisher's account
+   * has accepted that transfer, and only then, the shop issues the item, an
+   * object of which one exists, records it with `keep`, and gives it to the
+   * wallet. A payment buys one item, once.
+   *
+   * The account reports the fact "received" only for a transfer that landed
+   * paying what was asked: this object, this amount (dsm-app-host's
+   * landed_payment). An answer from the wallet saying it paid grants nothing.
+   *
+   * The sale is recorded as pending, with its buyer, before anything is issued,
+   * and stays pending until the item is given: a sale cut off part way (the
+   * server stopped, the wallet did not take the item up) is finished the next
+   * time that wallet buys anything (`settle`).
+   */
+  private async sell(
+    connection: Connection,
+    item: { id: string; name: string; price: string },
+    kind: "skin" | "hero",
+    prefix: string,
+    keep: (object: string, serial: number, symbol: string) => void,
+  ): Promise<{ ok: true; object: string; serial: number } | { ok: false; why: string }> {
+    await this.settle(connection);
+    const paid = await this.app.wait(await this.app.request(connection, ask.send(this.symbol, item.price, `${kind}: ${item.name}`)));
     if (paid.fact !== "received" || paid.received === undefined) {
       return { ok: false, why: paid.reason || paid.detail || `the wallet's answer is ${paid.outcome}` };
     }
     const payment = hex(paid.received);
     const record = this.store.data.shop;
-    if (Object.hasOwn(record.paid, payment)) return { ok: false, why: "that payment has already bought a skin" };
+    if (Object.hasOwn(record.paid, payment)) return { ok: false, why: `that payment has already bought a ${kind}` };
 
-    // The serial is taken, and the payment marked used, before anything else is awaited.
+    // The serial is taken, the payment marked used and the sale recorded as pending, before anything else is awaited.
     const serial = (record.serial += 1);
-    const symbol = `SK${String(serial).padStart(6, "0")}`;
+    const symbol = `${prefix}${String(serial).padStart(6, "0")}`;
     record.paid[payment] = "";
+    record.pending[payment] = { kind, itemId: item.id, serial, symbol, buyer: hex(connection.opponent.signingKey), object: "" };
     this.store.save();
+    const object = await this.finish(connection, payment, keep);
+    return { ok: true, object, serial };
+  }
 
-    const object = await this.app.issue({ symbol, name: `${skin.name} #${serial}`, supply: "1", description: `Sennite: Factions skin ${skin.id}` });
-    record.skins[object.id] = { skinId: skin.id, serial, symbol };
-    record.paid[payment] = object.id;
+  /** Issue a pending sale's item if it is not issued yet, record it, give it to the buyer, and close the sale. */
+  private async finish(connection: Connection, payment: string, keep?: (object: string, serial: number, symbol: string) => void): Promise<string> {
+    const record = this.store.data.shop;
+    const sale = record.pending[payment];
+    if (sale === undefined) throw new Error(`no pending sale for payment ${payment}`);
+    const item = sale.kind === "skin" ? this.skin(sale.itemId) : this.hero(sale.itemId);
+    let info: ObjectInfo;
+    if (sale.object === "") {
+      info = await this.app.issue({ symbol: sale.symbol, name: `${item.name} #${sale.serial}`, supply: "1", description: `Sennite: Factions ${sale.kind} ${item.id}` });
+      sale.object = info.id;
+      if (keep !== undefined) keep(info.id, sale.serial, sale.symbol);
+      else if (sale.kind === "skin") record.skins[info.id] = { skinId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
+      else record.heroes[info.id] = { heroId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
+      record.paid[payment] = info.id;
+      this.store.save();
+    } else {
+      info = await this.app.object(sale.object);
+    }
+    await this.deliver(connection, info);
+    delete record.pending[payment];
     this.store.save();
-    await this.deliver(connection, object);
-    return { ok: true, skin: { skinId: skin.id, name: skin.name, object: object.id, serial } };
+    return info.id;
+  }
+
+  /** Finish every sale to this wallet that was paid for and cut off before its item was given. */
+  async settle(connection: Connection): Promise<void> {
+    const buyer = hex(connection.opponent.signingKey);
+    for (const [payment, sale] of Object.entries(this.store.data.shop.pending)) {
+      if (sale.buyer === buyer) await this.finish(connection, payment);
+    }
   }
 
   /** Hand a wallet an object the shop issued: the wallet takes the object up, then the account gives it. */
@@ -152,7 +235,18 @@ export class Shop {
     return owned.sort((a, b) => a.serial - b.serial);
   }
 
-  /** What the shop reads from a wallet's proof: its D-bucks, its ERA and its skins. */
+  /** The heroes among what a wallet proved it owns: `proven` is object id (Base32 Crockford) to amount. */
+  heroesAmong(proven: Map<string, bigint>): OwnedHero[] {
+    const owned: OwnedHero[] = [];
+    for (const [object, sold] of Object.entries(this.store.data.shop.heroes)) {
+      if ((proven.get(object) ?? 0n) > 0n) {
+        owned.push({ heroId: sold.heroId, name: this.hero(sold.heroId).name, object, serial: sold.serial });
+      }
+    }
+    return owned.sort((a, b) => a.serial - b.serial);
+  }
+
+  /** What the shop reads from a wallet's proof: its D-bucks, its ERA, its skins and its heroes. */
   async purse(proven: Map<string, bigint>): Promise<Purse> {
     const dbucks = await this.app.object(this.symbol);
     const era = await this.app.object("ERA");
@@ -160,6 +254,7 @@ export class Shop {
       dbucks: Number(proven.get(dbucks.id) ?? 0n),
       era: await this.app.display(era, proven.get(era.id) ?? 0n),
       skins: this.skinsAmong(proven),
+      heroes: this.heroesAmong(proven),
     };
   }
 }

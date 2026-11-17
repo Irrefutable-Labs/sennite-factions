@@ -5,6 +5,8 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
+#include "HAL/PlatformTime.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GenericPlatform/GenericPlatformInputDeviceMapper.h"
@@ -34,6 +36,21 @@ namespace GameCheck
 	{
 		Controller->InputKey(FInputKeyEventArgs::CreateSimulated(InKey, Event, Event == IE_Released ? 0.0f : 1.0f, -1,
 			IPlatformInputDeviceMapper::Get().GetDefaultInputDevice()));
+	}
+
+	/**
+	 * A finger touching the screen at a point and lifting there, as a phone's screen reports it: through the
+	 * game's viewport, which hands it to the player controller, as it does every real touch.
+	 */
+	inline void Tap(const FVector2D& Where)
+	{
+		UGameViewportClient* Client = GEngine != nullptr ? GEngine->GameViewport : nullptr;
+		if (Client == nullptr) {
+			return;
+		}
+		const FTouchId Finger(IPlatformInputDeviceMapper::Get().GetDefaultInputDevice(), ETouchIndex::Touch1);
+		Client->InputTouch(Client->Viewport, Finger, ETouchType::Began, Where, 1.0f, FPlatformTime::Cycles64());
+		Client->InputTouch(Client->Viewport, Finger, ETouchType::Ended, Where, 0.0f, FPlatformTime::Cycles64());
 	}
 
 	/** Move the mouse along one axis by a number of mouse counts. */

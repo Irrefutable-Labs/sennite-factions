@@ -65,6 +65,12 @@ const BASE_FRESH_MS = 1000;
 const TICKET_MS = 2 * 60 * 1000;
 /** The most tickets kept at once. */
 const MAX_TICKETS = 10_000;
+/** How long a hero pass is good for. It is good once: the game server that asks with it uses it up. */
+const PASS_MS = 2 * 60 * 1000;
+/** How old a wallet's proof of its heroes may be and still answer a hero pass. */
+const PROOF_FRESH_MS = 60 * 60 * 1000;
+/** The most hero passes kept at once. */
+const MAX_PASSES = 10_000;
 
 /** A wallet's way into one match: who it is and which of the match's factions it plays for. */
 interface Ticket {
@@ -106,6 +112,10 @@ export class Service {
   readonly #bases = new Map<string, { at: number; base: Awaited<ReturnType<Publisher["base"]>> }>();
   /** Tickets into matches that no match server has taken yet. Kept in memory: a game asks again. */
   readonly #tickets = new Map<string, Ticket>();
+  /** The heroes each wallet (by signing key) proved it owns at its last proof here, and when. Kept in memory: a game proves again on connecting. */
+  readonly #provenHeroes = new Map<string, { heroes: string[]; at: number }>();
+  /** Hero passes: pass -> the wallet it speaks for, and until when. One live pass per wallet. */
+  readonly #passes = new Map<string, { signingKey: string; until: number }>();
 
   constructor(private readonly options: ServiceOptions) {}
 
@@ -347,10 +357,10 @@ export class Service {
       return { status: 200, body: { prizes: await publisher.matches.waiting(hex(connection.opponent.signingKey)) } };
     }
 
-    // The shop: the game's currency and the skins the publisher sells for it (spec 10.5).
+    // The shop: the game's currency and the skins and heroes the publisher sells for it (spec 10.5).
     if (is("GET", "shop")) {
       const shop = publisher.shop.world;
-      return { status: 200, body: { currency: { symbol: shop.currency.symbol, name: shop.currency.name }, skins: shop.skins } };
+      return { status: 200, body: { currency: { symbol: shop.currency.symbol, name: shop.currency.name }, skins: shop.skins, heroes: shop.heroes } };
     }
 
     // The wallet trades ERA for D-bucks through the publisher's vault, at the price the vault's reserves set.
@@ -384,6 +394,44 @@ export class Service {
       };
     }
 
+    // The wallet buys a hero, as it buys a skin.
+    if (is("POST", "shop", "heroes")) {
+      const player = this.player(req);
+      const connection = await this.connected(player);
+      const hero = publisher.shop.hero(text((await body(req)).heroId, "heroId"));
+      return {
+        status: 202,
+        body: this.start(player, async () => {
+          const sold = await publisher.shop.buyHero(connection, hero.id);
+          return sold.ok ? { ok: true, message: `${sold.hero.name} #${sold.hero.serial} is the wallet's` } : { ok: false, message: sold.why };
+        }),
+      };
+    }
+
+    // A hero pass for the player's game to show a game server it joins: that server can ask here, once,
+    // which heroes the wallet proved it owns at its last proof, and nothing else about the wallet. A pass
+    // is good for one asking and two minutes; a new pass replaces the wallet's last one.
+    if (is("POST", "players", "me", "hero-pass")) {
+      const connection = await this.connected(this.player(req));
+      const signingKey = hex(connection.opponent.signingKey);
+      const now = Date.now();
+      for (const [held, p] of this.#passes) if (p.until < now || p.signingKey === signingKey) this.#passes.delete(held);
+      if (this.#passes.size >= MAX_PASSES) throw new HttpError(429, "too many hero passes are out: try again in a moment");
+      const pass = hex(randomBytes(16));
+      this.#passes.set(pass, { signingKey, until: now + PASS_MS });
+      return { status: 201, body: { pass, seconds: PASS_MS / 1000 } };
+    }
+
+    // A game server asks what a hero pass a joining game showed it speaks for: the heroes the wallet proved it
+    // owns, at a proof no older than an hour. The asking uses the pass up: shown anywhere else, it is no pass.
+    if (is("GET", "hero-passes", null) && b !== undefined) {
+      const held = this.#passes.get(b);
+      if (held === undefined || held.until < Date.now()) throw new HttpError(404, "that is no hero pass");
+      this.#passes.delete(b);
+      const proven = this.#provenHeroes.get(held.signingKey);
+      return { status: 200, body: { heroes: proven !== undefined && Date.now() - proven.at <= PROOF_FRESH_MS ? proven.heroes : [] } };
+    }
+
     // The wallets connected to the game that are in no faction: who a member can invite.
     if (is("GET", "players", "free")) {
       const caller = await this.connected(this.player(req));
@@ -406,6 +454,7 @@ export class Service {
         status: 202,
         body: this.start(player, async () => {
           const holdings = await publisher.holdings(connection);
+          if (holdings !== undefined) this.#provenHeroes.set(hex(connection.opponent.signingKey), { heroes: holdings.heroes.map((h) => h.heroId), at: Date.now() });
           return holdings === undefined
             ? { ok: false, message: "the wallet proved nothing about what it holds" }
             : { ok: true, message: "the wallet proved what it holds", data: { ...holdings } };

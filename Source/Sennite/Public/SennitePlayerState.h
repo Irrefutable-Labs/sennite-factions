@@ -67,6 +67,38 @@ public:
 	UPROPERTY(Replicated)
 	FString Wallet;
 
+	/** Which hero this player is (USenniteHeroes): what they logged in with (Hero=), or chose in the lobby since. */
+	UPROPERTY(Replicated)
+	FName HeroId;
+
+	/**
+	 * This player chooses a hero, in the lobby, showing their hero pass for a hero bought in the shop. The
+	 * server takes the choice only in a lobby, not more than twice a second, and only as ClaimHero does.
+	 */
+	UFUNCTION(Server, Reliable)
+	void ServerChooseHero(FName Id, const FString& Pass);
+
+	/**
+	 * On the server: this player claims a hero. A free hero is theirs at once. A hero bought in the shop is
+	 * theirs only once the publisher's server says the wallet the pass speaks for proved it owns it; until
+	 * then, or if it says not, the player stays the hero they are (the default hero, if none yet). The
+	 * player's own game is never taken at its word for it.
+	 */
+	void ClaimHero(FName Id, const FString& Pass);
+
+	/** When, on the server's clock, this player's next choice of hero is taken. */
+	double NextHeroChoice = 0.0;
+
+	/** On the server: whether a claim to a paid hero is being checked with the publisher's server, and which claim is the latest. */
+	bool bClaimChecking = false;
+	int32 ClaimSeq = 0;
+
+	/** On the server: this player is this hero from now on, if the list has it. */
+	void SetHero(FName Id);
+
+	/** What a player keeps from one map to the next when the server travels: their hero. */
+	virtual void CopyProperties(APlayerState* PlayerState) override;
+
 	/** On the server: back to what a hero starts with. The weapons, rounds and healing items picked up are gone. */
 	void StartOver();
 

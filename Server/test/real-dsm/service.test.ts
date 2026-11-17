@@ -235,4 +235,31 @@ describe("the game's side of the publisher's server", () => {
       message: "the wallet has nothing committed there",
     });
   });
+
+  it("a hero pass tells one game server, once, the heroes the wallet proved, and nothing else", async () => {
+    // Alice's wallet has just proved its holdings: it owns no hero bought in the shop.
+    expect(await settled(game.alice!, "/players/me/materials", {})).toMatchObject({ ok: true });
+    const first = await call("POST", "/players/me/hero-pass", game.alice);
+    expect(first.status).toBe(201);
+    const pass = first.body.pass as string;
+    expect(pass).toMatch(/^[0-9a-f]{32}$/);
+
+    // Any game server may ask, with no token of its own; it learns the proven heroes and nothing more.
+    const asked = await call("GET", `/hero-passes/${pass}`);
+    expect(asked).toEqual({ status: 200, body: { heroes: [] } });
+    // Asking uses it up: a server that kept the pass cannot use it again, or show it anywhere else.
+    expect((await call("GET", `/hero-passes/${pass}`)).status).toBe(404);
+
+    // A made-up pass, and a pass the wallet's next one replaced, are no passes.
+    expect((await call("GET", `/hero-passes/${hex(randomBytes(16))}`)).status).toBe(404);
+    const second = await call("POST", "/players/me/hero-pass", game.alice);
+    const third = await call("POST", "/players/me/hero-pass", game.alice);
+    expect([second.status, third.status]).toEqual([201, 201]);
+    expect((await call("GET", `/hero-passes/${second.body.pass}`)).status).toBe(404);
+    expect((await call("GET", `/hero-passes/${third.body.pass}`)).status).toBe(200);
+
+    // A game with no wallet connected gets no pass.
+    const stranger = (await call("POST", "/players")).body.player as string;
+    expect((await call("POST", "/players/me/hero-pass", stranger)).status).toBe(409);
+  });
 });

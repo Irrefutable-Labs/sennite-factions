@@ -35,6 +35,14 @@ struct FSenniteSkinForSale
 	int32 Price = 0;
 };
 
+/** One hero the publisher's shop sells, and its price in D-bucks. */
+struct FSenniteHeroForSale
+{
+	FString Id;
+	FString Name;
+	int32 Price = 0;
+};
+
 /** One skin the wallet proved it owns: an object of which one exists. */
 struct FSenniteOwnedSkin
 {
@@ -241,6 +249,33 @@ public:
 	FString OnItsWay;
 
 	bool Owns(const FString& SkinId) const { return OwnedSkins.Contains(SkinId); }
+
+	/** The heroes the shop sells, and those the wallet proved it owns (by the shop's hero id). */
+	TArray<FSenniteHeroForSale> ShopHeroes;
+	TArray<FString> OwnedHeroes;
+	bool OwnsHero(const FString& HeroId) const { return OwnedHeroes.Contains(HeroId); }
+	const FSenniteHeroForSale* HeroForSale(const FString& HeroId) const { return ShopHeroes.FindByPredicate([&HeroId](const FSenniteHeroForSale& H) { return H.Id == HeroId; }); }
+	/** Buy a hero from the shop with D-bucks. */
+	void BuyHero(const FString& HeroId);
+	/** A hero the shop sold and gave that the wallet has not proved it owns yet: it is on its way. */
+	FString HeroOnItsWay;
+
+	/**
+	 * A pass this player's game shows a game server it joins (at login, and with a choice in the lobby):
+	 * with it that server asks the publisher's server, once, which heroes the wallet proved it owns. Good for
+	 * one asking and two minutes; the game keeps a fresh one. Empty until the wallet is connected and has
+	 * proved what it holds.
+	 */
+	FString HeroPass;
+
+	/** The hero pass, to show a server now: it is used up by that showing, and a new one is asked for. */
+	FString TakeHeroPass();
+
+	/** Whether a string is a hero pass as the publisher's server makes them (32 hex digits). */
+	static bool IsHeroPass(const FString& Pass);
+
+	/** A game server: ask which heroes the wallet a pass speaks for proved it owns. Done(false) if the pass is no pass or the server cannot be reached. */
+	void CheckHeroPass(const FString& Pass, TFunction<void(bool /* bOk */, const TArray<FString>& /* Heroes */)> Done);
 	/** Trade ERA for D-bucks through the publisher's vault. */
 	void BuyDBucks(const FString& InEra);
 	/** Buy a skin from the shop with D-bucks. */
@@ -357,8 +392,15 @@ private:
 	bool bPrizesAsked = false;
 	bool bShop = false;
 	bool bShopAsked = false;
-	/** The skin being bought by the request that has not settled yet. */
+	void AskHeroPass();
+	bool bHeroPassAsked = false;
+	double NextHeroPass = 0.0;
+	/** When the wallet is next asked to prove what it holds again: a proof older than an hour answers no hero pass. */
+	double NextReprove = 0.0;
+
+	/** The skin, or the hero, being bought by the request that has not settled yet. */
 	FString BuyingSkin;
+	FString BuyingHero;
 	double NextArrival = 0.0;
 	int32 ArrivalProofs = 0;
 	/** Whether the wallet has been asked what it holds since it connected. */

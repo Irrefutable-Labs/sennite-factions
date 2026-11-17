@@ -1,23 +1,18 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/GameMode.h"
+#include "GameFramework/GameModeBase.h"
 #include "MainMenuGameMode.generated.h"
 
-/**
- * 
- */
+/** The Menu map on its own: the first screen and the character select (SenniteMenu.h). No pawn: the player looks at the stage. */
 UCLASS()
-class SENNITE_API AMainMenuGameMode : public AGameMode
+class SENNITE_API AMainMenuGameMode : public AGameModeBase
 {
 	GENERATED_BODY()
-	
+
 public:
 	AMainMenuGameMode();
 
-	virtual void StartPlay() override;
-
-	virtual void PostLogin(APlayerController *NewPlayer) override;
+	/** Nobody is given a body at the menu. */
+	virtual bool PlayerCanRestart_Implementation(APlayerController* Player) override { return false; }
 };

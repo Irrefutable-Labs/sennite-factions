@@ -1,0 +1,265 @@
+// Menu check. Run in the game on the Menu map, with a profile of its own (-ProfileSlot=), by taps on
+// the screen as a phone gives them:
+// - the menu is the first thing shown: no hero to play, the player's hero turning on the stage;
+// - HEROES shows the character select; the arrows go through the heroes, each one standing and turning
+//   on the stage as itself;
+// - a hero bought with D-bucks cannot be chosen on a game with no shop;
+// - CHOOSE makes a free hero the player's, kept in the profile on disk;
+// - PLAY opens the test range, and the player is that hero there.
+//
+// Tools/check_menu.sh runs this and reads the result.
+
+#include "Misc/AutomationTest.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "MenuCheck.h"
+#include "SenniteCharacter.h"
+#include "SenniteHeroes.h"
+#include "SennitePlayerState.h"
+#include "Animation/SkeletalMeshActor.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "EngineUtils.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogMenuCheck, Log, All);
+
+namespace
+{
+	/** The yaw of the one hero standing on the stage, or a number no yaw is when there is not one. */
+	double StageYaw(UWorld* World)
+	{
+		TArray<ASkeletalMeshActor*> Figures;
+		for (TActorIterator<ASkeletalMeshActor> It(World); It; ++It) {
+			Figures.Add(*It);
+		}
+		return Figures.Num() == 1 ? Figures[0]->GetActorRotation().Yaw : 1000.0;
+	}
+
+	FString StageMesh(UWorld* World)
+	{
+		TActorIterator<ASkeletalMeshActor> It(World);
+		return It ? FSoftObjectPath(It->GetSkeletalMeshComponent()->GetSkeletalMeshAsset()).ToString() : FString();
+	}
+
+	class FMenuRun : public IAutomationLatentCommand
+	{
+	public:
+		explicit FMenuRun(FAutomationTestBase* InTest) : Test(InTest), RealStart(FPlatformTime::Seconds()) {}
+
+		virtual bool Update() override;
+
+	private:
+		enum class EPhase { WaitForMenu, MenuShot, Heroes, ToWraith, Turning, ToLocked, Locked, BackToWraith, Chosen, Play, Done };
+
+		void Enter(EPhase Next) { Phase = Next; PhaseStart = FPlatformTime::Seconds(); }
+		double Elapsed() const { return FPlatformTime::Seconds() - PhaseStart; }
+		bool Fail(const FString& Why) { Test->AddError(Why); return true; }
+
+		FAutomationTestBase* Test;
+		double RealStart;
+		EPhase Phase = EPhase::WaitForMenu;
+		double PhaseStart = 0.0;
+		double YawBefore = 0.0;
+		FName Free;
+		FName Locked;
+	};
+
+	bool FMenuRun::Update()
+	{
+		if (FPlatformTime::Seconds() - RealStart > 240.0) {
+			return Fail(FString::Printf(TEXT("The menu check did not finish in 240 s (stuck at step %d)"), int32(Phase)));
+		}
+		UWorld* World = GameCheck::FindGameWorld();
+		ASenniteMenuController* Menu = MenuCheck::Menu(World);
+		const TArray<FSenniteHero>& Heroes = USenniteHeroes::All();
+
+		switch (Phase) {
+		case EPhase::WaitForMenu: {
+			if (Menu == nullptr || !MenuCheck::Has(Menu, TEXT("play")) || World->GetTimeSeconds() < 2.0) {
+				return false;
+			}
+			// the heroes this check uses: the first free hero that is not the default, and the first that is bought
+			const FName Default = USenniteHeroes::FindOrDefault(NAME_None).Id;
+			for (const FSenniteHero& Hero : Heroes) {
+				if (Free.IsNone() && Hero.bFree && Hero.Id != Default) {
+					Free = Hero.Id;
+				}
+				if (Locked.IsNone() && !Hero.bFree) {
+					Locked = Hero.Id;
+				}
+			}
+			if (Free.IsNone() || Locked.IsNone()) {
+				return Fail(TEXT("The list needs a second free hero and a bought one for this check"));
+			}
+			Test->TestEqual(TEXT("The game opens on the menu"), UGameplayStatics::GetCurrentLevelName(World), FString(TEXT("Menu")));
+			Test->TestNull(TEXT("At the menu the player has no hero to play"), Menu->GetPawn());
+			Test->TestEqual(TEXT("A new profile's hero is the default hero"), USenniteProfile::Get().PlayingHero(Menu), Default);
+			Test->TestEqual(TEXT("The menu names the player's hero"), MenuCheck::Line(Menu, TEXT("hero")), USenniteHeroes::FindOrDefault(Default).Name);
+			Test->TestEqual(TEXT("The player's hero stands on the stage"), StageMesh(World), USenniteHeroes::FindOrDefault(Default).Mesh.ToString());
+			for (const TCHAR* Action : { TEXT("play"), TEXT("heroes"), TEXT("host"), TEXT("join"), TEXT("quit") }) {
+				Test->TestTrue(FString::Printf(TEXT("The menu has %s"), Action), MenuCheck::Has(Menu, Action));
+			}
+			GameCheck::Shot(TEXT("Menu"), TEXT("menu.png"));
+			UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK menu: hero=%s free=%s bought=%s"), *Default.ToString(), *Free.ToString(), *Locked.ToString());
+			Enter(EPhase::MenuShot);
+			return false;
+		}
+
+		case EPhase::MenuShot:
+			// the picture is taken at the end of a frame: nothing is tapped until it is
+			if (Elapsed() < 0.3) {
+				return false;
+			}
+			MenuCheck::Tap(Menu, TEXT("heroes"));
+			Enter(EPhase::Heroes);
+			return false;
+
+		case EPhase::Heroes:
+			if (Menu->Page != ESenniteMenuPage::Heroes && Elapsed() < 3.0) {
+				return false;
+			}
+			Test->TestTrue(TEXT("A tap on HEROES opens the character select"), Menu->Page == ESenniteMenuPage::Heroes);
+			Test->TestEqual(TEXT("It opens on the player's own hero"), Heroes[Menu->Browse].Id, USenniteProfile::Get().PlayingHero(Menu));
+			Test->TestTrue(TEXT("The player's own hero is marked chosen"), MenuCheck::Has(Menu, TEXT("chosen")));
+			// the arrows, to the free hero
+			MenuCheck::Tap(Menu, Heroes[(Menu->Browse + 1) % Heroes.Num()].Id == Free ? FName(TEXT("next")) : FName(TEXT("prev")));
+			Enter(EPhase::ToWraith);
+			return false;
+
+		case EPhase::ToWraith:
+			if (Heroes[Menu->Browse].Id != Free) {
+				if (Elapsed() > 0.3) {
+					MenuCheck::Tap(Menu, TEXT("next"));
+					Enter(EPhase::ToWraith);
+				}
+				return false;
+			}
+			if (Elapsed() < 1.5) {
+				return false;
+			}
+			Test->TestEqual(TEXT("The arrows bring the free hero up"), Heroes[Menu->Browse].Id, Free);
+			Test->TestEqual(TEXT("It stands on the stage as itself"), StageMesh(World), USenniteHeroes::FindOrDefault(Free).Mesh.ToString());
+			Test->TestEqual(TEXT("Its name is shown"), MenuCheck::Line(Menu, TEXT("name")), USenniteHeroes::FindOrDefault(Free).Name);
+			Test->TestTrue(TEXT("It says it is free"), MenuCheck::Line(Menu, TEXT("status")).EndsWith(TEXT("FREE")));
+			YawBefore = StageYaw(World);
+			Enter(EPhase::Turning);
+			return false;
+
+		case EPhase::Turning: {
+			if (Elapsed() < 1.0) {
+				return false;
+			}
+			const double Turned = FMath::Abs(FMath::FindDeltaAngleDegrees(YawBefore, StageYaw(World)));
+			Test->TestTrue(TEXT("The hero turns on the turntable"), YawBefore < 999.0 && Turned > 10.0);
+			GameCheck::Shot(TEXT("Menu"), TEXT("heroes_free.png"));
+			UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK select: %s on the stage, turned %.0f degrees in a second"), *Free.ToString(), Turned);
+			Enter(EPhase::ToLocked);
+			return false;
+		}
+
+		case EPhase::ToLocked:
+			if (Heroes[Menu->Browse].Id != Locked) {
+				if (Elapsed() > 0.3) {
+					MenuCheck::Tap(Menu, TEXT("next"));
+					Enter(EPhase::ToLocked);
+				}
+				return false;
+			}
+			if (Elapsed() < 1.5) {
+				return false;
+			}
+			{
+				bool bEnabled = true;
+				Test->TestFalse(TEXT("A bought hero has no CHOOSE"), MenuCheck::Has(Menu, TEXT("choose")));
+				Test->TestTrue(TEXT("It shows how it is had"), MenuCheck::Has(Menu, TEXT("buy"), &bEnabled));
+				Test->TestFalse(TEXT("With no shop on this game, it cannot be bought here"), bEnabled);
+				Test->TestEqual(TEXT("It stands on the stage as itself"), StageMesh(World), USenniteHeroes::FindOrDefault(Locked).Mesh.ToString());
+				UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK locked: %s status=\"%s\""), *Locked.ToString(), *MenuCheck::Line(Menu, TEXT("status")));
+				GameCheck::Shot(TEXT("Menu"), TEXT("heroes_bought.png"));
+				// a tap where its button is changes nothing
+				MenuCheck::Tap(Menu, TEXT("buy"));
+			}
+			Enter(EPhase::Locked);
+			return false;
+
+		case EPhase::Locked:
+			if (Elapsed() < 0.5) {
+				return false;
+			}
+			Test->TestEqual(TEXT("Tapping a bought hero's button does not make it the player's"), USenniteProfile::Get().Hero == Locked, false);
+			Test->TestTrue(TEXT("The character select stays open"), Menu->Page == ESenniteMenuPage::Heroes);
+			Enter(EPhase::BackToWraith);
+			return false;
+
+		case EPhase::BackToWraith:
+			if (Heroes[Menu->Browse].Id != Free) {
+				if (Elapsed() > 0.3) {
+					MenuCheck::Tap(Menu, TEXT("prev"));
+					Enter(EPhase::BackToWraith);
+				}
+				return false;
+			}
+			if (Elapsed() < 0.5) {
+				return false;
+			}
+			Test->TestTrue(TEXT("The free hero can be chosen"), MenuCheck::Tap(Menu, TEXT("choose")));
+			Enter(EPhase::Chosen);
+			return false;
+
+		case EPhase::Chosen: {
+			if (Elapsed() < 1.0) {
+				return false;
+			}
+			FString Slot;
+			FParse::Value(FCommandLine::Get(), TEXT("ProfileSlot="), Slot);
+			const USenniteProfile* OnDisk = Cast<USenniteProfile>(UGameplayStatics::LoadGameFromSlot(Slot, 0));
+			Test->TestFalse(TEXT("The check runs with a profile of its own"), Slot.IsEmpty());
+			Test->TestTrue(TEXT("CHOOSE goes back to the menu"), Menu->Page == ESenniteMenuPage::Main);
+			Test->TestEqual(TEXT("The hero is the player's"), USenniteProfile::Get().Hero, Free);
+			Test->TestTrue(TEXT("The choice is kept on disk for the next run"), OnDisk != nullptr && OnDisk->Hero == Free);
+			Test->TestEqual(TEXT("The menu names the new hero"), MenuCheck::Line(Menu, TEXT("hero")), USenniteHeroes::FindOrDefault(Free).Name);
+			GameCheck::Shot(TEXT("Menu"), TEXT("menu_chosen.png"));
+			MenuCheck::Tap(Menu, TEXT("play"));
+			Enter(EPhase::Play);
+			return false;
+		}
+
+		case EPhase::Play: {
+			APlayerController* Controller = World != nullptr ? World->GetFirstPlayerController() : nullptr;
+			ASenniteCharacter* Hero = Controller != nullptr ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
+			if (Hero == nullptr || !Hero->GetCharacterMovement()->IsMovingOnGround() || Elapsed() < 3.0) {
+				return Elapsed() > 60.0 ? Fail(TEXT("PLAY did not bring the player to the test range with a hero in 60 s")) : false;
+			}
+			const FSenniteHero& Want = USenniteHeroes::FindOrDefault(Free);
+			Test->TestEqual(TEXT("PLAY opens the test range"), UGameplayStatics::GetCurrentLevelName(World), FString(TEXT("TestRange")));
+			Test->TestEqual(TEXT("The player's state is the hero chosen"), Controller->GetPlayerState<ASennitePlayerState>()->HeroId, Free);
+			Test->TestEqual(TEXT("The character is the hero chosen"), Hero->HeroId, Free);
+			Test->TestEqual(TEXT("It wears the hero's mesh"), FSoftObjectPath(Hero->GetMesh()->GetSkeletalMeshAsset()).ToString(), Want.Mesh.ToString());
+			Test->TestEqual(TEXT("It runs the hero's own animation Blueprint"), FSoftClassPath(Hero->GetMesh()->GetAnimInstance()->GetClass()).ToString(), Want.AnimClass.ToString());
+			GameCheck::Shot(TEXT("Menu"), TEXT("play.png"));
+			UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK play: %s on %s"), *Hero->HeroId.ToString(), *UGameplayStatics::GetCurrentLevelName(World));
+			UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK finished"));
+			Phase = EPhase::Done;
+			return true;
+		}
+
+		default:
+			return true;
+		}
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSenniteMenuTest, "Sennite.Menu.ChooseAndPlay",
+	EAutomationTestFlags::ClientContext | EAutomationTestFlags::ProductFilter)
+
+bool FSenniteMenuTest::RunTest(const FString& Parameters)
+{
+	ADD_LATENT_AUTOMATION_COMMAND(FMenuRun(this));
+	return true;
+}
+
+#endif // WITH_DEV_AUTOMATION_TESTS
