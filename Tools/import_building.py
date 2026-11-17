@@ -87,6 +87,9 @@ for i, m in enumerate(MAPS):
     node.set_editor_property("sampler_type", samplers[m])
     if not mel.connect_material_property(node, pins[m][0], pins[m][1]):
         raise RuntimeError("panel material: could not connect " + m)
+# pieces are drawn a tile an instance (UInstancedStaticMeshComponent); a cooked game cannot add the
+# usage itself and would draw the engine's default material instead
+panel.set_editor_property("used_with_instanced_static_meshes", True)
 mel.recompile_material(panel)
 eal.save_loaded_asset(panel)
 
@@ -121,6 +124,11 @@ opacity = mel.create_material_expression(preview, unreal.MaterialExpressionConst
 opacity.set_editor_property("r", 0.35)
 if not (mel.connect_material_property(colour, "", P.MP_EMISSIVE_COLOR) and mel.connect_material_property(opacity, "", P.MP_OPACITY)):
     raise RuntimeError("preview material did not wire up")
+# the see-through tiles of a piece being edited are instances too
+preview.set_editor_property("used_with_instanced_static_meshes", True)
 mel.recompile_material(preview)
 eal.save_loaded_asset(preview)
+for made in (panel, preview):
+    if not made.get_editor_property("used_with_instanced_static_meshes"):
+        raise RuntimeError(made.get_name() + ": instanced use did not take")
 log("done")
