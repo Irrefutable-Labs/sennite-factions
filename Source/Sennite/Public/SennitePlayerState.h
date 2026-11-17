@@ -89,6 +89,10 @@ public:
 	/** When, on the server's clock, this player's next choice of hero is taken. */
 	double NextHeroChoice = 0.0;
 
+	/** On the server: whether a claim to a paid hero is being checked with the publisher's server, and which claim is the latest. */
+	bool bClaimChecking = false;
+	int32 ClaimSeq = 0;
+
 	/** On the server: this player is this hero from now on, if the list has it. */
 	void SetHero(FName Id);
 

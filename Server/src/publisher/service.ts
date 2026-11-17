@@ -65,8 +65,10 @@ const BASE_FRESH_MS = 1000;
 const TICKET_MS = 2 * 60 * 1000;
 /** The most tickets kept at once. */
 const MAX_TICKETS = 10_000;
-/** How long a hero pass is good for. It can be shown any number of times until then. */
-const PASS_MS = 60 * 60 * 1000;
+/** How long a hero pass is good for. It is good once: the game server that asks with it uses it up. */
+const PASS_MS = 2 * 60 * 1000;
+/** How old a wallet's proof of its heroes may be and still answer a hero pass. */
+const PROOF_FRESH_MS = 60 * 60 * 1000;
 /** The most hero passes kept at once. */
 const MAX_PASSES = 10_000;
 
@@ -110,8 +112,8 @@ export class Service {
   readonly #bases = new Map<string, { at: number; base: Awaited<ReturnType<Publisher["base"]>> }>();
   /** Tickets into matches that no match server has taken yet. Kept in memory: a game asks again. */
   readonly #tickets = new Map<string, Ticket>();
-  /** The heroes each wallet (by signing key) proved it owns, at its last proof here. Kept in memory: a game proves again on connecting. */
-  readonly #provenHeroes = new Map<string, string[]>();
+  /** The heroes each wallet (by signing key) proved it owns at its last proof here, and when. Kept in memory: a game proves again on connecting. */
+  readonly #provenHeroes = new Map<string, { heroes: string[]; at: number }>();
   /** Hero passes: pass -> the wallet it speaks for, and until when. One live pass per wallet. */
   readonly #passes = new Map<string, { signingKey: string; until: number }>();
 
@@ -406,9 +408,9 @@ export class Service {
       };
     }
 
-    // A hero pass for the player's game to show the game servers it joins: any of them can ask here which
-    // heroes the wallet proved it owns at its last proof, and nothing else about the wallet. A new pass
-    // replaces the wallet's last one.
+    // A hero pass for the player's game to show a game server it joins: that server can ask here, once,
+    // which heroes the wallet proved it owns at its last proof, and nothing else about the wallet. A pass
+    // is good for one asking and two minutes; a new pass replaces the wallet's last one.
     if (is("POST", "players", "me", "hero-pass")) {
       const connection = await this.connected(this.player(req));
       const signingKey = hex(connection.opponent.signingKey);
@@ -420,11 +422,14 @@ export class Service {
       return { status: 201, body: { pass, seconds: PASS_MS / 1000 } };
     }
 
-    // A game server asks what a hero pass a joining game showed it speaks for: the heroes the wallet proved it owns.
+    // A game server asks what a hero pass a joining game showed it speaks for: the heroes the wallet proved it
+    // owns, at a proof no older than an hour. The asking uses the pass up: shown anywhere else, it is no pass.
     if (is("GET", "hero-passes", null) && b !== undefined) {
       const held = this.#passes.get(b);
       if (held === undefined || held.until < Date.now()) throw new HttpError(404, "that is no hero pass");
-      return { status: 200, body: { heroes: this.#provenHeroes.get(held.signingKey) ?? [] } };
+      this.#passes.delete(b);
+      const proven = this.#provenHeroes.get(held.signingKey);
+      return { status: 200, body: { heroes: proven !== undefined && Date.now() - proven.at <= PROOF_FRESH_MS ? proven.heroes : [] } };
     }
 
     // The wallets connected to the game that are in no faction: who a member can invite.
@@ -449,7 +454,7 @@ export class Service {
         status: 202,
         body: this.start(player, async () => {
           const holdings = await publisher.holdings(connection);
-          if (holdings !== undefined) this.#provenHeroes.set(hex(connection.opponent.signingKey), holdings.heroes.map((h) => h.heroId));
+          if (holdings !== undefined) this.#provenHeroes.set(hex(connection.opponent.signingKey), { heroes: holdings.heroes.map((h) => h.heroId), at: Date.now() });
           return holdings === undefined
             ? { ok: false, message: "the wallet proved nothing about what it holds" }
             : { ok: true, message: "the wallet proved what it holds", data: { ...holdings } };

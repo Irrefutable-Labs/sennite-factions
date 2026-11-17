@@ -87,7 +87,13 @@ void ASennitePlayerState::ClaimHero(FName Id, const FString& Pass) {
 		return;
 	}
 	if (Hero->bFree) {
+		// a later choice: whatever is still being checked no longer counts
+		++ClaimSeq;
 		SetHero(Id);
+		return;
+	}
+	if (bClaimChecking) {
+		// one check at a time for a player; a claim made meanwhile is not taken
 		return;
 	}
 	const UGameInstance* Game = GetGameInstance();
@@ -97,9 +103,16 @@ void ASennitePlayerState::ClaimHero(FName Id, const FString& Pass) {
 		return;
 	}
 	TWeakObjectPtr<ASennitePlayerState> Self(this);
-	Shop->CheckHeroPass(Pass, [Self, Id](bool bOk, const TArray<FString>& Owned) {
+	bClaimChecking = true;
+	const int32 Seq = ++ClaimSeq;
+	Shop->CheckHeroPass(Pass, [Self, Id, Seq](bool bOk, const TArray<FString>& Owned) {
 		ASennitePlayerState* State = Self.Get();
 		if (State == nullptr) {
+			return;
+		}
+		State->bClaimChecking = false;
+		if (Seq != State->ClaimSeq) {
+			// the player chose again while this was checked: the later choice stands
 			return;
 		}
 		if (bOk && Owned.Contains(Id.ToString())) {

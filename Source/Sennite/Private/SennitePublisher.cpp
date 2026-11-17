@@ -277,6 +277,13 @@ bool USennitePublisher::Tick(float)
 	if (bConnected && bMaterialsKnown && !bHeroPassAsked && Now >= NextHeroPass) {
 		AskHeroPass();
 	}
+	// the publisher's server answers a hero pass only from a proof less than an hour old: prove again every half hour
+	if (bConnected && bMaterialsKnown && Now >= NextReprove) {
+		if (NextReprove > 0.0) {
+			bProofWanted = true;
+		}
+		NextReprove = Now + 1800.0;
+	}
 	// once the wallet is connected the game asks it, once, what it holds: the skin a player owns is on their character
 	if (bConnected && !bProvedOnConnect) {
 		bProvedOnConnect = true;
@@ -458,6 +465,14 @@ void USennitePublisher::BuyHero(const FString& HeroId)
 	BuyingHero = HeroId;
 }
 
+FString USennitePublisher::TakeHeroPass()
+{
+	FString Pass = MoveTemp(HeroPass);
+	HeroPass.Reset();
+	NextHeroPass = 0.0;
+	return Pass;
+}
+
 void USennitePublisher::AskHeroPass()
 {
 	bHeroPassAsked = true;
@@ -466,8 +481,8 @@ void USennitePublisher::AskHeroPass()
 		FString Pass;
 		if (Status == 201 && Json.IsValid() && Json->TryGetStringField(TEXT("pass"), Pass) && IsHeroPass(Pass)) {
 			HeroPass = Pass;
-			// a new one well before the server's hour is up
-			NextHeroPass = FPlatformTime::Seconds() + FMath::Max(60.0, Json->GetNumberField(TEXT("seconds")) * 0.75);
+			// a new one well before this one runs out
+			NextHeroPass = FPlatformTime::Seconds() + FMath::Max(30.0, Json->GetNumberField(TEXT("seconds")) * 0.75);
 		}
 		else {
 			NextHeroPass = FPlatformTime::Seconds() + 10.0;

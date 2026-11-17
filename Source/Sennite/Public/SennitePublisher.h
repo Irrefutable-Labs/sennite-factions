@@ -261,11 +261,15 @@ public:
 	FString HeroOnItsWay;
 
 	/**
-	 * A pass this player's game shows the game servers it joins (Hero pass, at login and with a choice in
-	 * the lobby): with it a server asks the publisher's server which heroes the wallet proved it owns. Empty
-	 * until the wallet is connected and has proved what it holds.
+	 * A pass this player's game shows a game server it joins (at login, and with a choice in the lobby):
+	 * with it that server asks the publisher's server, once, which heroes the wallet proved it owns. Good for
+	 * one asking and two minutes; the game keeps a fresh one. Empty until the wallet is connected and has
+	 * proved what it holds.
 	 */
 	FString HeroPass;
+
+	/** The hero pass, to show a server now: it is used up by that showing, and a new one is asked for. */
+	FString TakeHeroPass();
 
 	/** Whether a string is a hero pass as the publisher's server makes them (32 hex digits). */
 	static bool IsHeroPass(const FString& Pass);
@@ -391,6 +395,8 @@ private:
 	void AskHeroPass();
 	bool bHeroPassAsked = false;
 	double NextHeroPass = 0.0;
+	/** When the wallet is next asked to prove what it holds again: a proof older than an hour answers no hero pass. */
+	double NextReprove = 0.0;
 
 	/** The skin, or the hero, being bought by the request that has not settled yet. */
 	FString BuyingSkin;
