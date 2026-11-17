@@ -366,7 +366,19 @@ void ASenniteMenuController::Act(FName Action)
 			// in the lobby: the server hears it, and everyone sees the new hero on the stage
 			const UGameInstance* Game = GetGameInstance();
 			USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
-			State->ServerChooseHero(Hero.Id, Server != nullptr && !Hero.bFree ? Server->TakeHeroPass() : FString());
+			if (Hero.bFree || Server == nullptr) {
+				State->ServerChooseHero(Hero.Id, FString());
+			}
+			else {
+				// a hero bought in the shop: with a hero pass made out to this lobby's server
+				TWeakObjectPtr<ASennitePlayerState> Chooser(State);
+				const FName Id = Hero.Id;
+				Server->AskHeroPass(State->HeroAudience, [Chooser, Id](const FString& Pass) {
+					if (ASennitePlayerState* Still = Chooser.Get()) {
+						Still->ServerChooseHero(Id, Pass);
+					}
+				});
+			}
 		}
 		Note.Reset();
 		Page = InLobby() ? ESenniteMenuPage::Lobby : ESenniteMenuPage::Main;

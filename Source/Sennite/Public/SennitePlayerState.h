@@ -72,17 +72,38 @@ public:
 	FName HeroId;
 
 	/**
-	 * This player chooses a hero, in the lobby, showing their hero pass for a hero bought in the shop. The
-	 * server takes the choice only in a lobby, not more than twice a second, and only as ClaimHero does.
+	 * This player chooses a hero, in the lobby, showing a hero pass made out to this server for a hero bought
+	 * in the shop. The server takes the choice only in a lobby, not more than twice a second, and only as
+	 * ClaimHero does.
 	 */
 	UFUNCTION(Server, Reliable)
 	void ServerChooseHero(FName Id, const FString& Pass);
 
 	/**
+	 * Once in, a player whose chosen hero was bought in the shop claims it, with a hero pass made out to this
+	 * server (they log in as the default hero). Taken once for each player, anywhere, as ClaimHero does.
+	 */
+	UFUNCTION(Server, Reliable)
+	void ServerClaimStartingHero(FName Id, const FString& Pass);
+
+	/** What this server is called as the audience of a hero pass: what the player's game asks a pass for. Sent to this player alone. */
+	UPROPERTY(Replicated)
+	FString HeroAudience;
+
+	/** On the server: the wallet (signing key) the first hero pass this player showed spoke for. Every later pass must be that wallet's. */
+	FString HeroWallet;
+
+	/** Whether the starting claim was taken (on the server), or asked for (on the player's game). */
+	bool bStartingClaimTaken = false;
+	bool bStartingClaimAsked = false;
+
+	/**
 	 * On the server: this player claims a hero. A free hero is theirs at once. A hero bought in the shop is
-	 * theirs only once the publisher's server says the wallet the pass speaks for proved it owns it; until
-	 * then, or if it says not, the player stays the hero they are (the default hero, if none yet). The
-	 * player's own game is never taken at its word for it.
+	 * theirs only once the publisher's server, asked by this server with a pass made out to it, says the
+	 * wallet the pass speaks for proved it owns it, and that wallet is this player's: in a match, the wallet
+	 * their ticket named; elsewhere, the wallet of the first pass they showed. Until then, or if not, the
+	 * player stays the hero they are (the default hero, if none yet). The player's own game is never taken
+	 * at its word for it.
 	 */
 	void ClaimHero(FName Id, const FString& Pass);
 

@@ -56,7 +56,8 @@ async function enter(name: string): Promise<void> {
   const entered = await call("POST", "/players");
   expect(entered.status).toBe(201);
   const token = entered.body.player as string;
-  expect((await call("GET", "/players/me", token)).body).toEqual({ connected: false });
+  // before a wallet connects the game learns only that, and what it is called as a hero pass's audience
+  expect((await call("GET", "/players/me", token)).body).toEqual({ connected: false, audience: expect.stringMatching(/^[0-9a-f]{32}$/) });
   const wallet = a.wallets[name]!.wallet;
   const preview = await wallet.preview(entered.body.code as string);
   expect(preview.name).toBe(GAME);
@@ -236,34 +237,46 @@ describe("the game's side of the publisher's server", () => {
     });
   });
 
-  it("a hero pass tells one game server, once, the heroes the wallet proved, and nothing else", async () => {
+  it("a hero pass is for one game server: it alone can ask with it, once, and learns whose wallet and which heroes", async () => {
     // Alice's wallet has just proved its holdings: it owns no hero bought in the shop.
     expect(await settled(game.alice!, "/players/me/materials", {})).toMatchObject({ ok: true });
-    const first = await call("POST", "/players/me/hero-pass", game.alice);
+    // Bob's game is the server Alice joins: its audience is what Alice's game asks a pass for.
+    const host = (await call("GET", "/players/me", game.bob)).body.audience as string;
+    expect(host).toMatch(/^[0-9a-f]{32}$/);
+    expect((await call("GET", "/players/me", game.alice)).body.audience).not.toBe(host);
+    const first = await call("POST", "/players/me/hero-pass", game.alice, { audience: host });
     expect(first.status).toBe(201);
     const pass = first.body.pass as string;
     expect(pass).toMatch(/^[0-9a-f]{32}$/);
 
-    // Any game server may ask, with no token of its own; it learns the proven heroes and nothing more.
-    const asked = await call("GET", `/hero-passes/${pass}`);
-    expect(asked).toEqual({ status: 200, body: { heroes: [] } });
-    // Asking uses it up: a server that kept the pass cannot use it again, or show it anywhere else.
-    expect((await call("GET", `/hero-passes/${pass}`)).status).toBe(404);
+    // Another game, or a caller with no token, holding the pass learns nothing, and does not use it up.
+    expect((await call("GET", `/hero-passes/${pass}`, game.alice)).status).toBe(404);
+    expect((await call("GET", `/hero-passes/${pass}`)).status).toBe(401);
+    // The match server's audience is the match server's alone.
+    const forMatch = await call("POST", "/players/me/hero-pass", game.alice, { audience: "match" });
+    expect((await call("GET", `/hero-passes/${forMatch.body.pass}`, game.bob)).status).toBe(401);
 
-    // A made-up pass, and a pass the wallet's next one replaced, are no passes.
-    expect((await call("GET", `/hero-passes/${hex(randomBytes(16))}`)).status).toBe(404);
-    const second = await call("POST", "/players/me/hero-pass", game.alice);
-    const third = await call("POST", "/players/me/hero-pass", game.alice);
-    expect([second.status, third.status]).toEqual([201, 201]);
-    expect((await call("GET", `/hero-passes/${second.body.pass}`)).status).toBe(404);
-    expect((await call("GET", `/hero-passes/${third.body.pass}`)).status).toBe(200);
+    // The server it is for learns whose wallet it is and the heroes it proved; asking uses it up.
+    const fresh = await call("POST", "/players/me/hero-pass", game.alice, { audience: host });
+    const asked = await call("GET", `/hero-passes/${fresh.body.pass}`, game.bob);
+    expect(asked.status).toBe(200);
+    const alice = (await call("GET", "/players/me", game.alice)).body;
+    expect(asked.body).toEqual({ heroes: [], signingKey: alice.signingKey, wallet: alice.wallet });
+    expect((await call("GET", `/hero-passes/${fresh.body.pass}`, game.bob)).status).toBe(404);
+
+    // A pass the wallet's next one replaced is no pass, and a pass is asked for a game's audience only.
+    const second = await call("POST", "/players/me/hero-pass", game.alice, { audience: host });
+    const third = await call("POST", "/players/me/hero-pass", game.alice, { audience: host });
+    expect((await call("GET", `/hero-passes/${second.body.pass}`, game.bob)).status).toBe(404);
+    expect((await call("GET", `/hero-passes/${third.body.pass}`, game.bob)).status).toBe(200);
+    expect((await call("POST", "/players/me/hero-pass", game.alice, { audience: "anyone" })).status).toBe(400);
 
     // A game with no wallet connected gets no pass. (The tests before asked this address for its ten connect
     // codes of the minute: the minute is waited out first.)
     await new Promise((resolve) => setTimeout(resolve, 61_000));
     const made = await call("POST", "/players");
     expect(made.status, JSON.stringify(made.body)).toBe(201);
-    const refused = await call("POST", "/players/me/hero-pass", made.body.player as string);
+    const refused = await call("POST", "/players/me/hero-pass", made.body.player as string, { audience: host });
     expect(refused.status, JSON.stringify(refused.body)).toBe(409);
   });
 });

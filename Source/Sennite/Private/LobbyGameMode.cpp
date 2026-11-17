@@ -21,7 +21,7 @@ FString ALobbyGameMode::InitNewPlayer(APlayerController* NewPlayerController, co
 {
 	const FString Said = Super::InitNewPlayer(NewPlayerController, UniqueId, Options, Portal);
 	if (ASennitePlayerState* State = NewPlayerController != nullptr ? NewPlayerController->GetPlayerState<ASennitePlayerState>() : nullptr) {
-		State->ClaimHero(FName(UGameplayStatics::ParseOption(Options, TEXT("Hero"))), UGameplayStatics::ParseOption(Options, TEXT("HeroPass")));
+		State->ClaimHero(FName(UGameplayStatics::ParseOption(Options, TEXT("Hero"))), FString());
 	}
 	return Said;
 }

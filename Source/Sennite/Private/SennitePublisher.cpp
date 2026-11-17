@@ -273,10 +273,6 @@ bool USennitePublisher::Tick(float)
 			bProofWanted = true;
 		}
 	}
-	// a connected wallet that has proved what it holds gets a hero pass for the servers this game joins, renewed before it runs out
-	if (bConnected && bMaterialsKnown && !bHeroPassAsked && Now >= NextHeroPass) {
-		AskHeroPass();
-	}
 	// the publisher's server answers a hero pass only from a proof less than an hour old: prove again every half hour
 	if (bConnected && bMaterialsKnown && Now >= NextReprove) {
 		if (NextReprove > 0.0) {
@@ -465,28 +461,17 @@ void USennitePublisher::BuyHero(const FString& HeroId)
 	BuyingHero = HeroId;
 }
 
-FString USennitePublisher::TakeHeroPass()
+void USennitePublisher::AskHeroPass(const FString& ForAudience, TFunction<void(const FString&)> Done)
 {
-	FString Pass = MoveTemp(HeroPass);
-	HeroPass.Reset();
-	NextHeroPass = 0.0;
-	return Pass;
-}
-
-void USennitePublisher::AskHeroPass()
-{
-	bHeroPassAsked = true;
-	Send(TEXT("POST"), TEXT("/players/me/hero-pass"), MakeShared<FJsonObject>(), [this](int32 Status, const TSharedPtr<FJsonObject>& Json) {
-		bHeroPassAsked = false;
+	if (!IsOn() || !bConnected || !IsAudience(ForAudience)) {
+		Done(FString());
+		return;
+	}
+	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("audience"), ForAudience);
+	Send(TEXT("POST"), TEXT("/players/me/hero-pass"), Body, [Done = MoveTemp(Done)](int32 Status, const TSharedPtr<FJsonObject>& Json) {
 		FString Pass;
-		if (Status == 201 && Json.IsValid() && Json->TryGetStringField(TEXT("pass"), Pass) && IsHeroPass(Pass)) {
-			HeroPass = Pass;
-			// a new one well before this one runs out
-			NextHeroPass = FPlatformTime::Seconds() + FMath::Max(30.0, Json->GetNumberField(TEXT("seconds")) * 0.75);
-		}
-		else {
-			NextHeroPass = FPlatformTime::Seconds() + 10.0;
-		}
+		Done(Status == 201 && Json.IsValid() && Json->TryGetStringField(TEXT("pass"), Pass) && IsHeroPass(Pass) ? Pass : FString());
 	});
 }
 
@@ -503,24 +488,28 @@ bool USennitePublisher::IsHeroPass(const FString& Pass)
 	return true;
 }
 
-void USennitePublisher::CheckHeroPass(const FString& Pass, TFunction<void(bool, const TArray<FString>&)> Done)
+void USennitePublisher::CheckHeroPass(const FString& Pass, TFunction<void(bool, const TArray<FString>&, const FString&, const FString&)> Done)
 {
 	if (!IsOn() || !IsHeroPass(Pass)) {
-		Done(false, TArray<FString>());
+		Done(false, TArray<FString>(), FString(), FString());
 		return;
 	}
+	// the pass is good only for this server: it asks with what it is, its own token or the match server's secret
 	Send(TEXT("GET"), FString::Printf(TEXT("/hero-passes/%s"), *Pass), nullptr, [Done = MoveTemp(Done)](int32 Status, const TSharedPtr<FJsonObject>& Json) {
 		TArray<FString> Heroes;
+		FString SigningKey;
+		FString Wallet;
 		const TArray<TSharedPtr<FJsonValue>>* Listed = nullptr;
-		if (Status != 200 || !Json.IsValid() || !Json->TryGetArrayField(TEXT("heroes"), Listed)) {
-			Done(false, Heroes);
+		if (Status != 200 || !Json.IsValid() || !Json->TryGetArrayField(TEXT("heroes"), Listed)
+			|| !Json->TryGetStringField(TEXT("signingKey"), SigningKey) || !Json->TryGetStringField(TEXT("wallet"), Wallet)) {
+			Done(false, Heroes, FString(), FString());
 			return;
 		}
 		for (const TSharedPtr<FJsonValue>& Value : *Listed) {
 			Heroes.Add(Value->AsString());
 		}
-		Done(true, Heroes);
-	}, FString(), 10.0f);
+		Done(true, Heroes, SigningKey, Wallet);
+	}, IsMatchServer() ? MatchSecret : FString(), 10.0f);
 }
 
 void USennitePublisher::Wear(const FString& SkinId)
@@ -546,6 +535,11 @@ void USennitePublisher::AskMe()
 			return;
 		}
 		bConnected = Json->GetBoolField(TEXT("connected"));
+		// what this game is as the audience of a hero pass, when it is a game server
+		FString Named;
+		if (Json->TryGetStringField(TEXT("audience"), Named) && IsHeroPass(Named)) {
+			Audience = Named;
+		}
 		Wallet = bConnected ? Json->GetStringField(TEXT("wallet")) : FString();
 	});
 }

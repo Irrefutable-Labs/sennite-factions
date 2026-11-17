@@ -9,6 +9,7 @@
 #include "Net/UnrealNetwork.h"
 
 ASennitePlayerState::ASennitePlayerState() {
+	PrimaryActorTick.bCanEverTick = true;
 	InBuildMode = false;
 	BuildMode = FString("None");
 	HoldingWeapon = true; //when spawned, player is holding pickaxe
@@ -62,6 +63,7 @@ void ASennitePlayerState::GetLifetimeReplicatedProps(TArray< FLifetimeProperty >
 	DOREPLIFETIME(ASennitePlayerState, FactionId);
 	DOREPLIFETIME(ASennitePlayerState, Wallet);
 	DOREPLIFETIME(ASennitePlayerState, HeroId);
+	DOREPLIFETIME_CONDITION(ASennitePlayerState, HeroAudience, COND_OwnerOnly);
 }
 
 void ASennitePlayerState::ServerChooseHero_Implementation(FName Id, const FString& Pass) {
@@ -72,6 +74,14 @@ void ASennitePlayerState::ServerChooseHero_Implementation(FName Id, const FStrin
 		return;
 	}
 	NextHeroChoice = World->GetRealTimeSeconds() + 0.5;
+	ClaimHero(Id, Pass);
+}
+
+void ASennitePlayerState::ServerClaimStartingHero_Implementation(FName Id, const FString& Pass) {
+	if (bStartingClaimTaken) {
+		return;
+	}
+	bStartingClaimTaken = true;
 	ClaimHero(Id, Pass);
 }
 
@@ -105,7 +115,7 @@ void ASennitePlayerState::ClaimHero(FName Id, const FString& Pass) {
 	TWeakObjectPtr<ASennitePlayerState> Self(this);
 	bClaimChecking = true;
 	const int32 Seq = ++ClaimSeq;
-	Shop->CheckHeroPass(Pass, [Self, Id, Seq](bool bOk, const TArray<FString>& Owned) {
+	Shop->CheckHeroPass(Pass, [Self, Id, Seq](bool bOk, const TArray<FString>& Owned, const FString& SigningKey, const FString& PassWallet) {
 		ASennitePlayerState* State = Self.Get();
 		if (State == nullptr) {
 			return;
@@ -115,7 +125,12 @@ void ASennitePlayerState::ClaimHero(FName Id, const FString& Pass) {
 			// the player chose again while this was checked: the later choice stands
 			return;
 		}
-		if (bOk && Owned.Contains(Id.ToString())) {
+		// the pass must be this player's wallet's: the match ticket's, or the one their first pass named
+		const bool bTheirs = bOk && (State->Wallet.IsEmpty() || State->Wallet == PassWallet) && (State->HeroWallet.IsEmpty() || State->HeroWallet == SigningKey);
+		if (bTheirs && State->HeroWallet.IsEmpty()) {
+			State->HeroWallet = SigningKey;
+		}
+		if (bTheirs && Owned.Contains(Id.ToString())) {
 			State->SetHero(Id);
 		}
 		else {
@@ -172,6 +187,30 @@ void ASennitePlayerState::StartOver() {
 
 void ASennitePlayerState::Tick(float DeltaSeconds) {
 	Super::Tick(DeltaSeconds);
+	const UGameInstance* Game = GetGameInstance();
+	USennitePublisher* Shop = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+	// the server tells each player what to ask a hero pass for, once it knows what it is called
+	if (HasAuthority() && HeroAudience.IsEmpty() && Shop != nullptr && USennitePublisher::IsAudience(Shop->ServerAudience())) {
+		HeroAudience = Shop->ServerAudience();
+	}
+	// the player's own game: a hero bought in the shop is claimed once in, with a pass made out to this server
+	const APlayerController* Owner = Cast<APlayerController>(GetOwner());
+	if (!bStartingClaimAsked && Owner != nullptr && Owner->IsLocalController() && Shop != nullptr && USennitePublisher::IsAudience(HeroAudience)) {
+		const FName Want = USenniteProfile::Get().PlayingHero(this);
+		const FSenniteHero* Hero = USenniteHeroes::Find(Want);
+		if (Hero == nullptr || Hero->bFree || Want == HeroId) {
+			bStartingClaimAsked = true;
+		}
+		else if (Shop->bConnected) {
+			bStartingClaimAsked = true;
+			TWeakObjectPtr<ASennitePlayerState> Self(this);
+			Shop->AskHeroPass(HeroAudience, [Self, Want](const FString& Pass) {
+				if (ASennitePlayerState* State = Self.Get()) {
+					State->ServerClaimStartingHero(Want, Pass);
+				}
+			});
+		}
+	}
 	ASenniteCharacter* SenniteCharacter = Cast<ASenniteCharacter>(GetPawn());
 	if (SenniteCharacter) {
 

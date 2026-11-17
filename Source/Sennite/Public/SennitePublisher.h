@@ -261,21 +261,30 @@ public:
 	FString HeroOnItsWay;
 
 	/**
-	 * A pass this player's game shows a game server it joins (at login, and with a choice in the lobby):
-	 * with it that server asks the publisher's server, once, which heroes the wallet proved it owns. Good for
-	 * one asking and two minutes; the game keeps a fresh one. Empty until the wallet is connected and has
-	 * proved what it holds.
+	 * What this game is called as the audience of a hero pass, as the publisher's server gave it (a digest of
+	 * this game's token, never the token): empty until it has. The publisher's match server is "match".
 	 */
-	FString HeroPass;
+	FString Audience;
 
-	/** The hero pass, to show a server now: it is used up by that showing, and a new one is asked for. */
-	FString TakeHeroPass();
+	/** This game's audience as a game server: what it tells the players who join it to ask a hero pass for. */
+	FString ServerAudience() const { return IsMatchServer() ? FString(TEXT("match")) : Audience; }
 
-	/** Whether a string is a hero pass as the publisher's server makes them (32 hex digits). */
+	/** Whether a string is a hero pass, or an audience, as the publisher's server makes them (32 hex digits; or "match"). */
 	static bool IsHeroPass(const FString& Pass);
+	static bool IsAudience(const FString& ForAudience) { return ForAudience == TEXT("match") || IsHeroPass(ForAudience); }
 
-	/** A game server: ask which heroes the wallet a pass speaks for proved it owns. Done(false) if the pass is no pass or the server cannot be reached. */
-	void CheckHeroPass(const FString& Pass, TFunction<void(bool /* bOk */, const TArray<FString>& /* Heroes */)> Done);
+	/**
+	 * A player's game: ask for a hero pass for the game server of that audience, which it has joined. With it
+	 * that server alone asks the publisher's server, once, whose wallet this is and which heroes it proved it
+	 * owns. Done(empty) if no pass was given (no wallet connected, the server unreachable).
+	 */
+	void AskHeroPass(const FString& ForAudience, TFunction<void(const FString& /* Pass */)> Done);
+
+	/**
+	 * A game server: ask what a hero pass a joined player showed it speaks for. Done(false) if it is no pass for
+	 * this server, or the publisher's server cannot be reached.
+	 */
+	void CheckHeroPass(const FString& Pass, TFunction<void(bool /* bOk */, const TArray<FString>& /* Heroes */, const FString& /* SigningKey */, const FString& /* Wallet */)> Done);
 	/** Trade ERA for D-bucks through the publisher's vault. */
 	void BuyDBucks(const FString& InEra);
 	/** Buy a skin from the shop with D-bucks. */
@@ -392,9 +401,6 @@ private:
 	bool bPrizesAsked = false;
 	bool bShop = false;
 	bool bShopAsked = false;
-	void AskHeroPass();
-	bool bHeroPassAsked = false;
-	double NextHeroPass = 0.0;
 	/** When the wallet is next asked to prove what it holds again: a proof older than an hour answers no hero pass. */
 	double NextReprove = 0.0;
 

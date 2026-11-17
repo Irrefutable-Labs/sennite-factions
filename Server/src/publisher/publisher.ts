@@ -465,20 +465,29 @@ export class Publisher {
   async proven(connection: Connection): Promise<Map<string, bigint> | undefined> {
     // a proof covers the objects it is asked about: the skins and heroes are asked about one by one, each by its
     // object id. Everything the shop ever sold is asked about, so the asking is cut into proofs of PROOF_BATCH
-    // objects each, and what they prove is put together: no one proof grows with the shop's sales.
+    // objects each: no one proof grows with the shop's sales. What they prove is one answer only if every one of
+    // them was made at the same position of the wallet; if the wallet moved on between them, they are all asked
+    // again, and after PROOF_ATTEMPTS tries nothing is established.
     const { skins, heroes } = this.options.store.data.shop;
     const all = [...this.options.catalogue.resources, this.shop.symbol, "ERA", ...Object.keys(skins), ...Object.keys(heroes)];
-    const owned = new Map<string, bigint>();
-    for (let at = 0; at < all.length; at += PROOF_BATCH) {
-      const part = await this.proveSome(connection, all.slice(at, at + PROOF_BATCH));
-      if (part === undefined) return undefined;
-      for (const [object, amount] of part) owned.set(object, amount);
+    for (let attempt = 0; attempt < PROOF_ATTEMPTS; attempt++) {
+      const owned = new Map<string, bigint>();
+      let position: bigint | undefined;
+      let moved = false;
+      for (let at = 0; at < all.length && !moved; at += PROOF_BATCH) {
+        const part = await this.proveSome(connection, all.slice(at, at + PROOF_BATCH));
+        if (part === undefined) return undefined;
+        if (position !== undefined && part.position !== position) moved = true;
+        position = part.position;
+        for (const [object, amount] of part.owned) owned.set(object, amount);
+      }
+      if (!moved) return owned;
     }
-    return owned;
+    return undefined;
   }
 
-  /** One proof, of what the wallet owns of `asked`. Undefined when none was established. */
-  private async proveSome(connection: Connection, asked: string[]): Promise<Map<string, bigint> | undefined> {
+  /** One proof, of what the wallet owns of `asked`, and the wallet's position it was made at. Undefined when none was established. */
+  private async proveSome(connection: Connection, asked: string[]): Promise<{ owned: Map<string, bigint>; position: bigint } | undefined> {
     // A proof stands only while the wallet has not moved on from the position it was made at. A
     // wallet that takes something in just after answering leaves a proof that establishes nothing:
     // that is no answer about what it holds, so the wallet is asked again.
@@ -489,7 +498,9 @@ export class Publisher {
       const deadline = this.options.now() + PROOF_SETTLE_MS;
       for (;;) {
         const result = await this.options.app.result(ref);
-        if (result.fact === "owns" && result.owns !== undefined) return new Map(result.owns.map((o) => [o.object, o.amount]));
+        if (result.fact === "owns" && result.owns !== undefined) {
+          return { owned: new Map(result.owns.map((o) => [o.object, o.amount])), position: result.raw.holdingsPosition };
+        }
         if (this.options.now() > deadline) break;
         await new Promise((resolve) => setTimeout(resolve, 250));
       }

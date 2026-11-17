@@ -105,7 +105,7 @@ FString ASenniteGameMode::InitNewPlayer(APlayerController* NewPlayerController, 
 	FString InitializedString = Super::InitNewPlayer(NewPlayerController, UniqueId, Options, Portal);
 	// the hero the player's game logged in as (USenniteLocalPlayer), claimed as any choice is; or the default hero
 	if (ASennitePlayerState* State = NewPlayerController != nullptr ? NewPlayerController->GetPlayerState<ASennitePlayerState>() : nullptr) {
-		State->ClaimHero(FName(UGameplayStatics::ParseOption(Options, TEXT("Hero"))), UGameplayStatics::ParseOption(Options, TEXT("HeroPass")));
+		State->ClaimHero(FName(UGameplayStatics::ParseOption(Options, TEXT("Hero"))), FString());
 	}
 	
 	/*const FString& PlayerSessionId = UGameplayStatics::ParseOption(Options, "PlayerSessionId");
