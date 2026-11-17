@@ -259,6 +259,19 @@ public:
 	void BuyHero(const FString& HeroId);
 	/** A hero the shop sold and gave that the wallet has not proved it owns yet: it is on its way. */
 	FString HeroOnItsWay;
+
+	/**
+	 * A pass this player's game shows the game servers it joins (Hero pass, at login and with a choice in
+	 * the lobby): with it a server asks the publisher's server which heroes the wallet proved it owns. Empty
+	 * until the wallet is connected and has proved what it holds.
+	 */
+	FString HeroPass;
+
+	/** Whether a string is a hero pass as the publisher's server makes them (32 hex digits). */
+	static bool IsHeroPass(const FString& Pass);
+
+	/** A game server: ask which heroes the wallet a pass speaks for proved it owns. Done(false) if the pass is no pass or the server cannot be reached. */
+	void CheckHeroPass(const FString& Pass, TFunction<void(bool /* bOk */, const TArray<FString>& /* Heroes */)> Done);
 	/** Trade ERA for D-bucks through the publisher's vault. */
 	void BuyDBucks(const FString& InEra);
 	/** Buy a skin from the shop with D-bucks. */
@@ -375,6 +388,10 @@ private:
 	bool bPrizesAsked = false;
 	bool bShop = false;
 	bool bShopAsked = false;
+	void AskHeroPass();
+	bool bHeroPassAsked = false;
+	double NextHeroPass = 0.0;
+
 	/** The skin, or the hero, being bought by the request that has not settled yet. */
 	FString BuyingSkin;
 	FString BuyingHero;

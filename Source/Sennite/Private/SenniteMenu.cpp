@@ -364,7 +364,9 @@ void ASenniteMenuController::Act(FName Action)
 		Profile.Save();
 		if (ASennitePlayerState* State = GetPlayerState<ASennitePlayerState>()) {
 			// in the lobby: the server hears it, and everyone sees the new hero on the stage
-			State->ServerChooseHero(Hero.Id);
+			const UGameInstance* Game = GetGameInstance();
+			const USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+			State->ServerChooseHero(Hero.Id, Server != nullptr ? Server->HeroPass : FString());
 		}
 		Note.Reset();
 		Page = InLobby() ? ESenniteMenuPage::Lobby : ESenniteMenuPage::Main;

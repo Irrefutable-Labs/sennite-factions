@@ -6,7 +6,9 @@
 // taps START, and both travel to the test range together, each as their own hero.
 //
 // Joiner: taps JOIN, types the host's address on the screen's keypad, taps JOIN; in the lobby, taps
-// HEROES, goes to the second free hero and taps CHOOSE; the host sees it. On the test range they are
+// HEROES, goes to the second free hero and taps CHOOSE; the host sees it. Before that it sends what a
+// game changed to lie would: a claim to a hero bought in the shop, with a made-up pass; the server keeps it
+// as the hero it is. On the test range they are
 // that hero, and the host's hero is the host's.
 
 #include "Misc/AutomationTest.h"
@@ -61,7 +63,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForMenu, Opening, Typing, Joining, InLobby, ChooseHero, Chosen, WaitStart, Travel, Done };
+		enum class EPhase { WaitForMenu, Opening, Typing, Joining, Lie, InLobby, ChooseHero, Chosen, WaitStart, Travel, Done };
 
 		void Enter(EPhase Next) { Phase = Next; PhaseStart = FPlatformTime::Seconds(); }
 		double Elapsed() const { return FPlatformTime::Seconds() - PhaseStart; }
@@ -75,6 +77,7 @@ namespace
 		double PhaseStart = 0.0;
 		FString Address;
 		int32 Typed = 0;
+		FName Lied;
 	};
 
 	bool FLobbyRun::Update()
@@ -155,9 +158,30 @@ namespace
 			}
 			Test->TestFalse(TEXT("A joining player has no START"), MenuCheck::Has(Menu, TEXT("start")));
 			Test->TestTrue(TEXT("The joining player's address is kept for next time"), USenniteProfile::Get().LastAddress == Address);
+			// what a game changed to lie would send: a hero bought in the shop that this wallet never bought,
+			// with a pass of the right form that no publisher's server gave. The server must not take it.
+			for (const FSenniteHero& Hero : USenniteHeroes::All()) {
+				if (!Hero.bFree) {
+					Lied = Hero.Id;
+					break;
+				}
+			}
+			Menu->GetPlayerState<ASennitePlayerState>()->ServerChooseHero(Lied, TEXT("0123456789abcdef0123456789abcdef"));
+			Enter(EPhase::Lie);
+			return false;
+
+		case EPhase::Lie: {
+			if (Elapsed() < 2.0) {
+				return false;
+			}
+			const ASennitePlayerState* Me = Menu != nullptr ? Menu->GetPlayerState<ASennitePlayerState>() : nullptr;
+			Test->TestTrue(TEXT("The server does not make a player a hero bought in the shop on their game's word"), Me != nullptr && Me->HeroId == Default);
+			Test->TestFalse(TEXT("Nor does anyone's stage show it"), Menu->StageHeroes().Contains(Lied));
+			UE_LOG(LogLobbyCheck, Display, TEXT("GAMECHECK joiner claimed %s with no real pass: still %s"), *Lied.ToString(), Me ? *Me->HeroId.ToString() : TEXT("?"));
 			MenuCheck::Tap(Menu, TEXT("heroes"));
 			Enter(EPhase::ChooseHero);
 			return false;
+		}
 
 		case EPhase::ChooseHero:
 			if (Menu == nullptr || Menu->Page != ESenniteMenuPage::Heroes) {

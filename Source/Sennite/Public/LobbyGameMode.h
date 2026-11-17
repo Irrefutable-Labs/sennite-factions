@@ -26,7 +26,7 @@ public:
 	/** Nobody is given a body in the lobby: their hero stands on the stage. */
 	virtual bool PlayerCanRestart_Implementation(APlayerController* Player) override { return false; }
 
-	/** The hero the player's game logged in as (Hero=), or the default hero. */
+	/** The hero the player's game logged in as (Hero=, and HeroPass= for a hero bought in the shop), claimed as any choice is. */
 	virtual FString InitNewPlayer(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId, const FString& Options, const FString& Portal = TEXT("")) override;
 
 	virtual void PostLogin(APlayerController* NewPlayer) override;

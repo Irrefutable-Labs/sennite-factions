@@ -273,6 +273,10 @@ bool USennitePublisher::Tick(float)
 			bProofWanted = true;
 		}
 	}
+	// a connected wallet that has proved what it holds gets a hero pass for the servers this game joins, renewed before it runs out
+	if (bConnected && bMaterialsKnown && !bHeroPassAsked && Now >= NextHeroPass) {
+		AskHeroPass();
+	}
 	// once the wallet is connected the game asks it, once, what it holds: the skin a player owns is on their character
 	if (bConnected && !bProvedOnConnect) {
 		bProvedOnConnect = true;
@@ -452,6 +456,56 @@ void USennitePublisher::BuyHero(const FString& HeroId)
 	Ask(TEXT("/shop/heroes"), Body, TEXT("waiting for the wallet to pay for the hero..."));
 	bProveAfter = bBusy;
 	BuyingHero = HeroId;
+}
+
+void USennitePublisher::AskHeroPass()
+{
+	bHeroPassAsked = true;
+	Send(TEXT("POST"), TEXT("/players/me/hero-pass"), MakeShared<FJsonObject>(), [this](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+		bHeroPassAsked = false;
+		FString Pass;
+		if (Status == 201 && Json.IsValid() && Json->TryGetStringField(TEXT("pass"), Pass) && IsHeroPass(Pass)) {
+			HeroPass = Pass;
+			// a new one well before the server's hour is up
+			NextHeroPass = FPlatformTime::Seconds() + FMath::Max(60.0, Json->GetNumberField(TEXT("seconds")) * 0.75);
+		}
+		else {
+			NextHeroPass = FPlatformTime::Seconds() + 10.0;
+		}
+	});
+}
+
+bool USennitePublisher::IsHeroPass(const FString& Pass)
+{
+	if (Pass.Len() != 32) {
+		return false;
+	}
+	for (const TCHAR Each : Pass) {
+		if (!((Each >= TEXT('0') && Each <= TEXT('9')) || (Each >= TEXT('a') && Each <= TEXT('f')))) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void USennitePublisher::CheckHeroPass(const FString& Pass, TFunction<void(bool, const TArray<FString>&)> Done)
+{
+	if (!IsOn() || !IsHeroPass(Pass)) {
+		Done(false, TArray<FString>());
+		return;
+	}
+	Send(TEXT("GET"), FString::Printf(TEXT("/hero-passes/%s"), *Pass), nullptr, [Done = MoveTemp(Done)](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+		TArray<FString> Heroes;
+		const TArray<TSharedPtr<FJsonValue>>* Listed = nullptr;
+		if (Status != 200 || !Json.IsValid() || !Json->TryGetArrayField(TEXT("heroes"), Listed)) {
+			Done(false, Heroes);
+			return;
+		}
+		for (const TSharedPtr<FJsonValue>& Value : *Listed) {
+			Heroes.Add(Value->AsString());
+		}
+		Done(true, Heroes);
+	}, FString(), 10.0f);
 }
 
 void USennitePublisher::Wear(const FString& SkinId)

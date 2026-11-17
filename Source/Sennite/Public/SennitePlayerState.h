@@ -72,12 +72,19 @@ public:
 	FName HeroId;
 
 	/**
-	 * This player chooses a hero, in the lobby. Their game lets them choose only a hero that is free or
-	 * that their wallet proved it owns; the server checks the hero is on the list, takes the choice only
-	 * in a lobby and not more than twice a second, and shows it to everyone.
+	 * This player chooses a hero, in the lobby, showing their hero pass for a hero bought in the shop. The
+	 * server takes the choice only in a lobby, not more than twice a second, and only as ClaimHero does.
 	 */
 	UFUNCTION(Server, Reliable)
-	void ServerChooseHero(FName Id);
+	void ServerChooseHero(FName Id, const FString& Pass);
+
+	/**
+	 * On the server: this player claims a hero. A free hero is theirs at once. A hero bought in the shop is
+	 * theirs only once the publisher's server says the wallet the pass speaks for proved it owns it; until
+	 * then, or if it says not, the player stays the hero they are (the default hero, if none yet). The
+	 * player's own game is never taken at its word for it.
+	 */
+	void ClaimHero(FName Id, const FString& Pass);
 
 	/** When, on the server's clock, this player's next choice of hero is taken. */
 	double NextHeroChoice = 0.0;

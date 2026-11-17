@@ -69,5 +69,13 @@ FName USenniteProfile::PlayingHero(const UObject* WorldContext) const
 
 FString USenniteLocalPlayer::GetGameLoginOptions() const
 {
-	return FString::Printf(TEXT("Hero=%s"), *USenniteProfile::Get().PlayingHero(this).ToString());
+	// a hero bought in the shop goes with the pass the server checks it by; a free hero needs none
+	const FName Hero = USenniteProfile::Get().PlayingHero(this);
+	const UGameInstance* Game = GetGameInstance();
+	const USennitePublisher* Shop = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+	const FSenniteHero* Listed = USenniteHeroes::Find(Hero);
+	if (Listed != nullptr && !Listed->bFree && Shop != nullptr && USennitePublisher::IsHeroPass(Shop->HeroPass)) {
+		return FString::Printf(TEXT("Hero=%s?HeroPass=%s"), *Hero.ToString(), *Shop->HeroPass);
+	}
+	return FString::Printf(TEXT("Hero=%s"), *Hero.ToString());
 }
