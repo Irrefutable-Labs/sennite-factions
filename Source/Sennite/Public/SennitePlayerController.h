@@ -10,6 +10,7 @@ class ASenniteSpectator;
 class AStormActor;
 class AGameMode;
 class ASennitePlayerState;
+class USenniteGameMenu;
 class USenniteTouchControls;
 /**
  * 
@@ -92,8 +93,21 @@ public:
 
 	virtual void PlayerTick(float DeltaTime) override;
 
+	/** The menu this machine's player opens while playing (SenniteGameMenu.h). None for a player of another machine. */
+	USenniteGameMenu* GetGameMenu();
+
+	/** Escape and the phone's back button open the in-game menu; while it is open it takes every key. */
+	virtual bool InputKey(const FInputKeyEventArgs& Params) override;
+
+	/** Looking round, by the player's settings: how far it turns, and whether up looks down. */
+	virtual void AddYawInput(float Val) override;
+	virtual void AddPitchInput(float Val) override;
+
 private:
 	virtual void BeginPlay() override;
+
+	UPROPERTY()
+	TObjectPtr<USenniteGameMenu> GameMenu;
 
 	UPROPERTY()
 	TObjectPtr<USenniteTouchControls> TouchControls;

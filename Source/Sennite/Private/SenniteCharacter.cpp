@@ -334,7 +334,6 @@ void ASenniteCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerI
 	PlayerInputComponent->BindAction("HoldPotion", IE_Pressed, this, &ASenniteCharacter::HoldPotion);
 	PlayerInputComponent->BindAction("Ironsights", IE_Pressed, this, &ASenniteCharacter::AimGunIn);
 	PlayerInputComponent->BindAction("Ironsights", IE_Released, this, &ASenniteCharacter::AimGunOut);
-	PlayerInputComponent->BindAction("OpenSettings", IE_Pressed, this, &ASenniteCharacter::OpenSettingsMenu);
 	PlayerInputComponent->BindAction("OpenCrate", IE_Pressed, this, &ASenniteCharacter::OpenCrate);
 	PlayerInputComponent->BindAction("EditPiece", IE_Pressed, this, &ASenniteCharacter::EditPiece);
 
@@ -1162,16 +1161,6 @@ void ASenniteCharacter::ClientCrateGave_Implementation(bool bRifle, bool bShotgu
 		}
 	}
 	Hud->DrawCrateGave(FString::Join(Gave, TEXT("   ")));
-}
-
-void ASenniteCharacter::OpenSettingsMenu() {
-	if (GetController()) {
-		APlayerController* PlayerController = Cast<APlayerController>(GetController());
-		if (PlayerController->GetHUD()) {
-			ASenniteHUD* SenniteHUD = Cast<ASenniteHUD>(PlayerController->GetHUD());
-			SenniteHUD->DrawSettingsMenu();
-		}
-	}
 }
 
 void ASenniteCharacter::ServerSetIsWalkingTrue_Implementation() {

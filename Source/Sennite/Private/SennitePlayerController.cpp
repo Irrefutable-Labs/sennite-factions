@@ -6,6 +6,9 @@
 #include "SenniteSpectator.h"
 #include "SenniteMatch.h"
 #include "SenniteTouch.h"
+#include "SenniteGameMenu.h"
+#include "SenniteHeroes.h"
+#include "InputKeyEventArgs.h"
 #include "SenniteBaseEditor.h"
 #include "Engine/Engine.h"
 #include "Net/UnrealNetwork.h"
@@ -30,6 +33,35 @@ void ASennitePlayerController::BeginPlay() {
 	if (HasAuthority()) {
 		CurrentStorm = AStormActor::Find(GetWorld());
 	}
+	if (IsLocalController()) {
+		// the player's settings, in effect from the start of every game
+		USenniteGameMenu::ApplySettings(GetWorld());
+	}
+}
+
+USenniteGameMenu* ASennitePlayerController::GetGameMenu() {
+	if (GameMenu == nullptr && IsLocalPlayerController()) {
+		GameMenu = NewObject<USenniteGameMenu>(this);
+		GameMenu->Bind(this);
+	}
+	return GameMenu;
+}
+
+bool ASennitePlayerController::InputKey(const FInputKeyEventArgs& Params) {
+	USenniteGameMenu* Menu = GetGameMenu();
+	if (Menu != nullptr && Menu->Key(Params)) {
+		return true;
+	}
+	return Super::InputKey(Params);
+}
+
+void ASennitePlayerController::AddYawInput(float Val) {
+	Super::AddYawInput(Val * USenniteProfile::Get().LookSensitivity);
+}
+
+void ASennitePlayerController::AddPitchInput(float Val) {
+	const USenniteProfile& Profile = USenniteProfile::Get();
+	Super::AddPitchInput(Val * Profile.LookSensitivity * (Profile.bInvertLook ? -1.0f : 1.0f));
 }
 
 FVector ASennitePlayerController::SpectatorStart() const {
@@ -52,6 +84,15 @@ USenniteTouchControls* ASennitePlayerController::GetTouchControls() {
 }
 
 bool ASennitePlayerController::InputTouch(const FTouchId TouchId, const ETouchType::Type Type, const FVector2D& TouchLocation, const float Force, const uint64 Timestamp) {
+	// the in-game menu, while it is open, takes every touch
+	USenniteGameMenu* Menu = GetGameMenu();
+	if (Menu != nullptr && Menu->IsOpen()) {
+		// the finger that tapped MENU lifts over the menu: the touch controls let go of it, and of any other
+		if (TouchControls != nullptr) {
+			TouchControls->ReleaseAll();
+		}
+		return Menu->Touch(Type, TouchLocation);
+	}
 	// in play the stick and buttons; in the planning view of a base, the editor's buttons and the map
 	USenniteTouchControls* Controls = GetTouchControls();
 	if (Controls != nullptr) {
