@@ -150,8 +150,9 @@ bool USenniteGameMenu::Touch(ETouchType::Type Type, const FVector2D& Where)
 
 FName USenniteGameMenu::ButtonAt(const FVector2D& Where) const
 {
+	// Where is on the screen; the buttons are where the canvas drew them
 	for (const FSenniteMenuButton& Each : Buttons) {
-		if (Each.bEnabled && Each.Box.IsInside(Where)) {
+		if (Each.bEnabled && Each.Box.IsInside(Where - Origin)) {
 			return Each.Action;
 		}
 	}
@@ -162,7 +163,7 @@ bool USenniteGameMenu::Centre(FName Action, FVector2D& Out) const
 {
 	for (const FSenniteMenuButton& Each : Buttons) {
 		if (Each.Action == Action) {
-			Out = Each.Box.GetCenter();
+			Out = Each.Box.GetCenter() + Origin;
 			return true;
 		}
 	}
@@ -310,6 +311,7 @@ void USenniteGameMenu::Draw(UCanvas* Canvas)
 		return;
 	}
 	S = Canvas->ClipY / 720.0f;
+	Origin = SenniteUi::CanvasOrigin(Canvas);
 	// the button under the mouse, from where the last frame drew them
 	Hovered = NAME_None;
 	float MouseX = 0.0f;
@@ -320,9 +322,12 @@ void USenniteGameMenu::Draw(UCanvas* Canvas)
 	Buttons.Reset();
 	LastDrawn.Reset();
 	// the game is seen behind the menu, dimmed, and darker under the buttons
+	// the shade covers the whole screen, past the safe area the canvas is drawn in
+	const FVector2D ScreenMin(-Origin.X, -Origin.Y);
+	const FVector2D ScreenMax(Canvas->ClipX + Canvas->SafeZonePadEX, Canvas->ClipY + Canvas->SafeZonePadEY);
 	const FLinearColor Shade(0.0f, 0.0f, 0.0f, 0.45f);
-	SenniteUi::Fade(Canvas, FBox2D(FVector2D(0.0f, 0.0f), FVector2D(Canvas->ClipX, Canvas->ClipY)), Shade, Shade, false);
-	SenniteUi::Fade(Canvas, FBox2D(FVector2D(0.0f, 0.0f), FVector2D(620.0f * S, Canvas->ClipY)), FLinearColor(0.0f, 0.0f, 0.0f, 0.6f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
+	SenniteUi::Fade(Canvas, FBox2D(ScreenMin, ScreenMax), Shade, Shade, false);
+	SenniteUi::Fade(Canvas, FBox2D(ScreenMin, FVector2D(620.0f * S, ScreenMax.Y)), FLinearColor(0.0f, 0.0f, 0.0f, 0.6f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
 	switch (Page) {
 	case ESenniteGameMenuPage::Settings:
 		DrawSettings(Canvas);

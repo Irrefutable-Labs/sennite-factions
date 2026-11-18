@@ -33,7 +33,7 @@ public:
 
 	void Bind(APlayerController* InController);
 
-	/** A touch on the screen, at a point on the game's viewport. True if the controls took it. */
+	/** A touch on the screen, at a point on the game's viewport (the screen's own measure). True if the controls took it. */
 	bool Touch(const FTouchId& Id, ETouchType::Type Type, const FVector2D& At);
 
 	/** Each frame: the stick, as the left stick of a gamepad, and running when it is pushed all the way ahead. */
@@ -45,7 +45,7 @@ public:
 	/** Let go of every key and the stick: the player's fingers are no longer on the screen. */
 	void ReleaseAll();
 
-	/** Where a control is on a viewport of the given size, by the name drawn on it (FIRE, JUMP, RIFLE, STICK, ...). False if there is none. */
+	/** Where on the screen a control is, by the name drawn on it (FIRE, JUMP, RIFLE, STICK, ...): where a finger taps it. The size given is used until the controls have been drawn once. False if there is none. */
 	bool Where(const FString& Name, const FVector2D& Viewport, FVector2D& OutCentre) const;
 
 	/** Where, on the viewport now, the control is that presses a key: in play one that is shown; in the planning view any, dimmed or not. False if there is none. */
@@ -114,6 +114,13 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<APlayerController> Controller;
+
+	/**
+	 * Where the canvas the controls were last drawn on begins on the screen, and its size. On a phone the HUD
+	 * is drawn inside the screen's safe area: a touch, in the screen's measure, is on the canvas at the touch less this.
+	 */
+	FVector2D DrawnOrigin = FVector2D::ZeroVector;
+	FVector2D DrawnSize = FVector2D::ZeroVector;
 
 	TArray<FFinger> Fingers;
 

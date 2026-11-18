@@ -138,10 +138,10 @@ public:
 	/** Each line of text the last frame drew, as "name=text": what a check reads. */
 	TArray<FString> LastDrawn;
 
-	/** The enabled button at a point of the screen, or none. */
+	/** The enabled button at a point of the screen (the screen's own measure, as a touch or the mouse gives it), or none. */
 	FName ButtonAt(const FVector2D& Where) const;
 
-	/** Where a button was drawn: its middle. False if the last frame drew no such button. */
+	/** Where on the screen a button was drawn: its middle, where a finger taps it. False if the last frame drew no such button. */
 	bool Centre(FName Action, FVector2D& Out) const;
 
 private:
@@ -171,5 +171,7 @@ private:
 	float Width(const FString& Line, float Points) const;
 
 	float S = 1.0f;
+	/** Where the canvas begins on the screen (SenniteUi::CanvasOrigin): on a phone the HUD is drawn inside the safe area. */
+	FVector2D Origin = FVector2D::ZeroVector;
 	TArray<FString> Drawing;
 };

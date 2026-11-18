@@ -444,8 +444,9 @@ void ASenniteMenuController::Act(FName Action)
 
 FName ASenniteMenuHUD::ButtonAt(const FVector2D& Where) const
 {
+	// Where is on the screen; the buttons are where the canvas drew them
 	for (const FSenniteMenuButton& Each : Buttons) {
-		if (Each.bEnabled && Each.Box.IsInside(Where)) {
+		if (Each.bEnabled && Each.Box.IsInside(Where - Origin)) {
 			return Each.Action;
 		}
 	}
@@ -456,7 +457,7 @@ bool ASenniteMenuHUD::Centre(FName Action, FVector2D& Out) const
 {
 	for (const FSenniteMenuButton& Each : Buttons) {
 		if (Each.Action == Action) {
-			Out = Each.Box.GetCenter();
+			Out = Each.Box.GetCenter() + Origin;
 			return true;
 		}
 	}
@@ -526,6 +527,7 @@ void ASenniteMenuHUD::DrawHUD()
 	Drawing.Reset();
 	// every size is for a screen 720 lines high and scales with the screen, phone or desktop
 	S = Canvas->ClipY / 720.0f;
+	Origin = SenniteUi::CanvasOrigin(Canvas);
 	if (Menu == nullptr) {
 		return;
 	}

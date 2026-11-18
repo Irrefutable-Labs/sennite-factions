@@ -68,7 +68,7 @@ public:
 	TArray<FSenniteMenuButton> Buttons;
 	TArray<FString> LastDrawn;
 
-	/** Where a button was drawn: its middle. False if the last frame drew no such button. */
+	/** Where on the screen a button was drawn: its middle, where a finger taps it. False if the last frame drew no such button. */
 	bool Centre(FName Action, FVector2D& Out) const;
 
 	/** The player's settings, put into effect: the volume and, if they chose one, the graphics quality. Looking reads its own as it turns. */
@@ -100,6 +100,8 @@ private:
 	/** What the menu says about the last thing asked. */
 	FString Note;
 	float S = 1.0f;
+	/** Where the canvas the menu was last drawn on begins on the screen (SenniteUi::CanvasOrigin): a touch or the mouse is on the canvas at its place on the screen less this. */
+	FVector2D Origin = FVector2D::ZeroVector;
 	/** Whether the mouse pointer was showing before the menu opened: it is put back as it was. */
 	bool bCursorBefore = false;
 };

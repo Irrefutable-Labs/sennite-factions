@@ -56,6 +56,12 @@ namespace
 	}
 }
 
+FVector2D SenniteUi::CanvasOrigin(const UCanvas* Canvas)
+{
+	// the engine moves the HUD's canvas in from the screen's left and top by the safe area's padding (UCanvas::ApplySafeZoneTransform)
+	return Canvas != nullptr ? FVector2D(Canvas->SafeZonePadX, Canvas->SafeZonePadY) : FVector2D::ZeroVector;
+}
+
 FVector2D SenniteUi::Measure(const FString& Line, float Points, float Scale, bool bBold)
 {
 	if (HasSlate()) {

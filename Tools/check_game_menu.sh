@@ -13,5 +13,9 @@ rm -f Saved/SaveGames/GameMenuCheck.sav
 SMOOTH="-ini:Input:[/Script/Engine.InputSettings]:bEnableMouseSmoothing=False"
 Tools/run_game_check.sh Sennite.GameMenu OpensSetsAndLeaves GameMenu -ProfileSlot=GameMenuCheck "$SMOOTH" "$@" || exit 1
 rm -f Saved/SaveGames/GameMenuCheck.sav
+# by touch, and as on a phone with a camera cutout: the HUD is drawn inside a safe area (the engine's
+# r.DebugSafeZone.TitleRatio), so a touch is not where the canvas says a button is until the canvas's
+# place on the screen is taken off it
 Tools/run_game_check.sh Sennite.GameMenu OpensSetsAndLeaves GameMenuTouch -ProfileSlot=GameMenuCheck \
-  "-ini:Input:[/Script/Engine.InputSettings]:bAlwaysShowTouchInterface=True" "$SMOOTH" "$@"
+  "-ini:Input:[/Script/Engine.InputSettings]:bAlwaysShowTouchInterface=True" "$SMOOTH" \
+  "-ini:Engine:[SystemSettings]:r.DebugSafeZone.TitleRatio=0.85" "$@"

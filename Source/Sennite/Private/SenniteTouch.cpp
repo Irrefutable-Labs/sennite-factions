@@ -124,6 +124,10 @@ void USenniteTouchControls::Bind(APlayerController* InController)
 
 FVector2D USenniteTouchControls::ViewportSize() const
 {
+	// the canvas the controls are drawn on, once they have been: on a phone it is the screen's safe area
+	if (!DrawnSize.IsZero()) {
+		return DrawnSize;
+	}
 	FVector2D Size(1280.0, 720.0);
 	if (const ULocalPlayer* Local = Controller ? Controller->GetLocalPlayer() : nullptr) {
 		if (Local->ViewportClient != nullptr) {
@@ -423,11 +427,13 @@ void USenniteTouchControls::Run(bool bRun)
 	}
 }
 
-bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, const FVector2D& At)
+bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, const FVector2D& Screen)
 {
 	if (Controller == nullptr) {
 		return false;
 	}
+	// the touch on the canvas the controls are drawn on
+	const FVector2D At = Screen - DrawnOrigin;
 	const FVector2D Viewport = ViewportSize();
 	const float S = Viewport.Y / 720.0f;
 	FFinger* Finger = Fingers.FindByPredicate([&Id](const FFinger& Each) { return Each.Id == Id; });
@@ -454,7 +460,8 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 			}
 			else {
 				New.Use = EUse::Map;
-				TapMap(At);
+				// the map is the world's, seen through the whole screen
+				TapMap(Screen);
 			}
 			Fingers.Add(New);
 			return true;
@@ -555,25 +562,26 @@ void USenniteTouchControls::ReleaseAll()
 		return;
 	}
 	while (Fingers.Num() > 0) {
-		Touch(Fingers.Last().Id, ETouchType::Ended, Fingers.Last().Last);
+		Touch(Fingers.Last().Id, ETouchType::Ended, Fingers.Last().Last + DrawnOrigin);
 	}
 }
 
 bool USenniteTouchControls::Where(const FString& Name, const FVector2D& Viewport, FVector2D& OutCentre) const
 {
+	const FVector2D Size = DrawnSize.IsZero() ? Viewport : DrawnSize;
 	if (Name == TEXT("STICK")) {
-		OutCentre = StickRest(Viewport);
+		OutCentre = StickRest(Size) + DrawnOrigin;
 		return true;
 	}
 	for (const FButton& Button : Buttons()) {
 		if (Name == Button.Name) {
-			OutCentre = Centre(Button, Viewport);
+			OutCentre = Centre(Button, Size) + DrawnOrigin;
 			return true;
 		}
 	}
 	for (const FButton& Button : EditorButtons()) {
 		if (Name == Button.Name) {
-			OutCentre = Centre(Button, Viewport);
+			OutCentre = Centre(Button, Size) + DrawnOrigin;
 			return true;
 		}
 	}
@@ -590,7 +598,7 @@ bool USenniteTouchControls::WhereKey(const FKey& InKey, FVector2D& OutCentre) co
 	for (const FButton& Button : bPlanning ? EditorButtons() : Buttons()) {
 		// every button of the planning view is on the screen, a dimmed one too
 		if (Button.Key == InKey && (bPlanning || Shows(Button))) {
-			OutCentre = Centre(Button, Viewport);
+			OutCentre = Centre(Button, Viewport) + DrawnOrigin;
 			return true;
 		}
 	}
@@ -603,6 +611,8 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 	if (Canvas == nullptr || Controller == nullptr) {
 		return;
 	}
+	DrawnOrigin = SenniteUi::CanvasOrigin(Canvas);
+	DrawnSize = FVector2D(Canvas->ClipX, Canvas->ClipY);
 	if (Planning()) {
 		DrawEditor(Canvas);
 		return;
