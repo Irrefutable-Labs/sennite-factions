@@ -4,6 +4,11 @@
 // side can edit it, cutting tiles out for a door, a window or a hole and putting them back; the cut
 // tiles are gone for players and bullets alike. A piece shows what it has taken: its tiles are knocked
 // out of line, more the closer it is to falling, the same way on every machine.
+//
+// A piece stands only while something holds it up: the land or anything else solid that is not a
+// piece or a hero (a rock, a base's building), or a piece touching it that is itself held up. A piece
+// cannot be built with nothing to hold it, and when a piece falls every piece it alone was holding
+// falls a moment after it.
 
 #pragma once
 
@@ -107,6 +112,21 @@ public:
 
 	/** The tile, cut or not, a line from From along Way meets first within Reach, or INDEX_NONE; OutDistance is how far along the line. */
 	int32 TileUnderAim(const FVector& From, const FVector& Way, double Reach, double& OutDistance) const;
+
+	/** The box it fills, in the world. A ramp fills its whole build cell. */
+	FBox Fills() const;
+
+	/** Whether it touches anything solid that is not a piece or a hero: the land, a rock, a base's building. */
+	bool TouchesSolid() const;
+
+	/** The pieces something holds up: each one touching something solid, and each one touching a piece that is held. */
+	static TSet<const ABuildingActor*> HeldUp(UWorld* World);
+
+	/** Every piece nothing holds up falls. On the server. */
+	static void DropUnheld(UWorld* World);
+
+	/** How long after a piece falls the pieces it alone was holding fall. */
+	static constexpr float DropSeconds = 0.25f;
 
 	/** The strength of its material: what it starts with. */
 	float MaxHealth() const;

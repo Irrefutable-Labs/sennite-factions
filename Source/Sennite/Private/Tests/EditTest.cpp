@@ -1,10 +1,13 @@
 // Editing and damage check for built pieces. Run in the game on the test range, with the real keys and
-// mouse: the hero picks up the rifle, builds a wood wall and shoots it twice. The wall takes the
+// mouse: the hero takes the rifle from the range's crate, builds a wood wall and shoots it twice. The wall takes the
 // rifle's damage, the shooter sees the damage by the aim and the wall's health under it, and the
 // wall's tiles are knocked out of line. G edits the wall: the fire button marks the middle and bottom
 // middle tiles, G again cuts them out for everyone, a door. A shot through the door touches nothing,
-// and the hero walks through it. From the other side G and the aim button put every tile back; four
-// more rounds bring the wall down.
+// and the hero walks through it. From the other side G and the aim button put every tile back. Then
+// what holds a piece up: looking up, she builds a second wall on top of the first, which stands
+// because the first holds it; a wall one level up with nothing under it or beside it is not built
+// and costs nothing; four more rounds bring the first wall down, and the wall it was holding falls a
+// moment after it.
 //
 // Tools/check_editing.sh runs this and reads the result.
 
@@ -36,7 +39,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, Pickups, Rifle, WallPreview, WallBuilt, RifleBack, Shoot, EditStart, Mark, Confirmed, ShootHole, ToDoor, Through, TurnBack, Reset, Fell, Done };
+		enum class EPhase { WaitForPawn, OpenCrate, Rifle, WallPreview, WallBuilt, RifleBack, Shoot, EditStart, Mark, Confirmed, ShootHole, ToDoor, Through, TurnBack, Reset, Stack, Fell, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -98,11 +101,14 @@ namespace
 		EPhase Phase = EPhase::WaitForPawn;
 		double PhaseStart = 0.0;
 		int32 Step = 0;
+		GameCheck::FCrateRun Crate;
 		int32 Shots = 0;
 		int32 WoodBefore = 0;
 		bool bSawPieceHit = false;
 		FVector Ahead = FVector::XAxisVector;
 		ABuildingActor* Wall = nullptr;
+		TWeakObjectPtr<ABuildingActor> Upper;
+		bool bUpperStoodLonger = false;
 		GameCheck::FMouseTurn Turn;
 	};
 
@@ -119,27 +125,29 @@ namespace
 			}
 			// a run without a window starts with a stray mouse movement; begin from the view behind the hero
 			Controller->SetControlRotation(FRotator(-12.0, Hero->GetActorRotation().Yaw, 0.0));
-			// the rifle and the shotgun lie to her right
-			GameCheck::Key(Controller, EKeys::D, IE_Pressed);
-			Enter(EPhase::Pickups, World);
+			// the crate is to her right
+			Enter(EPhase::OpenCrate, World);
 			return false;
 		}
 		if (Hero == nullptr || State == nullptr) {
 			return Fail(TEXT("The hero went away during the check"));
 		}
 		// the last round may bring it down before the check moves on to see that it fell
+		bUpperStoodLonger |= Wall != nullptr && !IsValid(Wall) && Upper.IsValid();
 		if (Wall != nullptr && !IsValid(Wall) && Phase != EPhase::Fell && !(Phase == EPhase::Reset && Shots >= 4)) {
 			return Fail(TEXT("The wall went away before the check brought it down"));
 		}
 
 		switch (Phase) {
-		case EPhase::Pickups:
-			if (!State->EquippedWeapons.Contains(1) && Elapsed(World) < 6.0) {
+		case EPhase::OpenCrate:
+			if (!Crate.Step(World, Controller, Hero, EKeys::D)) {
 				return false;
 			}
-			GameCheck::Key(Controller, EKeys::D, IE_Released);
+			if (!Crate.Failure.IsEmpty()) {
+				return Fail(Crate.Failure);
+			}
 			if (!State->EquippedWeapons.Contains(1)) {
-				return Fail(TEXT("The hero did not pick up the rifle"));
+				return Fail(TEXT("The crate did not give the hero the rifle"));
 			}
 			Tap(Controller, EKeys::Two);
 			Enter(EPhase::Rifle, World);
@@ -394,9 +402,8 @@ namespace
 				Test->TestTrue(TEXT("The aim button ends the edit"), Hero->GetEditingPiece() == nullptr);
 				Test->TestEqual(TEXT("The aim button puts every tile back"), Wall->Cut, 0);
 				Test->TestEqual(TEXT("The whole wall shows again"), Wall->PieceMesh->GetInstanceCount(), 9);
-				Step = 2;
-				Shots = 0;
-				PhaseStart = World->GetTimeSeconds();
+				Tap(Controller, EKeys::X);
+				Enter(EPhase::Stack, World);
 				return false;
 			}
 			// four more rounds: 100 left, 25 a round
@@ -407,6 +414,10 @@ namespace
 				if (!AimAt(Controller, Hero, 4)) {
 					return Elapsed(World) > 10.0 ? Fail(TEXT("Could not aim at the wall from the other side")) : false;
 				}
+				if (Shots == 0) {
+					// both walls, the second standing on the first, before the first is brought down
+					GameCheck::Shot(TEXT("Editing"), TEXT("stacked.png"));
+				}
 				Tap(Controller, EKeys::LeftMouseButton);
 				++Shots;
 				PhaseStart = World->GetTimeSeconds();
@@ -415,18 +426,98 @@ namespace
 			Enter(EPhase::Fell, World);
 			return false;
 
-		case EPhase::Fell:
-			if (WallsStanding(World) > 0 && Elapsed(World) < 2.0) {
+		case EPhase::Stack: {
+			// in build mode, looking well up: the wall goes one level up
+			const FVector Eye = Controller->PlayerCameraManager->GetCameraLocation();
+			switch (Step) {
+			case 0:
+				// up at where a wall on top of the first would be
+				if (Elapsed(World) < 0.4 || !GameCheck::AimStep(Controller, Eye, Wall->GetActorLocation() + FVector(0.0, 0.0, ABuildingActor::Cell * 2.5), 0.5)) {
+					return Elapsed(World) > 12.0 ? Fail(TEXT("Could not look up at where the second wall goes")) : false;
+				}
+				WoodBefore = State->MaterialCounts[0];
+				Test->TestTrue(TEXT("Looking up, the wall preview is one level up, on the first wall"), Hero->BuildingPreview != nullptr
+					&& Hero->BuildingPreview->GetActorLocation().Equals(Wall->GetActorLocation() + FVector(0.0, 0.0, ABuildingActor::Cell), 1.0));
+				// the build button is read while it is held
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Pressed);
+				Step = 1;
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			case 1:
+				if (Elapsed(World) < 0.8) {
+					return false;
+				}
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
+				for (TActorIterator<ABuildingActor> It(World); It; ++It) {
+					if (!It->IsPreview && *It != Wall && It->StructureType == TEXT("Wall")) {
+						Upper = *It;
+					}
+				}
+				if (!Upper.IsValid()) {
+					return Fail(TEXT("The wall on top of the first was not built"));
+				}
+				Test->TestTrue(TEXT("The second wall is on top of the first"), Upper->GetActorLocation().Equals(Wall->GetActorLocation() + FVector(0.0, 0.0, ABuildingActor::Cell), 1.0));
+				Test->TestTrue(TEXT("The first wall stands on the ground"), Wall->TouchesSolid());
+				Test->TestFalse(TEXT("The second wall touches nothing but the first"), Upper->TouchesSolid());
+				Test->TestTrue(TEXT("The first wall holds the second up"), ABuildingActor::HeldUp(World).Contains(Upper.Get()));
+				Test->TestEqual(TEXT("The second wall is paid for"), State->MaterialCounts[0], WoodBefore - Hero->BuildingPieceCost);
+				WoodBefore = State->MaterialCounts[0];
+				Step = 2;
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			case 2:
+				// turned right round and still looking up: one level up on the far edge of her cell, where nothing is
+				if (!GameCheck::AimStep(Controller, Eye, Hero->GetActorLocation() + Ahead * 400.0 + FVector(0.0, 0.0, 1600.0), 0.5)) {
+					return Elapsed(World) > 12.0 ? Fail(TEXT("Could not look up and away from the walls")) : false;
+				}
+				Test->TestTrue(TEXT("The preview is one level up, away from both walls"), Hero->BuildingPreview != nullptr
+					&& Hero->BuildingPreview->GetActorLocation().Equals(Wall->GetActorLocation() + Ahead * ABuildingActor::Cell + FVector(0.0, 0.0, ABuildingActor::Cell), 1.0));
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Pressed);
+				Step = 3;
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			case 3:
+				if (Elapsed(World) < 0.8) {
+					return false;
+				}
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
+				Test->TestEqual(TEXT("A wall with nothing to hold it up is not built"), WallsStanding(World), 2);
+				Test->TestEqual(TEXT("and costs nothing"), State->MaterialCounts[0], WoodBefore);
+				UE_LOG(LogEditCheck, Display, TEXT("GAMECHECK support: a wall on a wall stands; a wall on nothing was not built; %d walls, wood %d"), WallsStanding(World), State->MaterialCounts[0]);
+				// X leaves build mode and the rifle comes back to hand
+				Tap(Controller, EKeys::X);
+				Step = 4;
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			default:
+				if (Elapsed(World) < 1.2) {
+					return false;
+				}
+				if (Hero->CurrentWeapon == nullptr || Hero->CurrentWeapon->WeaponType != 1) {
+					return Fail(TEXT("Leaving build mode did not bring the rifle back"));
+				}
+				Enter(EPhase::Reset, World);
+				Step = 2;
+				Shots = 0;
 				return false;
 			}
-			Test->TestEqual(TEXT("The wall falls when it has taken its strength"), WallsStanding(World), 0);
+		}
+
+		case EPhase::Fell:
+			// the first wall goes at once; the one it was holding stands a moment longer, then falls
+			if (WallsStanding(World) > 0 && Elapsed(World) < 3.0) {
+				return false;
+			}
+			Test->TestEqual(TEXT("The wall falls when it has taken its strength, and the wall it held with it"), WallsStanding(World), 0);
+			Test->TestTrue(TEXT("The wall it held fell a moment after it, not with it"), bUpperStoodLonger);
 			{
 				int32 Pieces = 0;
 				for (TActorIterator<ASennitePieceRubble> It(World); It; ++It) {
 					Pieces += It->Tiles->GetInstanceCount();
 				}
-				Test->TestEqual(TEXT("The fallen wall breaks into its nine tiles"), Pieces, 9);
+				Test->TestEqual(TEXT("Both fallen walls break into their nine tiles"), Pieces, 18);
 			}
+			UE_LOG(LogEditCheck, Display, TEXT("GAMECHECK support: the wall shot down took the wall it held with it, a moment after"));
 			GameCheck::Shot(TEXT("Editing"), TEXT("fallen.png"));
 			UE_LOG(LogEditCheck, Display, TEXT("GAMECHECK finished"));
 			Phase = EPhase::Done;

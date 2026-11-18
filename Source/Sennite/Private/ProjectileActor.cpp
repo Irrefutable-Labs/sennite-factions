@@ -16,6 +16,9 @@
 #include "Engine/Engine.h"
 #include "Net/UnrealNetwork.h"
 #include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 // Sets default values
 AProjectileActor::AProjectileActor()
@@ -23,8 +26,10 @@ AProjectileActor::AProjectileActor()
  	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
-	/*MeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComp"));
-	RootComponent = MeshComp;*/
+	// The server flies the bullet; every machine is sent it and flies its own copy from where it
+	// started, so the bolt is seen leaving the gun and travelling.
+	bReplicates = true;
+	SetReplicatingMovement(true);
 
 	CollisionComp = CreateDefaultSubobject<USphereComponent>(TEXT("SphereComp"));
 	CollisionComp->InitSphereRadius(5.0f);
@@ -38,6 +43,43 @@ AProjectileActor::AProjectileActor()
 	/*ProjectileMovementComponent->InitialSpeed = ProjectileSpeed;
 	ProjectileMovementComponent->MaxSpeed = ProjectileSpeed;*/
 	ProjectileMovementComponent->bRotationFollowsVelocity = true;
+
+	Bolt = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Bolt"));
+	Bolt->SetupAttachment(CollisionComp);
+	Bolt->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Bolt->SetGenerateOverlapEvents(false);
+	Bolt->SetCastShadow(false);
+	Bolt->SetCanEverAffectNavigation(false);
+}
+
+void AProjectileActor::PreInitializeComponents()
+{
+	Super::PreInitializeComponents();
+	// what a bolt is made of is one setting, held by the base class
+	const AProjectileActor* Shared = GetDefault<AProjectileActor>();
+	if (UStaticMesh* Shape = Cast<UStaticMesh>(Shared->BoltShape.TryLoad())) {
+		Bolt->SetStaticMesh(Shape);
+	}
+	else {
+		UE_LOG(LogTemp, Error, TEXT("Bolt shape '%s' did not load: bullets cannot be seen"), *Shared->BoltShape.ToString());
+	}
+	if (UMaterialInterface* Face = Cast<UMaterialInterface>(Shared->BoltMaterial.TryLoad())) {
+		if (UMaterialInstanceDynamic* Coloured = Bolt->CreateDynamicMaterialInstance(0, Face)) {
+			Coloured->SetVectorParameterValue(TEXT("Color"), BoltColour);
+		}
+	}
+	else {
+		UE_LOG(LogTemp, Error, TEXT("Bolt material '%s' did not load"), *Shared->BoltMaterial.ToString());
+	}
+	LayBolt();
+}
+
+void AProjectileActor::LayBolt()
+{
+	// a streak behind the bullet, no longer than the bullet has flown: it never reaches back through the gun
+	const float Length = FMath::Clamp(Flown, BoltWidth, BoltLength);
+	Bolt->SetRelativeLocation(FVector(-Length * 0.5f, 0.0f, 0.0f));
+	Bolt->SetRelativeScale3D(FVector(Length, BoltWidth, BoltWidth) / 100.0f);
 }
 
 // Called when the game starts or when spawned
@@ -56,7 +98,8 @@ void AProjectileActor::BeginPlay()
 void AProjectileActor::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, "projectile tick tick");
+	Flown += ProjectileMovementComponent->Velocity.Size() * DeltaTime;
+	LayBolt();
 }
 
 void AProjectileActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult) {

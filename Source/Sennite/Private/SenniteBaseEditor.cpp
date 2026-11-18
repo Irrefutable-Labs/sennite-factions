@@ -9,6 +9,7 @@
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
+#include "SenniteUi.h"
 #include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -840,8 +841,9 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 	}
 	// every size is for a screen 720 lines high and scales with the screen, phone or desktop
 	const float S = Canvas->ClipY / 720.0f;
-	const float Left = 24.0f * S;
-	float Y = 20.0f * S;
+	// the panel's text starts clear of the screen's corner, so its plate and gold edge are whole
+	const float Left = 38.0f * S;
+	float Y = 32.0f * S;
 	const FLinearColor White = FLinearColor::White;
 	const FLinearColor Dim(1.0f, 1.0f, 1.0f, 0.7f);
 	const FLinearColor Good(0.45f, 0.95f, 0.45f);
@@ -869,24 +871,25 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 		Editor->LastDrawn.Add(FString::Printf(TEXT("%s=%s"), Name, *Text));
 	};
 	auto Draw = [&]() {
+		// the panel is as tall and as wide as what it holds; its first line is its title, over a gold rule
 		float Height = 0.0f, Width = 0.0f;
 		for (const FPanelLine& One : Lines) {
-			const float High = One.Points * 1.4f * S;
-			float TextWidth = 0.0f, TextHeight = 0.0f;
-			Canvas->TextSize(Font, One.Text, TextWidth, TextHeight, High / FMath::Max(1.0f, Font->GetMaxCharHeight()), High / FMath::Max(1.0f, Font->GetMaxCharHeight()));
-			Width = FMath::Max(Width, TextWidth);
-			Height += High * 1.25f;
+			const FVector2D Size = SenniteUi::Measure(One.Text, One.Points, S);
+			Width = FMath::Max(Width, float(Size.X));
+			Height += One.Points * 1.4f * S * 1.3f;
 		}
-		FCanvasTileItem Plate(FVector2D(Left - 10.0f * S, Y - 8.0f * S), FVector2D(Width + 20.0f * S, Height + 12.0f * S), FLinearColor(0.0f, 0.0f, 0.0f, 0.6f));
-		Plate.BlendMode = SE_BLEND_Translucent;
-		Canvas->DrawItem(Plate);
-		for (const FPanelLine& One : Lines) {
-			const float High = One.Points * 1.4f * S;
-			FCanvasTextItem Item(FVector2D(Left, Y), FText::FromString(One.Text), Font, One.Colour);
-			Item.Scale = FVector2D(High / FMath::Max(1.0f, Font->GetMaxCharHeight()));
-			Item.EnableShadow(FLinearColor(0.0f, 0.0f, 0.0f, 0.8f));
-			Canvas->DrawItem(Item);
-			Y += High * 1.25f;
+		const float Pad = 18.0f * S;
+		const float Rule = 10.0f * S;
+		const FBox2D Box(FVector2D(Left - Pad, Y - Pad * 0.8f), FVector2D(Left + Width + Pad * 1.4f, Y + Height + Rule + Pad * 0.6f));
+		SenniteUi::Panel(Canvas, Box, S);
+		for (int32 Index = 0; Index < Lines.Num(); ++Index) {
+			const FPanelLine& One = Lines[Index];
+			SenniteUi::Text(Canvas, One.Text, Left, Y, One.Points, S, One.Colour);
+			Y += One.Points * 1.4f * S * 1.3f;
+			if (Index == 0) {
+				SenniteUi::Plate(Canvas, FBox2D(FVector2D(Left, Y + 1.0f * S), FVector2D(Left + 84.0f * S, Y + 3.5f * S)), 0.0f, SenniteUi::Gold, SenniteUi::Gold);
+				Y += Rule;
+			}
 		}
 	};
 

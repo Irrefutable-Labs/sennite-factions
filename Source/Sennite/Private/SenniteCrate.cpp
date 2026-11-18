@@ -3,8 +3,6 @@
 #include "SenniteArena.h"
 #include "SenniteCharacter.h"
 #include "SenniteHealing.h"
-#include "SennitePlayerState.h"
-#include "SenniteWeapons.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -30,11 +28,17 @@ void ASenniteCrate::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ASenniteCrate, bOpen);
+	DOREPLIFETIME(ASenniteCrate, bLeft);
 }
 
 void ASenniteCrate::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
+	// a crate holds everything: both weapons, rounds for both, a pack of bandages and of potions
+	Rounds = RifleRounds;
+	Shells = ShotgunShells;
+	Bandages = GetDefault<ASenniteBandage>()->Count;
+	Potions = GetDefault<ASennitePotion>()->Count;
 	UStaticMesh* Mesh = Cast<UStaticMesh>(Model.TryLoad());
 	const FVector Extent = Mesh != nullptr ? Mesh->GetBoundingBox().GetSize() : FVector::ZeroVector;
 	const bool bLongX = Extent.X >= Extent.Y;
@@ -56,31 +60,29 @@ void ASenniteCrate::PostInitializeComponents()
 	Body->SetRelativeLocation(-Turn.RotateVector(FVector(Box.GetCenter().X, Box.GetCenter().Y, Box.Min.Z) * Scale));
 }
 
+void ASenniteCrate::BeginPlay()
+{
+	Super::BeginPlay();
+	if (bLeft) {
+		// heroes walk through the crate a fallen hero left: it may lie on a bridge
+		Body->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	}
+}
+
 bool ASenniteCrate::Open(ASenniteCharacter* By)
 {
 	if (!HasAuthority() || bOpen || By == nullptr || FVector::Dist(By->GetActorLocation(), GetActorLocation()) > Reach + Across) {
 		return false;
 	}
-	bOpen = true;
-	// the weapons lie in front of it, at the height a hero's hands pass
-	const FVector Front = GetActorLocation() + GetActorForwardVector() * (Size.Y * 0.5 + 90.0) + FVector(0.0, 0.0, 60.0);
-	const FVector Side = GetActorRightVector() * 45.0;
-	FActorSpawnParameters Spawn;
-	Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	Laid.Reset();
-	Laid.Add(GetWorld()->SpawnActor<ASenniteRifle>(Front - Side, GetActorRotation(), Spawn));
-	Laid.Add(GetWorld()->SpawnActor<ASenniteShotgun>(Front + Side, GetActorRotation(), Spawn));
-	// and a pack of bandages and potions, one at each end of it, out of the way to the weapons
-	const FVector End = GetActorRightVector() * (Size.X * 0.5 + 70.0);
-	Laid.Add(GetWorld()->SpawnActor<ASenniteBandage>(GetActorLocation() - End + FVector(0.0, 0.0, 60.0), GetActorRotation(), Spawn));
-	Laid.Add(GetWorld()->SpawnActor<ASennitePotion>(GetActorLocation() + End + FVector(0.0, 0.0, 60.0), GetActorRotation(), Spawn));
-	// the rounds go to the hero who opened it
-	if (ASennitePlayerState* State = By->GetPlayerState<ASennitePlayerState>()) {
-		if (State->EquippedWeaponsAmmunition.IsValidIndex(2)) {
-			State->EquippedWeaponsAmmunition[1] += RifleRounds;
-			State->EquippedWeaponsAmmunition[2] += ShotgunShells;
-		}
+	// what it holds goes straight to the hero who opened it
+	if (!By->TakeFromCrate(bRifle, bShotgun, Rounds, Shells, Bandages, Potions)) {
+		return false;
 	}
+	if (bLeft) {
+		Destroy();
+		return true;
+	}
+	bOpen = true;
 	if (RestockSeconds > 0.0f) {
 		FTimerHandle Filling;
 		GetWorldTimerManager().SetTimer(Filling, this, &ASenniteCrate::Restock, RestockSeconds, false);
@@ -90,16 +92,38 @@ bool ASenniteCrate::Open(ASenniteCharacter* By)
 
 void ASenniteCrate::Restock()
 {
-	// what nobody took is gone; what someone took is theirs
-	for (const TWeakObjectPtr<AActor>& Each : Laid) {
-		const AWeaponActor* Weapon = Cast<AWeaponActor>(Each.Get());
-		const AHealingActor* Item = Cast<AHealingActor>(Each.Get());
-		if ((Weapon != nullptr && Weapon->Holder == nullptr) || (Item != nullptr && Item->Holder == nullptr)) {
-			Each->Destroy();
-		}
-	}
-	Laid.Reset();
 	bOpen = false;
+}
+
+ASenniteCrate* ASenniteCrate::Leave(UWorld* World, const AActor* Fallen, bool bHadRifle, bool bHadShotgun)
+{
+	if (World == nullptr || Fallen == nullptr || World->GetNetMode() == NM_Client || (!bHadRifle && !bHadShotgun)) {
+		return nullptr;
+	}
+	// on the ground under where the hero fell: the land, or what is built there
+	const FVector Fell = Fallen->GetActorLocation();
+	const double Yaw = Fallen->GetActorRotation().Yaw;
+	FHitResult Ground;
+	FCollisionQueryParams Past(SCENE_QUERY_STAT(SenniteCrateLeave), false, Fallen);
+	if (!World->LineTraceSingleByChannel(Ground, Fell, Fell - FVector(0.0, 0.0, 3000.0), ECC_Visibility, Past)) {
+		return nullptr;
+	}
+	ASenniteCrate* Crate = World->SpawnActorDeferred<ASenniteCrate>(ASenniteCrate::StaticClass(), FTransform(FRotator(0.0, Yaw, 0.0), Ground.ImpactPoint),
+		nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (Crate == nullptr) {
+		return nullptr;
+	}
+	Crate->bLeft = true;
+	Crate->FinishSpawning(FTransform(FRotator(0.0, Yaw, 0.0), Ground.ImpactPoint));
+	// the weapons the hero had, as new, and nothing else
+	Crate->bRifle = bHadRifle;
+	Crate->bShotgun = bHadShotgun;
+	Crate->Rounds = 0;
+	Crate->Shells = 0;
+	Crate->Bandages = 0;
+	Crate->Potions = 0;
+	Crate->SetLifeSpan(FMath::Max(1.0f, Crate->LeftSeconds));
+	return Crate;
 }
 
 ASenniteCrate* ASenniteCrate::Nearest(const UWorld* World, const FVector& From, float Within, bool bClosed)

@@ -12,8 +12,8 @@ AWeaponActor::AWeaponActor()
 	PrimaryActorTick.bCanEverTick = true;
 	bReplicates = true;
 
-	// Lying in the world a weapon is picked up by walking over it, and bullets pass through it:
-	// it overlaps everything and blocks nothing, and neither aim traces nor the camera see it.
+	// A weapon is in a hero's hand or not in the world at all (weapons come out of crates): it
+	// overlaps everything and blocks nothing, and neither aim traces nor the camera see it.
 	WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Weapon"));
 	RootComponent = WeaponMesh;
 	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);

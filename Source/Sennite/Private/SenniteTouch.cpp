@@ -1,6 +1,7 @@
 // The touch controls: see SenniteTouch.h.
 
 #include "SenniteTouch.h"
+#include "SenniteUi.h"
 #include "CanvasItem.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
@@ -631,13 +632,9 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 			Canvas->DrawItem(Line);
 		}
 	};
-	auto Text = [Canvas, Font, S](const FVector2D& At, const FString& Words, int32 Points, const FLinearColor& Colour) {
-		FCanvasTextItem Item(At, FText::FromString(Words), Font, Colour);
-		Item.Scale = FVector2D(Points * 1.4f * S / FMath::Max(1.0f, Font->GetMaxCharHeight()));
-		Item.bCentreX = true;
-		Item.bCentreY = true;
-		Item.EnableShadow(FLinearColor(0.0f, 0.0f, 0.0f, 0.8f));
-		Canvas->DrawItem(Item);
+	// a button's word, set crisp and centred on it, as the menus' text is (SenniteUi)
+	auto Text = [Canvas, S](const FVector2D& At, const FString& Words, int32 Points, const FLinearColor& Colour) {
+		SenniteUi::Text(Canvas, Words, At.X, At.Y - SenniteUi::Measure(Words, Points, S).Y * 0.5f, Points, S, Colour, 0.5f);
 	};
 
 	// the stick: where it rests until a thumb comes down on the left, then under the thumb
@@ -678,13 +675,10 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 		const FString Label = LabelOf(Button);
 		if (Button.bSlot) {
 			const FVector2D Half(Button.Radius * S, SlotHalfHeight * S);
-			FCanvasTileItem Box(At - Half, Half * 2.0, Fill);
-			Box.BlendMode = SE_BLEND_Translucent;
-			Canvas->DrawItem(Box);
-			FCanvasBoxItem Outline(At - Half, Half * 2.0);
-			Outline.SetColor(Edge);
-			Outline.LineThickness = 2.0f * S;
-			Canvas->DrawItem(Outline);
+			// a slot is a small plate with cut corners, its edge gold while what it names is in hand
+			const FBox2D Slot(At - Half, At + Half);
+			SenniteUi::Plate(Canvas, Slot, 6.0f * S, Fill, Fill);
+			SenniteUi::Outline(Canvas, Slot, 6.0f * S, bInHand ? SenniteUi::Gold : Edge, FMath::Max(1.0f, 1.5f * S));
 			Text(At, Label, 9, bHave ? FLinearColor::White : Dim);
 		}
 		else {
@@ -700,16 +694,6 @@ void USenniteTouchControls::DrawEditor(UCanvas* Canvas)
 {
 	const FVector2D Viewport(Canvas->ClipX, Canvas->ClipY);
 	const float S = Canvas->ClipY / 720.0f;
-	UFont* Font = GEngine->GetLargeFont();
-	if (Font == nullptr) {
-		return;
-	}
-	const FLinearColor Rest(0.0f, 0.0f, 0.0f, 0.55f);
-	const FLinearColor Off(0.0f, 0.0f, 0.0f, 0.25f);
-	const FLinearColor Held(1.0f, 1.0f, 1.0f, 0.35f);
-	const FLinearColor Edge(1.0f, 1.0f, 1.0f, 0.55f);
-	const FLinearColor EdgeOff(1.0f, 1.0f, 1.0f, 0.2f);
-	const FLinearColor Dim(1.0f, 1.0f, 1.0f, 0.35f);
 	const TArray<FButton>& Cells = EditorButtons();
 	for (int32 Index = 0; Index < Cells.Num(); ++Index) {
 		const FButton& Button = Cells[Index];
@@ -717,20 +701,11 @@ void USenniteTouchControls::DrawEditor(UCanvas* Canvas)
 		const bool bDown = Fingers.ContainsByPredicate([Index](const FFinger& Each) { return Each.Use == EUse::EditorButton && Each.Button == Index; });
 		const FVector2D At = Centre(Button, Viewport);
 		const FVector2D Half(CellHalfWidth * S, CellHalfHeight * S);
-		FCanvasTileItem Box(At - Half, Half * 2.0, bDown ? Held : bLive ? Rest : Off);
-		Box.BlendMode = SE_BLEND_Translucent;
-		Canvas->DrawItem(Box);
-		FCanvasBoxItem Outline(At - Half, Half * 2.0);
-		Outline.SetColor(bLive ? Edge : EdgeOff);
-		Outline.LineThickness = 2.0f * S;
-		Canvas->DrawItem(Outline);
+		// a cell is a menu button: pressed while a finger is on it, faint while it does nothing
+		const FLinearColor Ink = SenniteUi::ButtonPlate(Canvas, FBox2D(At - Half, At + Half), S,
+			!bLive ? SenniteUi::EButton::Disabled : bDown ? SenniteUi::EButton::Pressed : SenniteUi::EButton::Plain);
 		const FString Label = EditorLabel(Button);
-		FCanvasTextItem Item(At, FText::FromString(Label), Font, bLive ? FLinearColor::White : Dim);
-		Item.Scale = FVector2D(9 * 1.4f * S / FMath::Max(1.0f, Font->GetMaxCharHeight()));
-		Item.bCentreX = true;
-		Item.bCentreY = true;
-		Item.EnableShadow(FLinearColor(0.0f, 0.0f, 0.0f, 0.8f));
-		Canvas->DrawItem(Item);
+		SenniteUi::Text(Canvas, Label, At.X, At.Y - SenniteUi::Measure(Label, 9, S).Y * 0.5f, 9, S, Ink, 0.5f);
 		LastDrawn.Add(FString::Printf(TEXT("%s=%s%s"), Button.Name, *Label, bLive ? TEXT("") : TEXT(" (off)")));
 	}
 }

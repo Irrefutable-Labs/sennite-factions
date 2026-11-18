@@ -13,8 +13,8 @@ AHealingActor::AHealingActor()
 	PrimaryActorTick.bCanEverTick = true;
 	bReplicates = true;
 
-	// Lying in the world an item is picked up by walking over it: it overlaps everything and blocks
-	// nothing, and neither aim traces nor the camera see it.
+	// An item is in a hero's hand or not in the world at all (packs come out of crates): it overlaps
+	// everything and blocks nothing, and neither aim traces nor the camera see it.
 	ItemMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Item"));
 	RootComponent = ItemMesh;
 	ItemMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);

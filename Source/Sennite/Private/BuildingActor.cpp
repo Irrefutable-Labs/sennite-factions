@@ -3,13 +3,27 @@
 #include "BuildingActor.h"
 #include "Net/UnrealNetwork.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Engine/OverlapResult.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
 #include "Materials/MaterialInterface.h"
 #include "Math/RandomStream.h"
 #include "SenniteCharacter.h"
 #include "SenniteMatch.h"
 #include "SennitePlayerState.h"
+#include "TimerManager.h"
+
+namespace
+{
+	/** How near two things must be to count as touching: pieces sit on a grid, so they touch or are far apart. */
+	constexpr double TouchSlack = 6.0;
+
+	/** While the pieces nothing holds are falling: their going asks for no second look. */
+	bool bDropping = false;
+}
 
 ABuildingActor::ABuildingActor()
 {
@@ -157,6 +171,101 @@ int32 ABuildingActor::TileUnderAim(const FVector& From, const FVector& Way, doub
 	return Tile;
 }
 
+FBox ABuildingActor::Fills() const
+{
+	const double Half = Cell * 0.5;
+	FBox Own;
+	if (StructureType == TEXT("Wall")) {
+		Own = FBox(FVector(-Half, -Thickness * 0.5, 0.0), FVector(Half, Thickness * 0.5, Cell));
+	}
+	else if (StructureType == TEXT("Ramp")) {
+		Own = FBox(FVector(-Half, -Half, 0.0), FVector(Half, Half, Cell));
+	}
+	else {
+		Own = FBox(FVector(-Half, -Half, -Thickness), FVector(Half, Half, 0.0));
+	}
+	return Own.TransformBy(GetActorTransform());
+}
+
+bool ABuildingActor::TouchesSolid() const
+{
+	const UWorld* World = GetWorld();
+	if (World == nullptr) {
+		return false;
+	}
+	const FBox Box = Fills().ExpandBy(TouchSlack);
+	FCollisionObjectQueryParams Things;
+	Things.AddObjectTypesToQuery(ECC_WorldStatic);
+	Things.AddObjectTypesToQuery(ECC_WorldDynamic);
+	TArray<FOverlapResult> Found;
+	World->OverlapMultiByObjectType(Found, Box.GetCenter(), FQuat::Identity, Things, FCollisionShape::MakeBox(Box.GetExtent()),
+		FCollisionQueryParams(SCENE_QUERY_STAT(SennitePieceHeld), false, this));
+	for (const FOverlapResult& Each : Found) {
+		const AActor* Thing = Each.GetActor();
+		const UPrimitiveComponent* Part = Each.GetComponent();
+		// solid is what a hero cannot walk through; a piece holds a piece only if it is held itself (HeldUp)
+		if (Thing != nullptr && Part != nullptr && !Thing->IsA<ABuildingActor>() && !Thing->IsA<APawn>()
+			&& Part->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Block) {
+			return true;
+		}
+	}
+	return false;
+}
+
+TSet<const ABuildingActor*> ABuildingActor::HeldUp(UWorld* World)
+{
+	TSet<const ABuildingActor*> Held;
+	if (World == nullptr) {
+		return Held;
+	}
+	TArray<const ABuildingActor*> Pieces;
+	TArray<FBox> Boxes;
+	for (TActorIterator<ABuildingActor> It(World); It; ++It) {
+		if (!It->IsPreview && !It->IsActorBeingDestroyed()) {
+			Pieces.Add(*It);
+			Boxes.Add(It->Fills().ExpandBy(TouchSlack));
+		}
+	}
+	// from the pieces that touch something solid, outward through the pieces touching them
+	TArray<int32> Reached;
+	for (int32 Each = 0; Each < Pieces.Num(); ++Each) {
+		if (Pieces[Each]->TouchesSolid()) {
+			Held.Add(Pieces[Each]);
+			Reached.Add(Each);
+		}
+	}
+	while (Reached.Num() > 0) {
+		const int32 From = Reached.Pop(EAllowShrinking::No);
+		for (int32 Each = 0; Each < Pieces.Num(); ++Each) {
+			if (!Held.Contains(Pieces[Each]) && Boxes[From].Intersect(Boxes[Each])) {
+				Held.Add(Pieces[Each]);
+				Reached.Add(Each);
+			}
+		}
+	}
+	return Held;
+}
+
+void ABuildingActor::DropUnheld(UWorld* World)
+{
+	if (World == nullptr || World->GetNetMode() == NM_Client || World->bIsTearingDown || bDropping) {
+		return;
+	}
+	const TSet<const ABuildingActor*> Held = HeldUp(World);
+	TArray<ABuildingActor*> Falling;
+	for (TActorIterator<ABuildingActor> It(World); It; ++It) {
+		if (!It->IsPreview && !It->IsActorBeingDestroyed() && !Held.Contains(*It)) {
+			Falling.Add(*It);
+		}
+	}
+	// what is left standing was held without them, so one look is enough
+	TGuardValue<bool> Once(bDropping, true);
+	for (ABuildingActor* Piece : Falling) {
+		Piece->Health = 0.0f;
+		Piece->Destroy();
+	}
+}
+
 float ABuildingActor::MaxHealth() const
 {
 	const ABuildingActor* Shared = GetDefault<ABuildingActor>();
@@ -292,6 +401,14 @@ void ABuildingActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		if (ASennitePieceRubble* Rubble = GetWorld()->SpawnActor<ASennitePieceRubble>(GetActorLocation(), FRotator::ZeroRotator, Params)) {
 			Rubble->Scatter(PieceMesh->GetStaticMesh(), PieceMesh->GetMaterial(0), Laid, GetTypeHash(FIntVector(GetActorLocation() / 10.0)));
 		}
+	}
+	// a piece gone from the server: a moment later, what it alone was holding falls
+	UWorld* World = GetWorld();
+	if (EndPlayReason == EEndPlayReason::Destroyed && !IsPreview && !bDropping && World != nullptr && World->GetNetMode() != NM_Client && !World->bIsTearingDown) {
+		FTimerHandle Settling;
+		World->GetTimerManager().SetTimer(Settling, FTimerDelegate::CreateLambda([Where = TWeakObjectPtr<UWorld>(World)]() {
+			ABuildingActor::DropUnheld(Where.Get());
+		}), DropSeconds, false);
 	}
 	Super::EndPlay(EndPlayReason);
 }

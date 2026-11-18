@@ -1,8 +1,9 @@
 #!/bin/zsh
 # Two checks of a match that need one game and no accounts (Source/Sennite/Private/Tests/MatchTest.cpp):
 #   how a match ends, held against the rules on their own (kills to win, the time, a base wiped);
-#   a weapon crate on the arena: the hero opens it with the real key, takes the rifle it lays out,
-#   shoots and reloads with the rounds it gave, and the crate is closed and full again later.
+#   a weapon crate on the arena: the hero opens it with the real key and has what it held (the rifle
+#   in hand, nothing laid on the ground), shoots and reloads with the rounds it gave, and later the
+#   crate is closed and full again and opens again for rounds and packs but no second rifle.
 # A whole match, with the publisher's match server and two players' games, is run by
 # Tools/check_base_editor.sh, which has the accounts it needs.
 # Exit status 0 only if both passed.

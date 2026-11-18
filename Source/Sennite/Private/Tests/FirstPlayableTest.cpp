@@ -13,6 +13,7 @@
 #include "GameCheck.h"
 #include "SenniteCharacter.h"
 #include "SenniteHeroes.h"
+#include "StormActor.h"
 #include "Animation/AnimInstance.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -114,6 +115,19 @@ namespace
 			Test->TestEqual(TEXT("The mesh is the hero's, named in DefaultGame.ini"), FSoftObjectPath(Body).ToString(), Chosen.Mesh.ToString());
 			Test->TestEqual(TEXT("The animation class is the hero's own, named in DefaultGame.ini"), FSoftClassPath(Anim->GetClass()).ToString(), Chosen.AnimClass.ToString());
 			Test->TestTrue(TEXT("The test range has a sky dome with a sky material, which a phone needs to draw the sky"), GameCheck::HasSkyDome(World));
+			{
+				// the game has no storm for now: the one placed on the range is not seen and is nobody's
+				int32 Placed = 0, Seen = 0;
+				for (TActorIterator<AStormActor> It(World); It; ++It) {
+					++Placed;
+					Seen += It->IsHidden() ? 0 : 1;
+				}
+				Test->TestTrue(TEXT("The test range has a storm placed on it"), Placed > 0);
+				Test->TestEqual(TEXT("With the storm off, the storm placed on the range is not seen"), Seen, 0);
+				Test->TestTrue(TEXT("With the storm off, the game finds no storm"), AStormActor::Find(World) == nullptr);
+				Test->TestTrue(TEXT("With the storm off, the hero has no storm to be hurt by"), Hero->CurrentStorm == nullptr);
+				UE_LOG(LogFirstPlayable, Display, TEXT("GAMECHECK storm off: %d placed, %d seen, the hero's storm %s"), Placed, Seen, Hero->CurrentStorm == nullptr ? TEXT("none") : TEXT("set"));
+			}
 
 			const TArray<FSkeletalMaterial>& Shipped = Body->GetMaterials();
 			int32 Changed = 0;

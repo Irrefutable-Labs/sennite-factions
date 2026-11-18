@@ -36,7 +36,7 @@ class ASenniteCharacter : public ACharacter
 	UCapsuleComponent* TriggerCapsule;
 
 public:
-	ASenniteCharacter();
+	ASenniteCharacter(const FObjectInitializer& ObjectInitializer);
 
 	/** Base turn rate, in deg/sec. Other scaling may affect final turn rate. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=Camera)
@@ -118,12 +118,25 @@ public:
 	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FVector HeroItemPalmOffset;
 
-	/** The hero's own firing animation, played for every shot. None for a hero that ships with none. */
-	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
-	FSoftObjectPath HeroFireMontage;
-
 	/** Fix a weapon to the hero's weapon bone, at the weapon's own grip. */
 	void AttachWeaponToHand(AWeaponActor* Weapon);
+
+	/** With a gun in hand, how far the player's camera moves from straight behind the hero: to the right and up, to look over its shoulder. */
+	UPROPERTY(EditDefaultsOnly, Category = "Camera")
+	FVector ShoulderView = FVector(0.0f, 60.0f, 35.0f);
+
+	/** How much larger than its model a gun is in this hero's hands: the hero's arm against GunArm, between GunSizeLeast and GunSizeMost. */
+	float GunSize() const;
+
+	/** The arm, shoulder to wrist in cm, the guns' models are the right size for; and how small and how large a gun is made for a hero. */
+	UPROPERTY(EditDefaultsOnly, Category = "Hero")
+	float GunArm = 55.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Hero")
+	float GunSizeLeast = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Hero")
+	float GunSizeMost = 2.2f;
 
 	/** What this player last told the server about moving and running: -1, 0 or 1 once told. */
 	int32 LastForwardSent = MAX_int32;
@@ -145,18 +158,6 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Skin")
 	TArray<UMaterialInstance*> SkinMaterialInstances;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Shooting")
-	UAnimMontage* RifleHipShootingAnimation;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Shooting")
-	UAnimMontage* RifleIronsightsShootingAnimation;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Shooting")
-	UAnimMontage* ShotgunHipShootingAnimation;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Shooting")
-	UAnimMontage* ShotgunIronsightsShootingAnimation;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Pickaxe")
 	UAnimMontage* PickaxeSwingingAnimation;
@@ -233,6 +234,16 @@ public:
 	/** The server refused an edit: show the piece as it is. */
 	UFUNCTION(Client, Reliable)
 	void ClientEditRefused(ABuildingActor* Piece);
+
+	/**
+	 * What a crate held goes to the hero, on the server: each weapon it does not have yet, with a full
+	 * magazine, the rounds, the bandages and the potions. The first new weapon comes to hand. False,
+	 * and nothing is given, while the hero is busy (building, firing, reloading, healing).
+	 */
+	bool TakeFromCrate(bool bRifle, bool bShotgun, int32 Rounds, int32 Shells, int32 Bandages, int32 Potions);
+
+	/** A shot left the gun in hand: it kicks. */
+	void KickGun();
 
 	/** A shot of this player's took damage off a built piece. */
 	UFUNCTION(Client, Reliable)
@@ -436,6 +447,10 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void ServerOpenCrate();
 
+	/** What a crate this player opened gave, for the HUD to say. */
+	UFUNCTION(Client, Reliable)
+	void ClientCrateGave(bool bRifle, bool bShotgun, int32 Rounds, int32 Shells, int32 Bandages, int32 Potions);
+
 
 	/*UFUNCTION(Server, WithValidation)
 	void ServerSetAnimInstance(UThirdPersonAnimInstance* AnimInstance);*/
@@ -479,8 +494,6 @@ public:
 	// Tick function is called every frame
 	virtual void Tick(float DeltaTime) override;
 
-	/** How long since the hero was last offered what it stands on. On the server. */
-	float SincePickupOffer = 0.0f;
 	// Override playanimmontage to use pawn mesh
 	virtual float PlayAnimMontage(class UAnimMontage* AnimMontage, float InPlayRate = 1.f, FName StartSectionName = NAME_None) override;
 
@@ -741,13 +754,11 @@ public:
 	void OnRepSetSkin();
 
 private:
-	/** Dress the character as HeroId's hero: the mesh, its animation Blueprint, its firing animation, its capsule and its hands. */
+	/** Dress the character as HeroId's hero: the mesh, its animation Blueprint, its capsule and its hands. */
 	void ApplyHero();
 
-	/** The hero the character was last dressed as, and the firing animation that gave it. */
+	/** The hero the character was last dressed as. */
 	FName DressedHero;
-	UPROPERTY()
-	TObjectPtr<UAnimMontage> DressedFire;
 
 	// Object creation can only happen after the character has finished being constructed
 	virtual void BeginPlay() override;

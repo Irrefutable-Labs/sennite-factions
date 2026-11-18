@@ -1,5 +1,8 @@
 // The storm: a circle of safe ground that shrinks in steps. A player standing inside the circle is
 // safe; outside it the player loses Damage health every second (ASenniteCharacter::ServerApplyStormDamage).
+//
+// The game has no storm for now: bEnabled is off in DefaultGame.ini. With it off a storm placed in a
+// map is not seen, is never started and hurts nobody; the storm check turns it on for its own run.
 
 #pragma once
 
@@ -43,6 +46,13 @@ public:
 	/** Where a random centre may fall, when bRandomCentre is set. */
 	UPROPERTY(EditAnywhere, Category = "Storm")
 	FBox2D RandomCentre = FBox2D(FVector2D(-10000.0, -10000.0), FVector2D(10000.0, 10000.0));
+
+	/** Whether the game has a storm at all. Set in DefaultGame.ini, the same on every machine. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Storm")
+	bool bEnabled = false;
+
+	/** The storm of this world, or none: none when the game has no storm, whatever the map holds. */
+	static AStormActor* Find(const UWorld* World);
 
 	/** The cylinder the wall is shaped from. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Storm")

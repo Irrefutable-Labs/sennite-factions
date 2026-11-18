@@ -1,12 +1,12 @@
 // Touch check. Run in the game on the test range with the touch controls shown (as on a phone):
 // every move is a finger on the screen, sent to the game's viewport as a phone's touches are. A drag
-// on the right turns the hero to face the weapons; the stick walks her over the rifle and the
-// shotgun; the slots along the bottom change what she holds; FIRE held keeps the rifle firing, and
-// RELOAD, with no rounds to spare on the test range, leaves it as it is; JUMP jumps and fires
-// nothing; WALL, MAT, FIRE, RAMP and FLOOR build; EDIT, TILE and DONE cut a tile out of the wall
-// she built; then she turns, runs with the stick pushed all the way to the bandages and potions,
-// drinks a potion with POTION and USE, and takes a bandage in hand with BANDAGE. The controls are
-// drawn on the HUD and say what each button does now.
+// on the right turns the hero to her right; the stick walks her to the range's crate, where OPEN
+// shows, and OPEN gives her what the crate held; the slots along the bottom change what she holds;
+// FIRE held keeps the rifle firing, and RELOAD fills it from the rounds the crate gave; JUMP jumps
+// and fires nothing; WALL, MAT, FIRE, RAMP and FLOOR build; EDIT, TILE and DONE cut a tile out of
+// the wall she built; then she turns, runs with the stick pushed all the way, drinks a potion with
+// POTION and USE, and takes a bandage in hand with BANDAGE. The controls are drawn on the HUD and say
+// what each button does now.
 //
 // Tools/check_touch.sh runs this and reads the result.
 
@@ -58,7 +58,7 @@ namespace
 
 	private:
 		enum class EPhase {
-			WaitForPawn, FaceWeapons, WalkOver, Stop, Slots, Jump, HoldFire, Reload, Build, Edit, FaceItems, RunToBandage, FaceDrink, RunToPotion, Drink, Bandage, Done
+			WaitForPawn, FaceWeapons, WalkOver, Stop, OpenCrate, Slots, Jump, HoldFire, Reload, Build, Edit, FaceBack, Run, Drink, Bandage, Done
 		};
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; }
@@ -186,7 +186,7 @@ namespace
 
 		switch (Phase) {
 		case EPhase::FaceWeapons:
-			// a drag to the right turns her right, a quarter turn, to face the rifle and the shotgun
+			// a drag to the right turns her right, a quarter turn, to face along the crate
 			if (Elapsed(World) < 1.0) {
 				return false;
 			}
@@ -208,8 +208,8 @@ namespace
 		case EPhase::WalkOver:
 			bSawWalking |= Hero->IsWalking;
 			Test->TestFalse(TEXT("A stick pushed part way walks, it does not run"), Hero->IsRunning);
-			if (!(State->EquippedWeapons.Contains(1) && State->EquippedWeapons.Contains(2) && Hero->GetActorLocation().Y > Mark.Y + 520.0)) {
-				return Elapsed(World) > 12.0 ? Fail(FString::Printf(TEXT("The stick never walked the hero over both weapons (at %s)"), *Hero->GetActorLocation().ToCompactString())) : false;
+			if (Hero->GetActorLocation().Y <= Mark.Y + 520.0) {
+				return Elapsed(World) > 12.0 ? Fail(FString::Printf(TEXT("The stick never walked the hero up to the crate (at %s)"), *Hero->GetActorLocation().ToCompactString())) : false;
 			}
 			Test->TestTrue(TEXT("While the stick is held the hero walks"), bSawWalking);
 			Test->TestTrue(TEXT("The stick walks her the way she faces"), FMath::Abs(Hero->GetActorLocation().X - Mark.X) < 120.0);
@@ -232,7 +232,31 @@ namespace
 			}
 			Test->TestFalse(TEXT("Let go of, the stick stops the walk"), Hero->IsWalking);
 			Test->TestTrue(TEXT("Let go of, the stick leaves the hero standing"), Hero->GetVelocity().Size2D() < 5.0);
-			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK walk: from %s to %s, weapons %d"), *Mark.ToCompactString(), *Hero->GetActorLocation().ToCompactString(), State->EquippedWeapons.Num());
+			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK walk: from %s to %s"), *Mark.ToCompactString(), *Hero->GetActorLocation().ToCompactString());
+			Enter(EPhase::OpenCrate, World);
+			return false;
+
+		case EPhase::OpenCrate:
+			// beside the closed crate the OPEN button shows; a tap on it gives her what the crate held
+			if (Step == 0) {
+				Step = 1;
+				Test->TestTrue(TEXT("Beside the closed crate there is an OPEN button"), Controls->LastDrawn.ContainsByPredicate([](const FString& Each) { return Each.StartsWith(TEXT("OPEN=")); }));
+				Test->TestTrue(TEXT("She has no gun before the crate is opened"), !State->EquippedWeapons.Contains(1) && !State->EquippedWeapons.Contains(2));
+				Press(TEXT("OPEN"));
+				return false;
+			}
+			if (Step == 1 && Elapsed(World) > 0.15) { Step = 2; Lift(TEXT("OPEN")); return false; }
+			if (Elapsed(World) < 1.5) {
+				return false;
+			}
+			Test->TestTrue(TEXT("OPEN gives her the crate's rifle and shotgun"), State->EquippedWeapons.Contains(1) && State->EquippedWeapons.Contains(2));
+			Test->TestTrue(TEXT("The crate's rifle is in her hand at once"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 1);
+			Test->TestTrue(TEXT("and its bandages and potions are hers"), State->HealingItemCounts[0] > 0 && State->HealingItemCounts[1] > 0);
+			Test->TestEqual(TEXT("The opened crate laid nothing on the ground"), GameCheck::LyingAbout(World), 0);
+			Test->TestFalse(TEXT("Beside the opened crate there is no OPEN button"), Controls->LastDrawn.ContainsByPredicate([](const FString& Each) { return Each.StartsWith(TEXT("OPEN=")); }));
+			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK crate: opened by touch; weapons %d, rounds %d, shells %d, bandages %d, potions %d"), State->EquippedWeapons.Num(),
+				State->EquippedWeaponsAmmunition[1], State->EquippedWeaponsAmmunition[2], State->HealingItemCounts[0], State->HealingItemCounts[1]);
+			GameCheck::Shot(TEXT("Touch"), TEXT("crate.png"));
 			Enter(EPhase::Slots, World);
 			return false;
 
@@ -292,16 +316,18 @@ namespace
 			return false;
 
 		case EPhase::Reload:
-			// the test range has no rounds lying about: a rifle picked up there carries none to spare,
-			// and R, or RELOAD, leaves its clip as it is (the match check reloads with a crate's rounds)
+			// RELOAD fills the clip from the rounds the crate gave
 			if (Step == 0 && Elapsed(World) > 0.15) { Step = 1; Lift(TEXT("RELOAD")); return false; }
-			if (Elapsed(World) < 3.0) {
-				return false;
+			if (Hero->CurrentWeapon == nullptr) {
+				return Fail(TEXT("The rifle went out of her hand during the reload"));
 			}
-			Test->TestEqual(TEXT("The rifle picked up on the test range carries no rounds to spare"), State->EquippedWeaponsAmmunition[1], 0);
-			Test->TestEqual(TEXT("With none to spare, RELOAD leaves the clip as it is"), Hero->CurrentWeapon->CurrentBulletCount, CountMark);
-			Test->TestFalse(TEXT("RELOAD fires no shot"), Hero->CurrentWeapon->CurrentBulletCount < CountMark);
-			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK reload: clip %d, %d to spare"), Hero->CurrentWeapon->CurrentBulletCount, State->EquippedWeaponsAmmunition[1]);
+			// until the clip is full and her hands are free again
+			if (Hero->CurrentWeapon->CurrentBulletCount != Hero->CurrentWeapon->MagazineSize || State->JustReloadedRifle) {
+				return Elapsed(World) > 8.0 ? Fail(TEXT("RELOAD did not fill the rifle from the rounds the crate gave")) : false;
+			}
+			Test->TestEqual(TEXT("RELOAD takes the rounds it loads from those the crate gave"), State->EquippedWeaponsAmmunition[1],
+				GetDefault<ASenniteCrate>()->RifleRounds - (Hero->CurrentWeapon->MagazineSize - CountMark));
+			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK reload: clip %d -> %d, %d to spare"), CountMark, Hero->CurrentWeapon->CurrentBulletCount, State->EquippedWeaponsAmmunition[1]);
 			CountMark = Built(World);
 			Enter(EPhase::Build, World);
 			return false;
@@ -387,60 +413,29 @@ namespace
 				Test->TestTrue(TEXT("DONE finishes the edit"), Hero->GetEditingPiece() == nullptr);
 				Test->TestTrue(TEXT("DONE cuts the marked tile out of the wall"), Piece.IsValid() && Piece->Cut == CutMark);
 				UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK edit: wall cut %d"), Piece.IsValid() ? Piece->Cut : -1);
-				Enter(EPhase::FaceItems, World);
+				Enter(EPhase::FaceBack, World);
 				return false;
 			}
 
-		case EPhase::FaceItems: {
-			// turn to the bandages lying behind the start
-			const AHealingActor* Bandage = nullptr;
-			for (TActorIterator<AHealingActor> It(World); It; ++It) {
-				Bandage = It->Holder == nullptr && It->HealingType == 0 ? *It : Bandage;
+		case EPhase::FaceBack:
+			// turn back the way she came, then the stick pushed all the way: she runs
+			if (Step == 0) {
+				Step = 1;
+				Mark = FVector(Controller->GetControlRotation().Yaw, 0.0, 0.0);
 			}
-			if (Bandage == nullptr) {
-				return Fail(TEXT("The test range has no bandages lying on it"));
-			}
-			if (!TurnStep(Controller, YawTo(Hero, Bandage->GetActorLocation()))) {
-				return Elapsed(World) > 20.0 ? Fail(TEXT("Dragging never turned the hero to the bandages")) : false;
+			if (!TurnStep(Controller, Mark.X + 180.0)) {
+				return Elapsed(World) > 20.0 ? Fail(TEXT("Dragging never turned the hero round")) : false;
 			}
 			PushStick(1.0);
-			Enter(EPhase::RunToBandage, World);
+			Enter(EPhase::Run, World);
 			return false;
-		}
 
-		case EPhase::RunToBandage:
+		case EPhase::Run:
 			bSawRunning |= Hero->IsRunning;
-			if (State->HealingItemCounts[0] == 0) {
-				return Elapsed(World) > 8.0 ? Fail(TEXT("The stick never took the hero over the bandages")) : false;
+			if (Elapsed(World) < 1.2) {
+				return false;
 			}
 			Test->TestTrue(TEXT("The stick pushed all the way ahead runs"), bSawRunning);
-			LetGoOfStick();
-			Enter(EPhase::FaceDrink, World);
-			return false;
-
-		case EPhase::FaceDrink: {
-			if (Elapsed(World) < 0.6) {
-				return false;
-			}
-			const AHealingActor* Potion = nullptr;
-			for (TActorIterator<AHealingActor> It(World); It; ++It) {
-				Potion = It->Holder == nullptr && It->HealingType == 1 ? *It : Potion;
-			}
-			if (Potion == nullptr) {
-				return Fail(TEXT("The test range has no potions lying on it"));
-			}
-			if (!TurnStep(Controller, YawTo(Hero, Potion->GetActorLocation()))) {
-				return Elapsed(World) > 20.0 ? Fail(TEXT("Dragging never turned the hero to the potions")) : false;
-			}
-			PushStick(1.0);
-			Enter(EPhase::RunToPotion, World);
-			return false;
-		}
-
-		case EPhase::RunToPotion:
-			if (State->HealingItemCounts[1] == 0) {
-				return Elapsed(World) > 8.0 ? Fail(TEXT("The stick never took the hero over the potions")) : false;
-			}
 			LetGoOfStick();
 			Enter(EPhase::Drink, World);
 			return false;

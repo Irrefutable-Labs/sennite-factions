@@ -1,9 +1,10 @@
-// Hero hands check. Run in the game on the test range: the hero walks over the rifle and the shotgun,
-// takes the rifle in hand, and then becomes each hero of the list in turn, as the server makes a
+// Hero hands check. Run in the game on the test range: the hero opens the crate by the start, has
+// its rifle in hand, and then becomes each hero of the list in turn, as the server makes a
 // player the hero they chose (ASennitePlayerState::SetHero; this game is its own server). As each hero:
 // - the rifle is fixed to the hero's weapon bone, in the right hand, pointing ahead of them;
 // - the hero's own built-in weapon, if it has one, is hidden;
-// - a pull of the trigger plays the hero's own firing animation, if it ships with one.
+// - both hands are on the rifle, which points where the player aims;
+// - a pull of the trigger kicks the rifle in the hero's hands.
 //
 // It also measures, for setting up a hero, what WeaponsTest.cpp measures for Dekker: the grip that
 // would hold a weapon level and facing the way the hero faces in this pose, and where the palm is
@@ -18,6 +19,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "GameCheck.h"
+#include "SenniteHeroMesh.h"
+#include "Camera/CameraActor.h"
 #include "SenniteCharacter.h"
 #include "SenniteHeroes.h"
 #include "SennitePlayerState.h"
@@ -42,7 +45,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, WalkOverPickups, TakeRifle, Become, Measure, Shot, Fire, Done };
+		enum class EPhase { WaitForPawn, OpenCrate, TakeRifle, Become, Measure, Shot, Fire, Done };
 
 		/** Where the palm is, part way to the root of the middle finger, or of the index finger on a hand that has no middle finger; zero on a hand with neither. */
 		static FVector PalmOf(USkeletalMeshComponent* Mesh, FName HandBone, const TCHAR* Side)
@@ -67,6 +70,9 @@ namespace
 		double PhaseStart = 0.0;
 		int32 HeroIndex = 0;
 		int32 RoundsBefore = 0;
+		TWeakObjectPtr<ACameraActor> Onlooker;
+		bool bPlayPicture = false;
+		GameCheck::FCrateRun Crate;
 		bool bSawFire = false;
 	};
 
@@ -84,8 +90,7 @@ namespace
 			}
 			Test->TestTrue(TEXT("The list has heroes"), Heroes.Num() > 0);
 			Controller->SetControlRotation(FRotator(-12.0, Hero->GetActorRotation().Yaw, 0.0));
-			GameCheck::Key(Controller, EKeys::D, IE_Pressed);
-			Enter(EPhase::WalkOverPickups, World);
+			Enter(EPhase::OpenCrate, World);
 			return false;
 		}
 		if (Hero == nullptr || State == nullptr) {
@@ -94,13 +99,16 @@ namespace
 		USkeletalMeshComponent* Mesh = Hero->GetMesh();
 
 		switch (Phase) {
-		case EPhase::WalkOverPickups:
-			if (!(State->EquippedWeapons.Contains(1) && State->EquippedWeapons.Contains(2)) && Elapsed(World) < 6.0) {
+		case EPhase::OpenCrate:
+			// D walks to the crate to the right of the start; E opens it
+			if (!Crate.Step(World, Controller, Hero, EKeys::D)) {
 				return false;
 			}
-			GameCheck::Key(Controller, EKeys::D, IE_Released);
+			if (!Crate.Failure.IsEmpty()) {
+				return Fail(Crate.Failure);
+			}
 			if (!State->EquippedWeapons.Contains(1)) {
-				return Fail(TEXT("Walking over the rifle did not pick it up"));
+				return Fail(TEXT("The crate did not give the hero the rifle"));
 			}
 			GameCheck::Key(Controller, EKeys::Two, IE_Pressed);
 			GameCheck::Key(Controller, EKeys::Two, IE_Released);
@@ -176,7 +184,8 @@ namespace
 			const double FromHand = FVector::Dist(Rifle->WeaponMesh->GetComponentLocation(), Mesh->GetSocketLocation(Want.WeaponBone));
 			const FVector Ahead = Hero->GetActorTransform().InverseTransformVector(Rifle->WeaponMesh->GetForwardVector());
 			const FVector Up = Hero->GetActorTransform().InverseTransformVector(Rifle->WeaponMesh->GetUpVector());
-			Test->TestTrue(FString::Printf(TEXT("%s: the rifle is in the hero's right hand"), Id), FromHand < 45.0);
+			// a big hero's rifle is larger, and so is how far its middle is from the hand that holds it
+			Test->TestTrue(FString::Printf(TEXT("%s: the rifle is in the hero's right hand"), Id), FromHand < 45.0 * Rifle->WeaponMesh->GetRelativeScale3D().X);
 			Test->TestTrue(FString::Printf(TEXT("%s: standing, the hero holds the rifle pointing ahead"), Id), Ahead.X > 0.7);
 			Test->TestTrue(FString::Printf(TEXT("%s: the rifle is held top up, not on its side or upside down"), Id), Up.Z > 0.5);
 			for (const FName& Bone : Want.BuiltInWeaponBones) {
@@ -184,14 +193,44 @@ namespace
 			}
 			UE_LOG(LogHeroHands, Display, TEXT("GAMECHECK %s holds: from_hand=%.0f muzzle (fwd %.2f, right %.2f, up %.2f) top (fwd %.2f, right %.2f, up %.2f) hidden=%d"),
 				Id, FromHand, Ahead.X, Ahead.Y, Ahead.Z, Up.X, Up.Y, Up.Z, Want.BuiltInWeaponBones.Num());
+			{
+				// both hands on the rifle, and the rifle along the player's aim
+				const USenniteHeroMesh* Body = Cast<USenniteHeroMesh>(Mesh);
+				const double AlongAim = FVector::DotProduct(Rifle->WeaponMesh->GetForwardVector(), Controller->GetControlRotation().Vector());
+				Test->TestTrue(FString::Printf(TEXT("%s: the hero's body holds the rifle in both hands"), Id), Body != nullptr && Body->bHolding);
+				Test->TestTrue(FString::Printf(TEXT("%s: the grip hand is on the rifle's grip"), Id), Body != nullptr && Body->GripGap < 2.0);
+				Test->TestTrue(FString::Printf(TEXT("%s: the other hand is on the rifle's foregrip"), Id), Body != nullptr && Body->OffHandGap < 3.0);
+				Test->TestTrue(FString::Printf(TEXT("%s: the rifle points where the player aims"), Id), AlongAim > 0.99);
+				UE_LOG(LogHeroHands, Display, TEXT("GAMECHECK %s hold: both hands=%d grip hand %.1f cm off, other hand %.1f cm off, rifle along the aim %.3f"),
+					Id, Body != nullptr && Body->bHolding ? 1 : 0, Body ? Body->GripGap : -1.0, Body ? Body->OffHandGap : -1.0, AlongAim);
+			}
+			// the picture, from in front of the hero and to its right: a camera of the check's own, for this picture only
+			if (!Onlooker.IsValid()) {
+				Onlooker = World->SpawnActor<ACameraActor>();
+			}
+			if (Onlooker.IsValid()) {
+				const FVector Chest = Hero->GetActorLocation() + FVector(0.0, 0.0, 30.0);
+				const FVector From = Chest + Hero->GetActorForwardVector() * 230.0 + Hero->GetActorRightVector() * 170.0 + FVector(0.0, 0.0, 30.0);
+				Onlooker->SetActorLocationAndRotation(From, (Chest - From).Rotation());
+				Controller->SetViewTarget(Onlooker.Get());
+			}
 			GameCheck::Shot(TEXT("HeroHands"), *(Want.Id.ToString() + TEXT(".png")));
+			bPlayPicture = false;
 			Enter(EPhase::Shot, World);
 			return false;
 		}
 
 		case EPhase::Shot:
-			// the picture is taken at the end of a frame: nothing moves until it is
+			// a picture is taken at the end of a frame: nothing moves until it is
 			if (Elapsed(World) < 0.3) {
+				return false;
+			}
+			if (!bPlayPicture) {
+				// then one from the player's own camera, as the player sees the hero
+				bPlayPicture = true;
+				Controller->SetViewTarget(Hero);
+				GameCheck::Shot(TEXT("HeroHands"), *(Heroes[HeroIndex].Id.ToString() + TEXT("_play.png")));
+				PhaseStart = World->GetTimeSeconds();
 				return false;
 			}
 			RoundsBefore = Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->CurrentBulletCount : 0;
@@ -203,22 +242,17 @@ namespace
 
 		case EPhase::Fire: {
 			const FSenniteHero& Want = Heroes[HeroIndex];
-			UAnimMontage* Fire = Hero->RifleHipShootingAnimation;
-			bSawFire |= Fire != nullptr && Mesh->GetAnimInstance() != nullptr && Mesh->GetAnimInstance()->Montage_IsPlaying(Fire);
+			const USenniteHeroMesh* Body = Cast<USenniteHeroMesh>(Mesh);
+			bSawFire |= Body != nullptr && Body->KickNow > 0.3;
 			if (Elapsed(World) < 0.6) {
 				return false;
 			}
 			const FString IdText = Want.Id.ToString();
 			const TCHAR* Id = *IdText;
 			Test->TestTrue(FString::Printf(TEXT("%s: the trigger spends a round"), Id), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->CurrentBulletCount == RoundsBefore - 1);
-			if (!Want.FireMontage.IsNull()) {
-				Test->TestEqual(FString::Printf(TEXT("%s: the firing animation is the hero's own"), Id), FSoftObjectPath(Fire).ToString(), Want.FireMontage.ToString());
-				Test->TestTrue(FString::Printf(TEXT("%s: pulling the trigger plays it"), Id), bSawFire);
-			}
-			else {
-				Test->TestNull(FString::Printf(TEXT("%s: a hero with no firing animation plays none"), Id), Fire);
-			}
-			UE_LOG(LogHeroHands, Display, TEXT("GAMECHECK %s fire: animation=%s played=%d"), Id, *GetNameSafe(Fire), bSawFire ? 1 : 0);
+			Test->TestTrue(FString::Printf(TEXT("%s: pulling the trigger kicks the rifle in the hero's hands"), Id), bSawFire);
+			Test->TestTrue(FString::Printf(TEXT("%s: the kick is over and both hands are still on the rifle"), Id), Body != nullptr && Body->bHolding && Body->KickNow == 0.0);
+			UE_LOG(LogHeroHands, Display, TEXT("GAMECHECK %s fire: kick=%d"), Id, bSawFire ? 1 : 0);
 			if (++HeroIndex < Heroes.Num()) {
 				Enter(EPhase::Become, World);
 				return false;
