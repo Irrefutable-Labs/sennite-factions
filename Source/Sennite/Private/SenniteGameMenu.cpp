@@ -1,6 +1,7 @@
 // The in-game menu: see SenniteGameMenu.h.
 
 #include "SenniteGameMenu.h"
+#include "SenniteSounds.h"
 #include "AudioDevice.h"
 #include "Engine/Canvas.h"
 #include "Engine/GameInstance.h"
@@ -75,6 +76,7 @@ void USenniteGameMenu::Open()
 		return;
 	}
 	bOpen = true;
+	USenniteSounds::Play(Controller, TEXT("ui.open"));
 	Page = ESenniteGameMenuPage::Main;
 	Note.Reset();
 	Pressed = NAME_None;
@@ -98,6 +100,7 @@ void USenniteGameMenu::Close()
 		return;
 	}
 	bOpen = false;
+	USenniteSounds::Play(Controller, TEXT("ui.back"));
 	Pressed = NAME_None;
 	Buttons.Reset();
 	LastDrawn.Reset();
@@ -192,6 +195,7 @@ void USenniteGameMenu::Act(FName Action)
 		return;
 	}
 	const FString Name = Action.ToString();
+	USenniteSounds::Button(Controller, Action);
 	USenniteProfile& Profile = USenniteProfile::Get();
 	UWorld* World = Controller->GetWorld();
 	Note.Reset();

@@ -1,6 +1,7 @@
 // Copyright 1998-2018 Epic Games, Inc. All Rights Reserved.
 
 #include "SenniteCharacter.h"
+#include "SenniteSounds.h"
 #include "SennitePlayerController.h"
 #include "SennitePlayerState.h"
 #include "ThirdPersonAnimInstance.h"
@@ -2262,6 +2263,8 @@ void ASenniteCharacter::NetMulticastOwnAttack_Implementation() {
 	if (OwnAttack != nullptr) {
 		PlayAnimMontage(OwnAttack);
 	}
+	USenniteSounds::PlayAt(this, TEXT("attack.own"), OwnWeaponTip());
+	USenniteSounds::Voice(this, TEXT("attack"));
 }
 
 FVector ASenniteCharacter::OwnWeaponTip() const {
@@ -2277,6 +2280,7 @@ FVector ASenniteCharacter::OwnWeaponTip() const {
 
 void ASenniteCharacter::NetMulticastPlayPickaxeSwingAnimation_Implementation() {
 	PlayAnimMontage(PickaxeSwingingAnimation, 1.f, NAME_None);
+	USenniteSounds::PlayAt(this, TEXT("swing"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastGunFired_Implementation() {
@@ -2292,25 +2296,31 @@ void ASenniteCharacter::NetMulticastGunFired_Implementation() {
 
 void ASenniteCharacter::NetMulticastPlayUseHealingItemAnimation_Implementation() {
 	PlayAnimMontage(HealingAnimation);
+	USenniteSounds::PlayAt(this, CurrentHealingItemType == 1 ? TEXT("heal.potion") : TEXT("heal.bandage"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastPlayReloadRifleAnimation_Implementation() {
 	PlayAnimMontage(RifleHipReloadAnimation);
+	USenniteSounds::PlayAt(this, TEXT("reload.rifle"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastPlayReloadRifleIronsightsAnimation_Implementation() {
 	PlayAnimMontage(RifleIronsightsReloadAnimation);
+	USenniteSounds::PlayAt(this, TEXT("reload.rifle"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastPlayReloadShotgunAnimation_Implementation() {
 	PlayAnimMontage(ShotgunHipReloadAnimation);
+	USenniteSounds::PlayAt(this, TEXT("reload.shotgun"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastPlayReloadShotgunIronsightsAnimation_Implementation() {
 	PlayAnimMontage(ShotgunIronsightsReloadAnimation);
+	USenniteSounds::PlayAt(this, TEXT("reload.shotgun"), GetActorLocation());
 }
 
 void ASenniteCharacter::ClientDrawHitMarker_Implementation() {
+	USenniteSounds::Play(this, TEXT("hit.marker"));
 	if (GetController()) {
 		APlayerController* PlayerController = Cast<APlayerController>(GetController());
 		if (PlayerController->GetHUD()) {
@@ -2534,6 +2544,7 @@ bool ASenniteCharacter::ServerEditPiece_Validate(ABuildingActor* Piece, int32 Ne
 }
 
 void ASenniteCharacter::ClientEditRefused_Implementation(ABuildingActor* Piece) {
+	USenniteSounds::Play(this, TEXT("ui.denied"));
 	if (IsValid(Piece) && !Piece->EditingHere.IsValid()) {
 		Piece->ShowCut(Piece->Cut, 0);
 	}

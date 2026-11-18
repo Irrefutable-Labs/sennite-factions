@@ -1,4 +1,5 @@
 #include "SenniteMenu.h"
+#include "SenniteSounds.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/SkeletalMeshActor.h"
 #include "Camera/CameraActor.h"
@@ -397,6 +398,7 @@ void ASenniteMenuController::Release(const FVector2D& Where)
 
 void ASenniteMenuController::Act(FName Action)
 {
+	USenniteSounds::Button(this, Action);
 	const FString Name = Action.ToString();
 	const TArray<FSenniteHero>& Heroes = USenniteHeroes::All();
 	USenniteProfile& Profile = USenniteProfile::Get();
