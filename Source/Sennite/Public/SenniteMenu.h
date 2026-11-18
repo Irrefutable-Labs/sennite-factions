@@ -16,7 +16,8 @@
 // CONNECT YOUR WALLET (on a phone the DSM wallet opens on the connect code), GET D-BUCKS (a trade of ERA
 // from the wallet) while the wallet holds too few, then BUY.
 //
-// SKINS: each skin the shop sells, on the hero it is a skin of, turning on the stage. One not owned is
+// SKINS: each skin the shop sells, on the hero it is a skin of, turning on the stage. Along the bottom are
+// the heroes that have skins and, under them, the skins of the hero shown. One not owned is
 // bought as a hero is; one the wallet proves it owns is worn or taken off (it is on the hero in play only
 // while the wallet proves it owns it).
 //

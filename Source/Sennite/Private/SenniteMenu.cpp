@@ -48,11 +48,15 @@ namespace
 	}
 
 	/**
-	 * The hero a shop skin is a skin of: the one whose own mesh has the skin's skeleton, as the game goes
-	 * by when it dresses a hero in play. Null if it is no hero's. Found once for each skin.
+	 * The hero a shop skin is a skin of: the one the game's list of skins names for it, and for a skin
+	 * listed with none, the one whose own mesh has the skin's skeleton, as the game goes by when it
+	 * dresses a hero in play. Null if it is no hero's. Found once for each skin.
 	 */
 	const FSenniteHero* SkinHero(const FString& SkinId)
 	{
+		if (const FSenniteSkinMesh* Listed = SkinMesh(SkinId); Listed != nullptr && !Listed->Hero.IsNone()) {
+			return USenniteHeroes::Find(Listed->Hero);
+		}
 		static TMap<FString, FName> Known;
 		if (const FName* Found = Known.Find(SkinId)) {
 			return Found->IsNone() ? nullptr : USenniteHeroes::Find(*Found);
@@ -274,11 +278,13 @@ void ASenniteMenuController::UpdateStage(float DeltaTime)
 	// the buttons are to the left and the hero to the right on every page. On the character select the row
 	// of heroes to pick from lies along the bottom, so the hero stands a little further back, whole above
 	// it; a lobby's row is seen from far enough that the heroes at its ends are whole too
-	const bool bSelect = Page == ESenniteMenuPage::Heroes || Page == ESenniteMenuPage::Skins;
-	const float Distance = FMath::Max(Top * (bSelect ? 1.38f : 1.2f) / (2.0f * HalfUp), Row * (Figures.Num() > 1 ? 2.1f : 1.25f) / (2.0f * HalfAcross));
+	// the skins have two rows along the bottom, the heroes that have skins over the skins of one: a little further back again
+	const bool bSkins = Page == ESenniteMenuPage::Skins;
+	const bool bSelect = Page == ESenniteMenuPage::Heroes || bSkins;
+	const float Distance = FMath::Max(Top * (bSkins ? 1.6f : bSelect ? 1.38f : 1.2f) / (2.0f * HalfUp), Row * (Figures.Num() > 1 ? 2.1f : 1.25f) / (2.0f * HalfAcross));
 	const float Across = 2.0f * Distance * HalfAcross;
 	const float Aside = -0.17f * Across;
-	const FVector Goal(-Distance, Aside, Top * (bSelect ? 0.47f : 0.52f));
+	const FVector Goal(-Distance, Aside, Top * (bSkins ? 0.4f : bSelect ? 0.47f : 0.52f));
 	const FVector Now = FMath::VInterpTo(StageCamera->GetActorLocation(), Goal, DeltaTime, 4.0f);
 	StageCamera->SetActorLocationAndRotation(Now, FRotator(bSelect ? 0.0 : -2.0, 0.0, 0.0));
 }
@@ -577,6 +583,19 @@ void ASenniteMenuController::Act(FName Action)
 	else if (Name == TEXT("prev") || Name == TEXT("next")) {
 		Browse = (Browse + (Name == TEXT("next") ? 1 : -1) + Heroes.Num()) % FMath::Max(1, Heroes.Num());
 		Note.Reset();
+	}
+	else if (Name.StartsWith(TEXT("skinsof:"))) {
+		// a hero's own skins: the first of them the shop lists
+		const USennitePublisher* Server = Shop(this);
+		const FName Of(*Name.Mid(8));
+		const int32 At = Server != nullptr ? Server->ShopSkins.IndexOfByPredicate([Of](const FSenniteSkinForSale& Skin) {
+			const FSenniteHero* Hero = SkinHero(Skin.Id);
+			return (Hero != nullptr ? Hero->Id : FName()) == Of;
+		}) : INDEX_NONE;
+		if (At != INDEX_NONE) {
+			BrowseSkin = At;
+			Note.Reset();
+		}
 	}
 	else if (Name.StartsWith(SkinOnStage)) {
 		// a skin's own tile in the store
@@ -1091,11 +1110,11 @@ void ASenniteMenuHUD::DrawSkins(ASenniteMenuController* Menu)
 	const float W = Canvas->ClipX / S;
 	const float H = Canvas->ClipY / S;
 	const FLinearColor White = FLinearColor::White;
-	// as the heroes' section: the skin's name and what is done with it on a shade at the left, the row of
-	// skins on one that rises from the bottom
+	// as the heroes' section: the skin's name and what is done with it on a shade at the left, the rows of
+	// heroes and skins on one that rises from the bottom
 	const FBox2D Whole = Screen();
 	SenniteUi::Fade(Canvas, FBox2D(Whole.Min, FVector2D(600.0f * S, Whole.Max.Y)), FLinearColor(0.0f, 0.0f, 0.0f, 0.66f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
-	SenniteUi::Fade(Canvas, FBox2D(FVector2D(Whole.Min.X, (H - 190.0f) * S), Whole.Max), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.7f), true);
+	SenniteUi::Fade(Canvas, FBox2D(FVector2D(Whole.Min.X, (H - 250.0f) * S), Whole.Max), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.75f), true);
 	StoreTop(Menu);
 
 	const float Left = 48.0f;
@@ -1168,16 +1187,38 @@ void ASenniteMenuHUD::DrawSkins(ASenniteMenuController* Menu)
 	Button(TEXT("prev"), TEXT("<"), HeroX - 330.0f, H * 0.5f - 76.0f, 76.0f, 116.0f, true, 34, false, -1);
 	Button(TEXT("next"), TEXT(">"), FMath::Min(HeroX + 254.0f, W - 100.0f), H * 0.5f - 76.0f, 76.0f, 116.0f, true, 34, false, 1);
 
-	// every skin along the bottom, each on its own tile: the one shown in gold, the one worn marked, and one
-	// not owned faint
+	// Along the bottom, two rows. The heroes that have skins in the shop, the one whose skins these are in
+	// gold; under them that hero's skins, each on its own tile: the one shown in gold, the one worn marked,
+	// and one not owned faint.
+	const FName Showing = Of != nullptr ? Of->Id : FName();
+	TArray<FName> Wearers;
+	TArray<int32> Theirs;
+	for (int32 Index = 0; Index < Skins.Num(); ++Index) {
+		const FSenniteHero* Wearer = SkinHero(Skins[Index].Id);
+		const FName Id = Wearer != nullptr ? Wearer->Id : FName();
+		Wearers.AddUnique(Id);
+		if (Id == Showing) {
+			Theirs.Add(Index);
+		}
+	}
 	const float Gap = 8.0f;
-	const float TileWide = FMath::Min(240.0f, (W - 2.0f * Left - Gap * (Skins.Num() - 1)) / FMath::Max(1, Skins.Num()));
+	if (Wearers.Num() > 1) {
+		const float ChipWide = FMath::Min(170.0f, (W - 2.0f * Left - Gap * (Wearers.Num() - 1)) / Wearers.Num());
+		for (int32 Index = 0; Index < Wearers.Num(); ++Index) {
+			const FSenniteHero* Wearer = USenniteHeroes::Find(Wearers[Index]);
+			const FString Label = Wearer != nullptr ? Wearer->Name : FString(TEXT("OTHER"));
+			Button(FName(*FString::Printf(TEXT("skinsof:%s"), *Wearers[Index].ToString())), Label, Left + Index * (ChipWide + Gap), H - 142.0f, ChipWide, 44.0f, true,
+				FMath::Min(13.0f, 13.0f * (ChipWide - 22.0f) * S / FMath::Max(1.0f, Width(Label, 13))), Wearers[Index] == Showing);
+		}
+	}
+	const float TileWide = FMath::Min(240.0f, (W - 2.0f * Left - Gap * (Theirs.Num() - 1)) / FMath::Max(1, Theirs.Num()));
 	const float TileHigh = 56.0f;
 	const float TileTop = H - 82.0f;
-	for (int32 Index = 0; Index < Skins.Num(); ++Index) {
+	for (int32 Place = 0; Place < Theirs.Num(); ++Place) {
+		const int32 Index = Theirs[Place];
 		const FSenniteSkinForSale& Each = Skins[Index];
 		const FName Action(*(FString(SkinOnStage) + Each.Id));
-		const float X = Left + Index * (TileWide + Gap);
+		const float X = Left + Place * (TileWide + Gap);
 		const FBox2D Box(FVector2D(X * S, TileTop * S), FVector2D((X + TileWide) * S, (TileTop + TileHigh) * S));
 		const bool bHad = Server->bConnected && Server->Owns(Each.Id);
 		const bool bOn = bHad && Server->Wearing == Each.Id;
@@ -1188,7 +1229,11 @@ void ASenniteMenuHUD::DrawSkins(ASenniteMenuController* Menu)
 		if (!bHad && Index != Menu->BrowseSkin) {
 			Ink = FLinearColor(1.0f, 1.0f, 1.0f, 0.5f);
 		}
-		const FString Label = Each.Name.ToUpper();
+		// the tile says which skin: the hero's name, which the row over it says, is left off
+		FString Label = Each.Name.ToUpper();
+		if (Of != nullptr && Label.StartsWith(Of->Name + TEXT(" "))) {
+			Label.RightChopInline(Of->Name.Len() + 1);
+		}
 		const float Points = FMath::Min(13.0f, 13.0f * (TileWide - 22.0f) * S / FMath::Max(1.0f, Width(Label, 13)));
 		const float High = SenniteUi::Measure(Label, Points, S).Y;
 		SenniteUi::Text(Canvas, Label, Box.GetCenter().X, Box.GetCenter().Y - High * 0.5f, Points, S, Ink, 0.5f);
@@ -1196,7 +1241,7 @@ void ASenniteMenuHUD::DrawSkins(ASenniteMenuController* Menu)
 			// the skin worn: a gold line over its tile
 			SenniteUi::Plate(Canvas, FBox2D(FVector2D(Box.Min.X + 14.0f * S, Box.Min.Y - 7.0f * S), FVector2D(Box.Max.X, Box.Min.Y - 4.0f * S)), 0.0f, SenniteUi::Gold, SenniteUi::Gold);
 		}
-		Drawing.Add(FString::Printf(TEXT("tile%d=%s%s%s"), Index, *Label, bOn ? TEXT("  WORN") : TEXT(""), bHad ? TEXT("") : TEXT("  NOT HAD")));
+		Drawing.Add(FString::Printf(TEXT("tile%d=%s%s%s"), Place, *Label, bOn ? TEXT("  WORN") : TEXT(""), bHad ? TEXT("") : TEXT("  NOT HAD")));
 		FSenniteMenuButton Tile;
 		Tile.Action = Action;
 		Tile.Text = Label;

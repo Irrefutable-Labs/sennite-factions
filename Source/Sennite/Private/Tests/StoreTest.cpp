@@ -40,6 +40,13 @@ namespace
 		return Skin != nullptr ? Skin->Mesh.ToString() : FString();
 	}
 
+	/** The hero a shop skin is a skin of, as the game's list of skins names it. */
+	FName StoreSkinHero(const FString& SkinId)
+	{
+		const FSenniteSkinMesh* Skin = GetDefault<ASenniteBaseEditor>()->Skins.FindByPredicate([&SkinId](const FSenniteSkinMesh& Each) { return Each.Id == SkinId; });
+		return Skin != nullptr ? Skin->Hero : FName();
+	}
+
 	class FStoreRun : public IAutomationLatentCommand
 	{
 	public:
@@ -124,8 +131,20 @@ namespace
 			Test->TestEqual(TEXT("The stage holds the skin, not a hero as it ships"), Menu->StageHeroes().Num() == 1 ? Menu->StageHeroes()[0].ToString() : FString(), FString(TEXT("skin:")) + Skin.Id);
 			Test->TestFalse(TEXT("A skin not owned has no WEAR"), MenuCheck::Has(Menu, TEXT("wear")));
 			Test->TestFalse(TEXT("It says what the button is for"), MenuCheck::Line(Menu, TEXT("hint")).IsEmpty());
-			for (const FSenniteSkinForSale& Each : Server->ShopSkins) {
-				Test->TestTrue(FString::Printf(TEXT("The skin %s has a tile"), *Each.Id), MenuCheck::Has(Menu, FName(*(FString(TEXT("skin:")) + Each.Id))));
+			{
+				// the row of heroes that have skins, and under it a tile for each skin of the hero shown, and no other's
+				TArray<FName> Wearers;
+				for (const FSenniteSkinForSale& Each : Server->ShopSkins) {
+					const FName Wearer = StoreSkinHero(Each.Id);
+					Wearers.AddUnique(Wearer);
+					Test->TestEqual(FString::Printf(TEXT("The skin %s has a tile only while its hero's skins are shown"), *Each.Id), MenuCheck::Has(Menu, FName(*(FString(TEXT("skin:")) + Each.Id))), Wearer == StoreSkinHero(Skin.Id));
+				}
+				if (Wearers.Num() > 1) {
+					for (const FName Wearer : Wearers) {
+						Test->TestTrue(FString::Printf(TEXT("%s, which has skins, is in the row of heroes"), *Wearer.ToString()), MenuCheck::Has(Menu, FName(*FString::Printf(TEXT("skinsof:%s"), *Wearer.ToString()))));
+					}
+				}
+				UE_LOG(LogStoreCheck, Display, TEXT("GAMECHECK skins: for %d heroes"), Wearers.Num());
 			}
 			UE_LOG(LogStoreCheck, Display, TEXT("GAMECHECK skins: %d listed; %s on the stage as %s; %s"), Server->ShopSkins.Num(), *Skin.Id, *StoreStageMesh(World), *MenuCheck::Line(Menu, TEXT("count")));
 			GameCheck::Shot(TEXT("Store"), TEXT("skins.png"));
@@ -156,19 +175,30 @@ namespace
 		}
 
 		case EPhase::ByTile: {
+			// the last skin the shop lists is another hero's, when more than one hero has skins: that hero's place in
+			// the row brings its skins up, and the skin's own tile shows it
 			const int32 Last = Server->ShopSkins.Num() - 1;
+			const FName Wearer = StoreSkinHero(Server->ShopSkins[Last].Id);
 			if (Menu->BrowseSkin != Last) {
-				if (Elapsed() > 0.3) {
-					Test->TestTrue(TEXT("The last skin's tile can be tapped"), MenuCheck::Tap(Menu, FName(*(FString(TEXT("skin:")) + Server->ShopSkins[Last].Id))));
+				if (Elapsed() > 0.5) {
+					const FName Tile(*(FString(TEXT("skin:")) + Server->ShopSkins[Last].Id));
+					if (MenuCheck::Has(Menu, Tile)) {
+						MenuCheck::Tap(Menu, Tile);
+					}
+					else {
+						Test->TestTrue(TEXT("The last skin's hero can be tapped in the row of heroes"), MenuCheck::Tap(Menu, FName(*FString::Printf(TEXT("skinsof:%s"), *Wearer.ToString()))));
+					}
 					Enter(EPhase::ByTile);
 				}
 				return false;
 			}
-			if (StoreStageMesh(World) != StoreSkinMesh(Server->ShopSkins[Last].Id) || Elapsed() < 1.0) {
+			if (StoreStageMesh(World) != StoreSkinMesh(Server->ShopSkins[Last].Id) || Elapsed() < 1.5) {
 				return Elapsed() > 30.0 ? Fail(TEXT("A tap on a skin's tile did not bring it onto the stage in 30 s")) : false;
 			}
 			Test->TestEqual(TEXT("A tap on a skin's tile shows that skin"), MenuCheck::Line(Menu, TEXT("name")), Server->ShopSkins[Last].Name.ToUpper());
-			MenuCheck::Tap(Menu, TEXT("tab:swap"));
+			Test->TestTrue(TEXT("It says which hero it is a skin of"), MenuCheck::Line(Menu, TEXT("count")).EndsWith(FString(TEXT("FOR ")) + USenniteHeroes::FindOrDefault(Wearer).Name));
+			UE_LOG(LogStoreCheck, Display, TEXT("GAMECHECK skins: %s on the stage as %s; %s"), *Server->ShopSkins[Last].Id, *StoreStageMesh(World), *MenuCheck::Line(Menu, TEXT("count")));
+			GameCheck::Shot(TEXT("Store"), TEXT("skins_last.png"));
 			Enter(EPhase::DBucks);
 			return false;
 		}
