@@ -16,6 +16,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "LobbyGameMode.h"
 #include "SenniteBaseEditor.h"
+#include "SenniteCharacter.h"
 #include "SenniteGameInstance.h"
 #include "SenniteHeroes.h"
 #include "SennitePlayerState.h"
@@ -87,13 +88,21 @@ namespace
 	}
 
 	/**
-	 * The gun a shop's id is: the game's own weapon, whose model and name the store shows. Null for an id that
-	 * is no gun of this game's.
+	 * The gun a shop's id is: the game's own weapon sold under it (AWeaponActor::ShopId, set for each weapon
+	 * class in DefaultGame.ini), whose model and name the store shows. Null for an id that is no gun of this game's.
 	 */
 	const AWeaponActor* ShopGun(const FString& WeaponId)
 	{
-		const UClass* Gun = WeaponId == TEXT("energy-rifle") ? ASenniteEnergyRifle::StaticClass() : WeaponId == TEXT("sniper") ? ASenniteSniper::StaticClass() : nullptr;
-		return Gun != nullptr ? GetDefault<AWeaponActor>(Gun) : nullptr;
+		if (WeaponId.IsEmpty()) {
+			return nullptr;
+		}
+		for (const TSubclassOf<AWeaponActor>& Class : GetDefault<ASenniteCharacter>()->WeaponClasses) {
+			const AWeaponActor* Gun = Class != nullptr ? GetDefault<AWeaponActor>(Class) : nullptr;
+			if (Gun != nullptr && Gun->ShopId == WeaponId) {
+				return Gun;
+			}
+		}
+		return nullptr;
 	}
 
 	/** What the stage calls a shop skin standing on it. */

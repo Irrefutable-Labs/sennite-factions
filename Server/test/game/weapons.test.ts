@@ -4,7 +4,9 @@
  * everything outside the game. The player's wallet, new and holding only ERA, connects to the game
  * by the code the game hands it. In the store's WEAPONS the player trades ERA for D-bucks, buys the
  * energy rifle with them, and the game sees the wallet own it; a hero pass made out to the game
- * speaks for the gun. Outside the game, the wallet proves it owns the gun: one object, its own.
+ * speaks for the gun. Then the player goes into play: the game's server takes the pass, and a crate
+ * gives her the gun she bought and keeps the one she did not. Outside the game, the wallet proves it
+ * owns the gun: one object, its own.
  *
  * Run with `npm run test:game` (see test/real-dsm/hosts.ts for what it needs).
  */
@@ -55,7 +57,7 @@ describe("a gun bought in the game", () => {
     for (const stale of [CODE_FILE, PLAYER_FILE, PROFILE]) rmSync(stale, { force: true });
     const game = spawn(
       join(REPO, "Tools", "run_game_check.sh"),
-      ["Sennite.WeaponShop.BuyAndOwn", "BuyAndOwn", "WeaponShop", `-PublisherUrl=${url}`, `-PublisherPlayerFile=${PLAYER_FILE}`, "-ProfileSlot=WeaponShopCheck"],
+      ["Sennite.GunShop.BuyAndOwn", "BuyAndOwn", "WeaponShop", `-PublisherUrl=${url}`, `-PublisherPlayerFile=${PLAYER_FILE}`, "-ProfileSlot=WeaponShopCheck"],
       { cwd: REPO, env: { ...process.env, SENNITE_MAP: "/Game/Maps/Menu" } },
     );
     let output = "";
@@ -83,6 +85,8 @@ describe("a gun bought in the game", () => {
       expect(said).toContain(`GAMECHECK bought ${gun.id} for ${gun.price} D-bucks`);
       expect(said).toMatch(new RegExp(`GAMECHECK the hero pass speaks for: .*${gun.id}`));
       expect(said).toContain(`GAMECHECK ${other.id} is still for sale`);
+      expect(said).toMatch(/GAMECHECK in play: the server took the pass, guns owned [1-9]/);
+      expect(said).toContain(`GAMECHECK on the range the crate gave ${gun.id}`);
       expect(said).toContain("GAMECHECK finished");
       expect(said).toContain("Test Completed. Result={Success} Name={BuyAndOwn}");
       expect(ended).toBe(0);
