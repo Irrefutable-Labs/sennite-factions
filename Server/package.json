@@ -18,7 +18,7 @@
     "start": "node dist/publisher/main.js"
   },
   "dependencies": {
-    "dsm-app-client": "file:vendor/dsm-app-client-0.1.0-beta.4.tgz"
+    "dsm-app-client": "file:vendor/dsm-app-client-0.1.1-beta.4.tgz"
   },
   "devDependencies": {
     "@types/node": "^20.19.0",
