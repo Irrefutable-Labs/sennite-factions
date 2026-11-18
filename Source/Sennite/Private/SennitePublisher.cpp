@@ -432,6 +432,18 @@ void USennitePublisher::AskShop()
 				ShopHeroes.Add(MoveTemp(Hero));
 			}
 		}
+		ShopWeapons.Reset();
+		const TArray<TSharedPtr<FJsonValue>>* Weapons = nullptr;
+		if (Json->TryGetArrayField(TEXT("weapons"), Weapons)) {
+			for (const TSharedPtr<FJsonValue>& Value : *Weapons) {
+				const TSharedPtr<FJsonObject> One = Value->AsObject();
+				FSenniteHeroForSale Gun;
+				Gun.Id = One->GetStringField(TEXT("id"));
+				Gun.Name = One->GetStringField(TEXT("name"));
+				Gun.Price = FCString::Atoi(*One->GetStringField(TEXT("price")));
+				ShopWeapons.Add(MoveTemp(Gun));
+			}
+		}
 		bShop = true;
 	});
 }
@@ -581,6 +593,19 @@ void USennitePublisher::BuyHero(const FString& HeroId)
 	Ask(TEXT("/shop/heroes"), Body, TEXT("waiting for the wallet to pay for the hero..."));
 	bProveAfter = bBusy;
 	BuyingHero = HeroId;
+}
+
+void USennitePublisher::BuyWeapon(const FString& WeaponId)
+{
+	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("weaponId"), WeaponId);
+	if (bBusy) {
+		return;
+	}
+	Ask(TEXT("/shop/weapons"), Body, TEXT("waiting for the wallet to pay for the gun..."));
+	bProveAfter = bBusy;
+	// bought and given as a hero is: it is the wallet's once the wallet proves it, in the same list
+	BuyingHero = WeaponId;
 }
 
 void USennitePublisher::AskHeroPass(const FString& ForAudience, TFunction<void(const FString&)> Done)
@@ -997,6 +1022,13 @@ void USennitePublisher::ReadHoldings(const FJsonObject& Json)
 	if (Json.TryGetArrayField(TEXT("heroes"), Heroes)) {
 		for (const TSharedPtr<FJsonValue>& Value : *Heroes) {
 			OwnedHeroes.AddUnique(Value->AsObject()->GetStringField(TEXT("heroId")));
+		}
+	}
+	// the guns the wallet owns, in the same list: they are sold and owned as heroes are, and no gun has a hero's id
+	const TArray<TSharedPtr<FJsonValue>>* Weapons = nullptr;
+	if (Json.TryGetArrayField(TEXT("weapons"), Weapons)) {
+		for (const TSharedPtr<FJsonValue>& Value : *Weapons) {
+			OwnedHeroes.AddUnique(Value->AsObject()->GetStringField(TEXT("weaponId")));
 		}
 	}
 	bMaterialsKnown = true;

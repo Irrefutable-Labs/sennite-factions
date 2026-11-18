@@ -34,5 +34,9 @@
     { "id": "rampage", "name": "Rampage", "price": "1200" },
     { "id": "sevarog", "name": "Sevarog", "price": "1200" },
     { "id": "trooper", "name": "Sci-Fi Trooper", "price": "1200" }
+  ],
+  "weapons": [
+    { "id": "energy-rifle", "name": "Energy Rifle", "price": "900" },
+    { "id": "sniper", "name": "Sniper", "price": "900" }
   ]
 }

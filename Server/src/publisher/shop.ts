@@ -16,7 +16,7 @@ import { ask, grant, type AppAccount, type Connection, type Grant, type ObjectIn
 import { hex } from "../faction/canonical.js";
 import { Refused } from "./refused.js";
 import type { Store } from "./store.js";
-import type { HeroForSale, ShopWorld, SkinForSale } from "./world.js";
+import type { HeroForSale, ShopWorld, SkinForSale, WeaponForSale } from "./world.js";
 
 const VAULT_LABEL = "sennite d-bucks";
 
@@ -38,6 +38,15 @@ export interface OwnedHero {
   serial: number;
 }
 
+/** A gun a wallet proved it owns. */
+export interface OwnedWeapon {
+  weaponId: string;
+  name: string;
+  /** The object's id, as people read it. */
+  object: string;
+  serial: number;
+}
+
 /** What a wallet proved it holds that the shop cares about. */
 export interface Purse {
   /** D-bucks, in whole units. */
@@ -46,6 +55,7 @@ export interface Purse {
   era: string;
   skins: OwnedSkin[];
   heroes: OwnedHero[];
+  weapons: OwnedWeapon[];
 }
 
 export class Shop {
@@ -101,6 +111,12 @@ export class Shop {
     return found;
   }
 
+  weapon(weaponId: string): WeaponForSale {
+    const found = this.world.weapons.find((w) => w.id === weaponId);
+    if (found === undefined) throw new Refused(`the shop has no gun ${weaponId}`);
+    return found;
+  }
+
   /** What the vault would give in D-bucks for `era` now: information from the vault's public state, never a fact. */
   async price(connection: Connection, era: string): Promise<number> {
     const quoted = await this.app.wait(await this.app.request(connection, ask.price("ERA", this.symbol, era)));
@@ -145,6 +161,15 @@ export class Shop {
     return sold.ok ? { ok: true, hero: { heroId: hero.id, name: hero.name, object: sold.object, serial: sold.serial } } : sold;
   }
 
+  /** Sell a gun, as a hero is sold: paid for first, then issued, one of it, and given. */
+  async buyWeapon(connection: Connection, weaponId: string): Promise<{ ok: true; weapon: OwnedWeapon } | { ok: false; why: string }> {
+    const weapon = this.weapon(weaponId);
+    const sold = await this.sell(connection, weapon, "weapon", "WP", (object, serial, symbol) => {
+      this.store.data.shop.weapons[object] = { weaponId: weapon.id, serial, symbol };
+    });
+    return sold.ok ? { ok: true, weapon: { weaponId: weapon.id, name: weapon.name, object: sold.object, serial: sold.serial } } : sold;
+  }
+
   /**
    * The wallet sends the item's price in D-bucks; once the publisher's account
    * has accepted that transfer, and only then, the shop issues the item, an
@@ -163,7 +188,7 @@ export class Shop {
   private async sell(
     connection: Connection,
     item: { id: string; name: string; price: string },
-    kind: "skin" | "hero",
+    kind: "skin" | "hero" | "weapon",
     prefix: string,
     keep: (object: string, serial: number, symbol: string) => void,
   ): Promise<{ ok: true; object: string; serial: number } | { ok: false; why: string }> {
@@ -191,14 +216,15 @@ export class Shop {
     const record = this.store.data.shop;
     const sale = record.pending[payment];
     if (sale === undefined) throw new Error(`no pending sale for payment ${payment}`);
-    const item = sale.kind === "skin" ? this.skin(sale.itemId) : this.hero(sale.itemId);
+    const item = sale.kind === "skin" ? this.skin(sale.itemId) : sale.kind === "hero" ? this.hero(sale.itemId) : this.weapon(sale.itemId);
     let info: ObjectInfo;
     if (sale.object === "") {
       info = await this.app.issue({ symbol: sale.symbol, name: `${item.name} #${sale.serial}`, supply: "1", description: `Sennite: Factions ${sale.kind} ${item.id}` });
       sale.object = info.id;
       if (keep !== undefined) keep(info.id, sale.serial, sale.symbol);
       else if (sale.kind === "skin") record.skins[info.id] = { skinId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
-      else record.heroes[info.id] = { heroId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
+      else if (sale.kind === "hero") record.heroes[info.id] = { heroId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
+      else record.weapons[info.id] = { weaponId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
       record.paid[payment] = info.id;
       this.store.save();
     } else {
@@ -246,7 +272,18 @@ export class Shop {
     return owned.sort((a, b) => a.serial - b.serial);
   }
 
-  /** What the shop reads from a wallet's proof: its D-bucks, its ERA, its skins and its heroes. */
+  /** The guns among what a wallet proved it owns: `proven` is object id (Base32 Crockford) to amount. */
+  weaponsAmong(proven: Map<string, bigint>): OwnedWeapon[] {
+    const owned: OwnedWeapon[] = [];
+    for (const [object, sold] of Object.entries(this.store.data.shop.weapons)) {
+      if ((proven.get(object) ?? 0n) > 0n) {
+        owned.push({ weaponId: sold.weaponId, name: this.weapon(sold.weaponId).name, object, serial: sold.serial });
+      }
+    }
+    return owned.sort((a, b) => a.serial - b.serial);
+  }
+
+  /** What the shop reads from a wallet's proof: its D-bucks, its ERA, its skins, its heroes and its guns. */
   async purse(proven: Map<string, bigint>): Promise<Purse> {
     const dbucks = await this.app.object(this.symbol);
     const era = await this.app.object("ERA");
@@ -255,6 +292,7 @@ export class Shop {
       era: await this.app.display(era, proven.get(era.id) ?? 0n),
       skins: this.skinsAmong(proven),
       heroes: this.heroesAmong(proven),
+      weapons: this.weaponsAmong(proven),
     };
   }
 }

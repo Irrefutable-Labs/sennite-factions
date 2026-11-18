@@ -38,6 +38,17 @@ export interface HeroForSale {
   price: string;
 }
 
+/**
+ * A gun the publisher's shop sells: each one sold is an object of which one exists, as a hero is. A wallet
+ * that owns one is given that gun by the game's crates; the game's free guns are not sold.
+ */
+export interface WeaponForSale {
+  id: string;
+  name: string;
+  /** Its price in D-bucks, in whole units. */
+  price: string;
+}
+
 /** The game's currency, the publisher's vault that sells it for ERA, and the shop (spec 10.5). */
 export interface ShopWorld {
   /** D-bucks: an object the publisher's account issues with a fixed maximum supply. */
@@ -48,6 +59,7 @@ export interface ShopWorld {
   grant: { era: { perRequest: string; total: string }; dbucks: { perRequest: string; total: string } };
   skins: SkinForSale[];
   heroes: HeroForSale[];
+  weapons: WeaponForSale[];
 }
 
 /**
@@ -81,6 +93,10 @@ export function loadWorld(dir: string = WORLD_DIR): World {
   if (new Set(shop.skins.map((k) => k.id)).size !== shop.skins.length) throw new Error("the shop lists a skin twice");
   shop.heroes ??= [];
   if (new Set(shop.heroes.map((h) => h.id)).size !== shop.heroes.length) throw new Error("the shop lists a hero twice");
+  shop.weapons ??= [];
+  // a wallet's heroes and guns are told to a game in one list, by these ids: no gun has a hero's id, or another gun's
+  const owned = [...shop.heroes.map((h) => h.id), ...shop.weapons.map((w) => w.id)];
+  if (new Set(owned).size !== owned.length) throw new Error("the shop lists a gun twice, or under a hero's id");
   const matches = JSON.parse(new TextDecoder().decode(bytes("matches.json"))) as MatchWorld;
   for (const [resource, amount] of Object.entries(matches.prize)) {
     if (!catalogue.resources.includes(resource)) throw new Error(`a match's prize names ${resource}, which is not a resource`);
