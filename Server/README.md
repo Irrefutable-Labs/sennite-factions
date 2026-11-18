@@ -13,7 +13,7 @@ What is here:
 | `src/dsm/` | What the server asks of the publisher's account: cell writes and their facts, contributions and the funding read, authored objects. |
 | `src/publisher/` | The publisher's server: parcel assignments, proposing members' changes, the 48-hour clock, what stands in play, the shop (`shop.ts`: D-bucks, the vault that sells them for ERA, skins), matches and their prizes (`matches.ts`), and what the game client asks of it over HTTP (`service.ts`). `main.ts` starts it. |
 | `world/` | The publisher's game assets: the prefab catalogue, the parcel registry, what the account issues, the shop (`shop.json`: D-bucks, the vault's opening reserves and fee, the skins and their prices), and what a match pays (`matches.json`). |
-| `vendor/` | DSM's TypeScript client, packed from DSM `main` at `2d109bb58` (`clients/typescript`, `npm pack`). |
+| `vendor/` | DSM's TypeScript client, packed from DSM `main` at `262050ec0` (`clients/typescript`, `npm pack`; 0.1.1-beta.4). It needs a `dsm-app-host` from the same DSM: `wait` holds on the host's `/activity/{after}/wait`. |
 | `docs/dsm-gaps.md` | What the specification needs that DSM's app surface does not offer yet. |
 | `formal/` | Formal models of the lineage and of supply (spec 12.4), in TLA+, and the script that checks them. |
 
