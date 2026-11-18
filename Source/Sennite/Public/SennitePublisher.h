@@ -250,6 +250,12 @@ public:
 
 	bool Owns(const FString& SkinId) const { return OwnedSkins.Contains(SkinId); }
 
+	/**
+	 * What a screen that sells something says of the wallet's D-bucks: the amount the wallet proved it
+	 * holds, or, with none proved, why there is none to show. bKnown is whether it is an amount.
+	 */
+	FString DBucksLine(bool& bKnown) const;
+
 	/** The heroes the shop sells, and those the wallet proved it owns (by the shop's hero id). */
 	TArray<FSenniteHeroForSale> ShopHeroes;
 	TArray<FString> OwnedHeroes;

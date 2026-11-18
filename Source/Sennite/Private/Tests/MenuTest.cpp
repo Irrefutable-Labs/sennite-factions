@@ -125,6 +125,7 @@ namespace
 			Test->TestTrue(TEXT("A tap on HEROES opens the character select"), Menu->Page == ESenniteMenuPage::Heroes);
 			Test->TestEqual(TEXT("It opens on the player's own hero"), Heroes[Menu->Browse].Id, USenniteProfile::Get().PlayingHero(Menu));
 			Test->TestTrue(TEXT("The player's own hero is marked chosen"), MenuCheck::Has(Menu, TEXT("chosen")));
+			Test->TestTrue(TEXT("A game with no shop shows no wallet balance"), MenuCheck::Line(Menu, TEXT("balance")).IsEmpty());
 			// the arrows, to the free hero
 			MenuCheck::Tap(Menu, Heroes[(Menu->Browse + 1) % Heroes.Num()].Id == Free ? FName(TEXT("next")) : FName(TEXT("prev")));
 			Enter(EPhase::ToWraith);

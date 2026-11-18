@@ -19,6 +19,7 @@
 #include "SenniteBaseEditor.h"
 #include "SenniteCharacter.h"
 #include "SennitePublisher.h"
+#include "SenniteUi.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/SkeletalMesh.h"
@@ -145,6 +146,7 @@ namespace
 			Test->TestEqual(TEXT("The panel is on its shop page"), Drawn(Editor, TEXT("page")), FString(TEXT("SHOP")));
 			Test->TestEqual(TEXT("A new wallet holds no D-bucks"), Server->DBucks, 0);
 			Test->TestTrue(TEXT("The panel shows what the wallet proved it holds"), Drawn(Editor, TEXT("purse")).StartsWith(TEXT("D-BUCKS 0   ERA ")));
+			Test->TestEqual(TEXT("The shop shows the wallet's D-bucks at its top right"), Drawn(Editor, TEXT("balance")), FString(TEXT("0 D-BUCKS")));
 			Test->TestEqual(TEXT("The first row trades ERA for D-bucks, chosen"), Drawn(Editor, TEXT("shop0")), FString(TEXT("> BUY D-BUCKS   2 ERA")));
 			Test->TestEqual(TEXT("The shop lists the skin at its price"), Drawn(Editor, TEXT("shop1")), FString::Printf(TEXT("  %s   %d D-BUCKS"), *Skin.Name.ToUpper(), Skin.Price));
 			Test->TestEqual(TEXT("The wallet owns no skin"), Server->OwnedSkins.Num(), 0);
@@ -168,6 +170,7 @@ namespace
 				return false;
 			}
 			Test->TestEqual(TEXT("The panel shows the D-bucks the wallet proves it holds"), Drawn(Editor, TEXT("purse")).Left(FString::Printf(TEXT("D-BUCKS %d   "), DBucksBought).Len()), FString::Printf(TEXT("D-BUCKS %d   "), DBucksBought));
+			Test->TestEqual(TEXT("The shop's top right shows the D-bucks the trade brought"), Drawn(Editor, TEXT("balance")), FString::Printf(TEXT("%s D-BUCKS"), *SenniteUi::Grouped(DBucksBought)));
 			Test->TestTrue(TEXT("The skin's row is chosen, and the panel offers to buy it"), Drawn(Editor, TEXT("shop1")).StartsWith(TEXT("> ")) && Drawn(Editor, TEXT("keys")).StartsWith(TEXT("F: buy")));
 			Log(Editor, TEXT("with D-bucks"));
 			Tap(Controller, EKeys::F);

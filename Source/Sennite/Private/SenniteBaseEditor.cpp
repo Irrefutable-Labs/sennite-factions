@@ -27,8 +27,10 @@
 #include "SenniteMatch.h"
 #include "SenniteMatchBases.h"
 #include "GameFramework/PlayerStart.h"
+#include "SennitePlayerController.h"
 #include "SennitePublisher.h"
 #include "SenniteStructure.h"
+#include "SenniteTouch.h"
 
 namespace
 {
@@ -973,6 +975,23 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 		Line(TEXT("faction"), TEXT("ANOTHER FACTION'S PARCEL"), 11, Dim);
 	}
 
+	// Top right on the pages where something is bought or worn: what the wallet proved it holds of D-bucks,
+	// beside a wallet. On a phone the editor's buttons fill that corner, and it stands to their left.
+	auto Balance = [&]() {
+		float Right = Canvas->ClipX - 24.0f * S;
+		ASennitePlayerController* Player = Cast<ASennitePlayerController>(Hud->GetOwningPlayerController());
+		const USenniteTouchControls* Touch = Player != nullptr ? Player->GetTouchControls() : nullptr;
+		FVector2D Close;
+		if (Touch != nullptr && Touch->WhereKey(EKeys::B, Close)) {
+			// CLOSE is the grid's top left button
+			Right = FMath::Min(Right, float(Close.X) - 58.0f * S);
+		}
+		bool bKnown = false;
+		const FString Holds = Server->DBucksLine(bKnown);
+		SenniteUi::Balance(Canvas, FVector2D(Right, 16.0f * S), S, Holds, bKnown);
+		Editor->LastDrawn.Add(FString::Printf(TEXT("balance=%s"), *Holds));
+	};
+
 	const FString Purse = Server->bMaterialsKnown ? FString::Printf(TEXT("D-BUCKS %d   ERA %s"), Server->DBucks, *Server->Era) : FString(TEXT("M: show what the wallet holds"));
 	if (Editor->bInventory && Server->bConnected) {
 		// what the wallet proves it holds: a skin is owned whether or not it is worn
@@ -1000,6 +1019,7 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 			Line(TEXT("message"), Server->Message, 11, Server->bBusy ? Dim : Server->bLastOk ? Good : Short);
 		}
 		Draw();
+		Balance();
 		return;
 	}
 
@@ -1024,6 +1044,7 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 			Line(TEXT("message"), Server->Message, 11, Server->bBusy ? Dim : Server->bLastOk ? Good : Short);
 		}
 		Draw();
+		Balance();
 		return;
 	}
 

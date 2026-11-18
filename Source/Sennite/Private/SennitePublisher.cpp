@@ -1,4 +1,5 @@
 #include "SennitePublisher.h"
+#include "SenniteUi.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -427,6 +428,19 @@ void USennitePublisher::AskShop()
 		}
 		bShop = true;
 	});
+}
+
+FString USennitePublisher::DBucksLine(bool& bKnown) const
+{
+	bKnown = bConnected && bMaterialsKnown;
+	if (!bConnected) {
+		return FString(TEXT("NO WALLET CONNECTED"));
+	}
+	if (bMaterialsKnown) {
+		return FString::Printf(TEXT("%s D-BUCKS"), *SenniteUi::Grouped(DBucks));
+	}
+	// nothing proved yet: no amount is made up for it
+	return FString(ProofPending() ? TEXT("ASKING YOUR WALLET ...") : TEXT("NOT PROVED YET"));
 }
 
 void USennitePublisher::BuyDBucks(const FString& InEra)

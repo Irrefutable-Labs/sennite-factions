@@ -1,6 +1,7 @@
 // How the game's menus and panels look, drawn on the canvas: text set crisp at the size it is shown
 // (the engine's own Roboto through its font cache, not a small font stretched), plates with two cut
-// corners filled top to bottom between two colours, their edges, and the arrows of the arrow buttons.
+// corners filled top to bottom between two colours, their edges, the arrows of the arrow buttons, and
+// the plate that says what the player's wallet holds, with a wallet drawn beside it.
 // The menu (SenniteMenu.cpp) and the base editor's panel (SenniteBaseEditor.cpp) draw with these, so
 // they look like one game. Every size given here is in screen pixels; callers scale from a 720-line
 // screen, as the HUD does.
@@ -62,4 +63,17 @@ namespace SenniteUi
 
 	/** A panel: a dark plate with a gold edge down its left side, for lists and readouts. */
 	void Panel(UCanvas* Canvas, const FBox2D& Box, float Scale);
+
+	/** A whole number with its thousands set apart: 1,200. */
+	FString Grouped(int32 Number);
+
+	/** A wallet, drawn in gold: Size across and high, its top left corner at At. */
+	void Wallet(UCanvas* Canvas, const FVector2D& At, float Size);
+
+	/**
+	 * What the player's wallet holds, on a plate with a wallet beside it, the plate's top right corner at
+	 * TopRight: where a screen sells something. bKnown is whether Line is an amount, or says why there is
+	 * none to show yet. Returns the plate.
+	 */
+	FBox2D Balance(UCanvas* Canvas, const FVector2D& TopRight, float Scale, const FString& Line, bool bKnown);
 }

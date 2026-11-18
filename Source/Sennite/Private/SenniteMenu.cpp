@@ -623,6 +623,15 @@ void ASenniteMenuHUD::DrawHeroes(ASenniteMenuController* Menu)
 	SenniteUi::Fade(Canvas, FBox2D(FVector2D(Whole.Min.X, (H - 190.0f) * S), Whole.Max), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.7f), true);
 	Button(TEXT("back"), TEXT("BACK"), 24.0f, 24.0f, 184.0f, 58.0f, true, 17, false, -1);
 
+	// top right, where heroes are sold: what the player's wallet holds, as it proved it
+	const USennitePublisher* Seller = Shop(Menu);
+	if (Seller != nullptr && Seller->IsOn()) {
+		bool bKnown = false;
+		const FString Holds = Seller->DBucksLine(bKnown);
+		SenniteUi::Balance(Canvas, FVector2D((W - 24.0f) * S, 24.0f * S), S, Holds, bKnown);
+		Drawing.Add(FString::Printf(TEXT("balance=%s"), *Holds));
+	}
+
 	const float Left = 48.0f;
 	Text(TEXT("count"), FString::Printf(TEXT("HERO %d OF %d"), Menu->Browse + 1, Heroes.Num()), Left * S, 122.0f * S, 12, SenniteUi::Gold);
 	// the name, as large as the column lets it be
@@ -682,8 +691,6 @@ void ASenniteMenuHUD::DrawHeroes(ASenniteMenuController* Menu)
 	else {
 		const FSenniteHeroForSale* ForSale = Server->HeroForSale(Hero.Id.ToString());
 		Button(TEXT("buy"), ForSale != nullptr ? FString::Printf(TEXT("BUY  %d D-BUCKS"), ForSale->Price) : FString(TEXT("NOT IN THE SHOP")), BX, BY, BW, 66.0f, ForSale != nullptr, 18, true);
-		Text(TEXT("purse"), Server->bMaterialsKnown ? FString::Printf(TEXT("YOUR WALLET: %d D-BUCKS"), Server->DBucks) : FString(TEXT("YOUR WALLET: NOT PROVED YET")),
-			(Left + 2.0f) * S, Under, 11, SenniteUi::Dim, 0.0f, false);
 	}
 	if (Server != nullptr && Server->IsOn() && !Server->Message.IsEmpty() && (Server->bBusy || !Server->HeroOnItsWay.IsEmpty())) {
 		Text(TEXT("shop"), Server->Message.ToUpper(), (Left + 2.0f) * S, Under + 22.0f * S, 10, White, 0.0f, false);

@@ -21,6 +21,7 @@
 #include "SenniteHeroes.h"
 #include "SennitePlayerState.h"
 #include "SennitePublisher.h"
+#include "SenniteUi.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -125,6 +126,7 @@ namespace
 				Test->TestFalse(TEXT("It has no CHOOSE before it is bought"), MenuCheck::Has(Menu, TEXT("choose")));
 				Test->TestTrue(TEXT("BUY is there and can be tapped"), MenuCheck::Has(Menu, TEXT("buy"), &bEnabled) && bEnabled);
 				Test->TestTrue(TEXT("The wallet holds enough D-bucks"), DBucksBefore >= Price);
+				Test->TestEqual(TEXT("The screen shows the D-bucks the wallet proved it holds"), MenuCheck::Line(Menu, TEXT("balance")), FString::Printf(TEXT("%s D-BUCKS"), *SenniteUi::Grouped(DBucksBefore)));
 				GameCheck::Shot(TEXT("HeroShop"), TEXT("for_sale.png"));
 				MenuCheck::Tap(Menu, TEXT("buy"));
 			}
@@ -147,6 +149,7 @@ namespace
 			}
 			bool bEnabled = false;
 			Test->TestTrue(TEXT("The bought hero says it is the player's"), MenuCheck::Line(Menu, TEXT("status")) == TEXT("YOURS"));
+			Test->TestEqual(TEXT("The screen shows what the wallet holds after paying"), MenuCheck::Line(Menu, TEXT("balance")), FString::Printf(TEXT("%s D-BUCKS"), *SenniteUi::Grouped(DBucksBefore - Price)));
 			Test->TestTrue(TEXT("It can be chosen now"), MenuCheck::Has(Menu, TEXT("choose"), &bEnabled) && bEnabled);
 			GameCheck::Shot(TEXT("HeroShop"), TEXT("bought.png"));
 			MenuCheck::Tap(Menu, TEXT("choose"));
