@@ -1,5 +1,5 @@
 // Sound check. Run in the game on the test range: every sound the game names has recordings and each
-// one loads; the air of the place is going; the hero's steps are heard as it walks, its jump as it
+// one loads; no sound goes round in the background; the hero's steps are heard as it walks, its jump as it
 // leaves the ground and its landing as it meets it again; its own weapon's attack is heard; and the
 // in-game menu is heard opening, its buttons and its closing.
 //
@@ -79,8 +79,8 @@ namespace
 				TEXT("step.metal.walk"), TEXT("voice.f.attack"), TEXT("voice.f.hit"), TEXT("voice.f.pain"), TEXT("voice.m.attack"), TEXT("voice.m.hit"), TEXT("voice.m.pain") }) {
 				Test->TestTrue(FString::Printf(TEXT("The game has a sound called %s"), Name), Names.Contains(FName(Name)));
 			}
-			Test->TestEqual(TEXT("The air of the field is going"), USenniteSounds::Heard(World, TEXT("air.field")), 1);
-			UE_LOG(LogSoundsCheck, Display, TEXT("GAMECHECK sounds: %d named, %d recordings load; the air of the field is going"), Names.Num(), Takes);
+			Test->TestEqual(TEXT("No sound goes round in the background"), USenniteSounds::HeardBeginning(World, TEXT("air.")), 0);
+			UE_LOG(LogSoundsCheck, Display, TEXT("GAMECHECK sounds: %d named, %d recordings load; nothing goes round in the background"), Names.Num(), Takes);
 			Player->SetControlRotation(FRotator(0.0, Hero->GetActorRotation().Yaw, 0.0));
 			Began = Hero->GetActorLocation();
 			Before = USenniteSounds::HeardBeginning(World, TEXT("step."));

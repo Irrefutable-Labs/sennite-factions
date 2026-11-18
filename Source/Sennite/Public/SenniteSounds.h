@@ -106,7 +106,7 @@ public:
 	UPROPERTY(Config)
 	float RunStride = 210.0f;
 
-	/** The air of a map (by the map's name) and of every other one. */
+	/** The air of a map (by the map's name) and of every other one: a sound that goes round while the map is open. None is set. */
 	UPROPERTY(Config)
 	TMap<FString, FName> Ambience;
 

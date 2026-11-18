@@ -243,6 +243,10 @@ void USenniteSounds::OnWorldBeginPlay(UWorld& InWorld)
 	}
 	// every recording is loaded now, so the first step or shot does not wait for its file
 	for (const FSenniteSound& Each : Sounds) {
+		if (Each.Name.ToString().StartsWith(TEXT("air."))) {
+			// a long one that goes round is loaded when a map asks for it
+			continue;
+		}
 		for (const FSoftObjectPath& Path : Each.Takes) {
 			if (UObject* Wave = Path.TryLoad()) {
 				Loaded.Add(Wave);
@@ -256,7 +260,7 @@ void USenniteSounds::OnWorldBeginPlay(UWorld& InWorld)
 	}
 	SpawnedHandle = InWorld.AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &USenniteSounds::Spawned));
 	DestroyedHandle = InWorld.AddOnActorDestroyedHandler(FOnActorDestroyed::FDelegate::CreateUObject(this, &USenniteSounds::Destroyed));
-	// the air of the place
+	// the air of the place, where a map has one
 	const FName* Here = Ambience.Find(UGameplayStatics::GetCurrentLevelName(&InWorld, true));
 	Air(Here != nullptr ? *Here : AmbienceElsewhere, AirLoop, AmbienceVolume);
 }
