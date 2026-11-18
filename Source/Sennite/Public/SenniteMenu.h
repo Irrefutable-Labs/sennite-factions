@@ -100,6 +100,12 @@ private:
 	/** The button a press began on, by tap or click; it acts when the press ends on the same button. */
 	FName Pressed;
 
+public:
+	/** The button held down now, if any: the menu draws it pressed. */
+	FName HeldButton() const { return Pressed; }
+
+private:
+
 	/** A press or a tap at a point of the screen. */
 	void Press(const FVector2D& Where);
 	void Release(const FVector2D& Where);
@@ -144,14 +150,25 @@ private:
 	void DrawJoin(ASenniteMenuController* Menu);
 	void DrawLobby(ASenniteMenuController* Menu);
 
-	/** A button: a plate with its text in the middle, on a 720-line screen's measure. */
-	void Button(FName Action, const FString& Text, float X, float Y, float Width, float Height, bool bEnabled = true, int32 Points = 18);
+	/**
+	 * A button, on a 720-line screen's measure: a plate with its text in the middle. bPrimary is the one
+	 * thing the page is for. Arrow is -1 or 1 for an arrow pointing left or right: before the word, or,
+	 * for a button whose text is one mark, in its place.
+	 */
+	void Button(FName Action, const FString& Text, float X, float Y, float Width, float Height, bool bEnabled = true, float Points = 18.0f, bool bPrimary = false, int32 Arrow = 0);
 
-	/** A line of text at a point size for a 720-line screen; centred on X when bCentre. Recorded under its name. */
-	void Text(const TCHAR* Name, const FString& Line, float X, float Y, int32 Points, const FLinearColor& Colour, bool bCentre = false);
+	/** A line of text at a point size for a 720-line screen. Align is where X is in it: 0 left, 0.5 middle, 1 right. Recorded under its name. */
+	void Text(const TCHAR* Name, const FString& Line, float X, float Y, float Points, const FLinearColor& Colour, float Align = 0.0f, bool bBold = true);
+
+	/** A page's name at its top left: First in white, Second in gold, and a line under them. */
+	void Heading(const FString& First, const FString& Second, const FString& Under);
+
+	/** The button under the mouse, and the one held down, this frame. */
+	FName Hovered;
+	FName Held;
 
 	/** How wide a line of text is drawn at a point size, on the screen. */
-	float Width(const FString& Line, int32 Points) const;
+	float Width(const FString& Line, float Points) const;
 
 	float S = 1.0f;
 	TArray<FString> Drawing;

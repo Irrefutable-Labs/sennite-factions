@@ -2,7 +2,7 @@
 
   UnrealEditor-Cmd Sennite.uproject -run=pythonscript -script=Tools/build_test_range.py -unattended -nullrhi
 
-Phone-level lighting only: one shadowed sun, an unshadowed sky fill, no ray tracing, no Lumen.
+Phone-level lighting only: one shadowed sun, an unshadowed fill from a fixed daylight sky, no ray tracing, no Lumen.
 The floor is one build-grid cell thick and the blocks sit on the 480 cm build grid, so building pieces
 line up with them. Writes /Game/Maps/TestRange."""
 import os
@@ -128,10 +128,17 @@ for key, value in (("intensity", 6.0), ("atmosphere_sun_light", True), ("dynamic
                    ("dynamic_shadow_cascades", 3), ("cast_shadows", True)):
     sc.set_editor_property(key, value)
 
+# The sky fill is the engine's daylight sky, as a fixed texture: it lights the shaded side of a hero from
+# the first frame, on a phone as on a desktop (a sky captured live is black until it is captured, and a
+# phone may not capture one at all), and from below as well as above, so nothing in shade is black.
+daylight = unreal.load_asset("/Engine/MapTemplates/Sky/DaylightAmbientCubemap")  # by its path: the registry has not scanned the engine's templates
+if daylight is None:
+    raise RuntimeError("the engine's daylight sky did not load")
 sky = spawn(unreal.SkyLight, "sky_fill", unreal.Vector(0, 0, 1200), folder="lights")
 kc = sky.light_component
 kc.set_mobility(unreal.ComponentMobility.MOVABLE)
-for key, value in (("real_time_capture", True), ("cast_shadows", False), ("intensity", 1.0)):
+for key, value in (("source_type", unreal.SkyLightSourceType.SLS_SPECIFIED_CUBEMAP), ("cubemap", daylight),
+                   ("real_time_capture", False), ("lower_hemisphere_is_black", False), ("cast_shadows", False), ("intensity", 1.8)):
     kc.set_editor_property(key, value)
 
 atmosphere = spawn(unreal.SkyAtmosphere, "atmosphere", folder="lights")
