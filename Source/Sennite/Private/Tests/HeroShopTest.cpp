@@ -1,5 +1,5 @@
 // Hero shop check. Run in the game on the menu against a publisher's server on DSM, by taps on the
-// screen, as a player with a new wallet meets it. In HEROES a tap on a bought hero's tile shows it; with
+// screen, as a player with a new wallet meets it. In the STORE's heroes a tap on a bought hero's tile shows it; with
 // no wallet connected its button is CONNECT YOUR WALLET, and a tap hands the wallet the connect code.
 // Connected, the wallet holds ERA and no D-bucks: the button is GET D-BUCKS, and a tap trades ERA for
 // them. With enough, the button is BUY and the wallet pays; once the wallet proves it owns the hero,
@@ -77,7 +77,7 @@ namespace
 
 		switch (Phase) {
 		case EPhase::WaitForMenu:
-			if (Menu == nullptr || !MenuCheck::Has(Menu, TEXT("heroes")) || World->GetTimeSeconds() < 2.0) {
+			if (Menu == nullptr || !MenuCheck::Has(Menu, TEXT("store")) || World->GetTimeSeconds() < 2.0) {
 				return false;
 			}
 			// the first hero the shop sells
@@ -88,13 +88,13 @@ namespace
 				}
 			}
 			Test->TestFalse(TEXT("A new profile cannot play the bought hero"), USenniteHeroes::MayPlay(Menu, Bought));
-			MenuCheck::Tap(Menu, TEXT("heroes"));
+			MenuCheck::Tap(Menu, TEXT("store"));
 			Enter(EPhase::ToLocked);
 			return false;
 
 		case EPhase::ToLocked: {
 			if (Menu == nullptr || Menu->Page != ESenniteMenuPage::Heroes) {
-				return Elapsed() > 10.0 ? Fail(TEXT("HEROES did not open the character select")) : false;
+				return Elapsed() > 10.0 ? Fail(TEXT("STORE did not open the store on its heroes")) : false;
 			}
 			// a tap on the bought hero's own tile
 			if (Heroes[Menu->Browse].Id != Bought) {

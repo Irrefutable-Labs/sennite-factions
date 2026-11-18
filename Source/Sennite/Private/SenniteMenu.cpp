@@ -13,6 +13,7 @@
 #include "IPAddress.h"
 #include "Kismet/GameplayStatics.h"
 #include "LobbyGameMode.h"
+#include "SenniteBaseEditor.h"
 #include "SenniteGameInstance.h"
 #include "SenniteHeroes.h"
 #include "SennitePlayerState.h"
@@ -39,6 +40,47 @@ namespace
 		const UGameInstance* Game = Context->GetWorld() != nullptr ? Context->GetWorld()->GetGameInstance() : nullptr;
 		return Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
 	}
+
+	/** The mesh a shop skin is ([/Script/Sennite.SenniteBaseEditor] in DefaultGame.ini), or null for a skin this game has no mesh for. */
+	const FSenniteSkinMesh* SkinMesh(const FString& SkinId)
+	{
+		return GetDefault<ASenniteBaseEditor>()->Skins.FindByPredicate([&SkinId](const FSenniteSkinMesh& Each) { return Each.Id == SkinId; });
+	}
+
+	/**
+	 * The hero a shop skin is a skin of: the one whose own mesh has the skin's skeleton, as the game goes
+	 * by when it dresses a hero in play. Null if it is no hero's. Found once for each skin.
+	 */
+	const FSenniteHero* SkinHero(const FString& SkinId)
+	{
+		static TMap<FString, FName> Known;
+		if (const FName* Found = Known.Find(SkinId)) {
+			return Found->IsNone() ? nullptr : USenniteHeroes::Find(*Found);
+		}
+		FName Of;
+		const FSenniteSkinMesh* Skin = SkinMesh(SkinId);
+		if (const USkeletalMesh* Mesh = Skin != nullptr ? Cast<USkeletalMesh>(Skin->Mesh.TryLoad()) : nullptr) {
+			// only the heroes of the skin's own pack are looked at: no other hero is loaded to find this out
+			TArray<FString> Parts;
+			Skin->Mesh.GetLongPackageName().ParseIntoArray(Parts, TEXT("/"));
+			const FString Pack = Parts.Num() > 1 ? FString::Printf(TEXT("/%s/%s/"), *Parts[0], *Parts[1]) : FString();
+			for (const FSenniteHero& Hero : USenniteHeroes::All()) {
+				if (Pack.IsEmpty() || !Hero.Mesh.GetLongPackageName().StartsWith(Pack)) {
+					continue;
+				}
+				const USkeletalMesh* Own = Cast<USkeletalMesh>(Hero.Mesh.TryLoad());
+				if (Own != nullptr && Own->GetSkeleton() == Mesh->GetSkeleton()) {
+					Of = Hero.Id;
+					break;
+				}
+			}
+		}
+		Known.Add(SkinId, Of);
+		return Of.IsNone() ? nullptr : USenniteHeroes::Find(Of);
+	}
+
+	/** What the stage calls a shop skin standing on it. */
+	const TCHAR* SkinOnStage = TEXT("skin:");
 }
 
 ASenniteMenuController::ASenniteMenuController()
@@ -156,6 +198,11 @@ void ASenniteMenuController::UpdateStage(float DeltaTime)
 	else if (Page == ESenniteMenuPage::Heroes && USenniteHeroes::All().IsValidIndex(Browse)) {
 		Want.Add(USenniteHeroes::All()[Browse].Id);
 	}
+	else if (const USennitePublisher* Server = Shop(this); Page == ESenniteMenuPage::Skins && Server != nullptr && Server->ShopSkins.IsValidIndex(BrowseSkin)
+		&& SkinHero(Server->ShopSkins[BrowseSkin].Id) != nullptr) {
+		// the skin the store shows, on the hero it is a skin of
+		Want.Add(FName(*(FString(SkinOnStage) + Server->ShopSkins[BrowseSkin].Id)));
+	}
 	else {
 		Want.Add(USenniteProfile::Get().PlayingHero(this));
 	}
@@ -191,7 +238,7 @@ void ASenniteMenuController::UpdateStage(float DeltaTime)
 	// the buttons are to the left and the hero to the right on every page. On the character select the row
 	// of heroes to pick from lies along the bottom, so the hero stands a little further back, whole above
 	// it; a lobby's row is seen from far enough that the heroes at its ends are whole too
-	const bool bSelect = Page == ESenniteMenuPage::Heroes;
+	const bool bSelect = Page == ESenniteMenuPage::Heroes || Page == ESenniteMenuPage::Skins;
 	const float Distance = FMath::Max(Top * (bSelect ? 1.38f : 1.2f) / (2.0f * HalfUp), Row * (Figures.Num() > 1 ? 2.1f : 1.25f) / (2.0f * HalfAcross));
 	const float Across = 2.0f * Distance * HalfAcross;
 	const float Aside = -0.17f * Across;
@@ -211,7 +258,13 @@ void ASenniteMenuController::StandHeroes(const TArray<FName>& Heroes)
 	FigureHeroes = Heroes;
 	USenniteGameInstance* Game = GetGameInstance<USenniteGameInstance>();
 	for (int32 Index = 0; Index < Heroes.Num(); ++Index) {
-		const FSenniteHero& Hero = USenniteHeroes::FindOrDefault(Heroes[Index]);
+		// a hero as it ships, or a shop skin: the hero it is a skin of, in the skin's mesh
+		const FString Standing = Heroes[Index].ToString();
+		const FString SkinId = Standing.StartsWith(SkinOnStage) ? Standing.Mid(FCString::Strlen(SkinOnStage)) : FString();
+		const FSenniteSkinMesh* Skin = SkinId.IsEmpty() ? nullptr : SkinMesh(SkinId);
+		const FSenniteHero* Skinned = Skin != nullptr ? SkinHero(SkinId) : nullptr;
+		const FSenniteHero& Hero = Skinned != nullptr ? *Skinned : USenniteHeroes::FindOrDefault(Heroes[Index]);
+		const FSoftObjectPath Wearing = Skinned != nullptr ? Skin->Mesh : Hero.Mesh;
 		const FVector Where(0.0, (Index - (Heroes.Num() - 1) * 0.5f) * Spacing, 0.0);
 		FActorSpawnParameters Spawn;
 		Spawn.ObjectFlags |= RF_Transient;
@@ -225,7 +278,7 @@ void ASenniteMenuController::StandHeroes(const TArray<FName>& Heroes)
 		Figure->FinishSpawning(FTransform(FRotator(0.0, 90.0, 0.0), Where));
 		USkeletalMeshComponent* Body = Figure->GetSkeletalMeshComponent();
 		Body->SetMobility(EComponentMobility::Movable);
-		if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(Hero.Mesh.TryLoad())) {
+		if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(Wearing.TryLoad())) {
 			Body->SetSkeletalMeshAsset(Mesh);
 		}
 		if (UClass* Anim = Hero.AnimClass.TryLoadClass<UAnimInstance>()) {
@@ -270,7 +323,7 @@ bool ASenniteMenuController::InputKey(const FInputKeyEventArgs& Params)
 		Act(TEXT("back"));
 		return true;
 	}
-	if (Page == ESenniteMenuPage::Heroes) {
+	if (Page == ESenniteMenuPage::Heroes || Page == ESenniteMenuPage::Skins) {
 		if (Key == EKeys::Left || Key == EKeys::A) {
 			Act(TEXT("prev"));
 			return true;
@@ -279,7 +332,7 @@ bool ASenniteMenuController::InputKey(const FInputKeyEventArgs& Params)
 			Act(TEXT("next"));
 			return true;
 		}
-		if (Key == EKeys::Enter) {
+		if (Key == EKeys::Enter && Page == ESenniteMenuPage::Heroes) {
 			Act(TEXT("choose"));
 			return true;
 		}
@@ -350,10 +403,29 @@ void ASenniteMenuController::Act(FName Action)
 	if (Name == TEXT("play")) {
 		UGameplayStatics::OpenLevel(this, FName(PlayMap));
 	}
-	else if (Name == TEXT("heroes")) {
+	else if (Name == TEXT("store") || Name == TEXT("heroes") || Name == TEXT("tab:heroes")) {
+		// the store opens on its heroes; the lobby's HEROES is the same section
 		Page = ESenniteMenuPage::Heroes;
 		Browse = IndexOf(Profile.PlayingHero(this));
 		Note.Reset();
+	}
+	else if (Name == TEXT("tab:skins")) {
+		Page = ESenniteMenuPage::Skins;
+		// on the skin worn, if one is
+		const USennitePublisher* Server = Shop(this);
+		BrowseSkin = Server != nullptr ? FMath::Max(0, Server->ShopSkins.IndexOfByPredicate([Server](const FSenniteSkinForSale& Skin) { return Skin.Id == Server->Wearing; })) : 0;
+		Note.Reset();
+	}
+	else if (Name == TEXT("tab:dbucks")) {
+		Page = ESenniteMenuPage::DBucks;
+		Note.Reset();
+	}
+	else if (Name == TEXT("base")) {
+		// the player's base is on the map the game is played on: it opens there, on the planning view
+		const USennitePublisher* Server = Shop(this);
+		if (Server != nullptr && Server->IsOn()) {
+			UGameplayStatics::OpenLevel(this, FName(PlayMap), true, ASenniteBaseEditor::OpenOption);
+		}
 	}
 	else if (Name == TEXT("host")) {
 		UGameplayStatics::OpenLevel(this, FName(MenuMap), true, TEXT("listen?game=lobby"));
@@ -366,9 +438,42 @@ void ASenniteMenuController::Act(FName Action)
 	else if (Name == TEXT("quit")) {
 		ConsoleCommand(TEXT("quit"));
 	}
+	else if ((Name == TEXT("prev") || Name == TEXT("next")) && Page == ESenniteMenuPage::Skins) {
+		const USennitePublisher* Server = Shop(this);
+		const int32 Count = Server != nullptr ? Server->ShopSkins.Num() : 0;
+		BrowseSkin = Count > 0 ? (BrowseSkin + (Name == TEXT("next") ? 1 : -1) + Count) % Count : 0;
+		Note.Reset();
+	}
 	else if (Name == TEXT("prev") || Name == TEXT("next")) {
 		Browse = (Browse + (Name == TEXT("next") ? 1 : -1) + Heroes.Num()) % FMath::Max(1, Heroes.Num());
 		Note.Reset();
+	}
+	else if (Name.StartsWith(SkinOnStage)) {
+		// a skin's own tile in the store
+		const USennitePublisher* Server = Shop(this);
+		const FString Id = Name.Mid(FCString::Strlen(SkinOnStage));
+		const int32 At = Server != nullptr ? Server->ShopSkins.IndexOfByPredicate([&Id](const FSenniteSkinForSale& Skin) { return Skin.Id == Id; }) : INDEX_NONE;
+		if (At != INDEX_NONE) {
+			BrowseSkin = At;
+			Note.Reset();
+		}
+	}
+	else if (Name == TEXT("buyskin") || Name == TEXT("wear") || Name == TEXT("takeoff")) {
+		const UGameInstance* Game = GetGameInstance();
+		USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+		if (Server == nullptr || !Server->IsOn() || !Server->ShopSkins.IsValidIndex(BrowseSkin)) {
+			return;
+		}
+		const FString Id = Server->ShopSkins[BrowseSkin].Id;
+		if (Name == TEXT("buyskin")) {
+			if (Server->bConnected && !Server->bBusy) {
+				Server->BuySkin(Id);
+			}
+		}
+		else if (Server->Owns(Id)) {
+			// worn, or taken off: it is on the hero in play only while the wallet proves it owns it
+			Server->Wear(Name == TEXT("wear") ? Id : FString());
+		}
 	}
 	else if (Name.StartsWith(TEXT("hero:"))) {
 		// a hero's own tile on the character select
@@ -437,7 +542,7 @@ void ASenniteMenuController::Act(FName Action)
 		}
 	}
 	else if (Name == TEXT("back")) {
-		if (Page == ESenniteMenuPage::Heroes) {
+		if (InStore(Page)) {
 			Page = InLobby() ? ESenniteMenuPage::Lobby : ESenniteMenuPage::Main;
 		}
 		else if (Page == ESenniteMenuPage::Join) {
@@ -588,6 +693,8 @@ void ASenniteMenuHUD::DrawHUD()
 	switch (Menu->Page) {
 	case ESenniteMenuPage::Main: DrawMain(Menu); break;
 	case ESenniteMenuPage::Heroes: DrawHeroes(Menu); break;
+	case ESenniteMenuPage::Skins: DrawSkins(Menu); break;
+	case ESenniteMenuPage::DBucks: DrawDBucks(Menu); break;
 	case ESenniteMenuPage::Join: DrawJoin(Menu); break;
 	case ESenniteMenuPage::Lobby: DrawLobby(Menu); break;
 	}
@@ -627,12 +734,18 @@ void ASenniteMenuHUD::DrawMain(ASenniteMenuController* Menu)
 	SenniteUi::Fade(Canvas, FBox2D(FVector2D(Whole.Min.X, H - 180.0f * S), Whole.Max), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.5f), true);
 	Heading(TEXT("SENNITE"), TEXT("FACTIONS"), TEXT("BETA"));
 	const float X = 48.0f;
-	float Y = 156.0f;
-	const float Step = 74.0f;
-	for (const TPair<const TCHAR*, const TCHAR*>& Each : { TPair<const TCHAR*, const TCHAR*>(TEXT("play"), TEXT("PLAY")), { TEXT("heroes"), TEXT("HEROES") },
-			{ TEXT("host"), TEXT("HOST A LOBBY") }, { TEXT("join"), TEXT("JOIN A LOBBY") }, { TEXT("quit"), TEXT("QUIT") } }) {
-		Button(Each.Key, Each.Value, X, Y, 320.0f, 62.0f, true, 18, FName(Each.Key) == TEXT("play"));
+	float Y = 140.0f;
+	const float Step = 72.0f;
+	// a base is planned where there is a publisher's server, which keeps the factions' bases
+	const USennitePublisher* Server = Shop(Menu);
+	const bool bBases = Server != nullptr && Server->IsOn();
+	for (const TPair<const TCHAR*, const TCHAR*>& Each : { TPair<const TCHAR*, const TCHAR*>(TEXT("play"), TEXT("PLAY")), { TEXT("store"), TEXT("STORE") },
+			{ TEXT("base"), TEXT("BASE EDITOR") }, { TEXT("host"), TEXT("HOST A LOBBY") }, { TEXT("join"), TEXT("JOIN A LOBBY") }, { TEXT("quit"), TEXT("QUIT") } }) {
+		Button(Each.Key, Each.Value, X, Y, 320.0f, 60.0f, bBases || FName(Each.Key) != TEXT("base"), 18, FName(Each.Key) == TEXT("play"));
 		Y += Step;
+	}
+	if (!bBases) {
+		Text(TEXT("why"), TEXT("THE BASE EDITOR NEEDS THE PUBLISHER'S SERVER"), (X + 2.0f) * S, (Y + 2.0f) * S, 11, SenniteUi::Dim, 0.0f, false);
 	}
 	// bottom right, under the turning hero: who the player is
 	const FSenniteHero& Hero = USenniteHeroes::FindOrDefault(USenniteProfile::Get().PlayingHero(Menu));
@@ -657,16 +770,7 @@ void ASenniteMenuHUD::DrawHeroes(ASenniteMenuController* Menu)
 	const FBox2D Whole = Screen();
 	SenniteUi::Fade(Canvas, FBox2D(Whole.Min, FVector2D(600.0f * S, Whole.Max.Y)), FLinearColor(0.0f, 0.0f, 0.0f, 0.66f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
 	SenniteUi::Fade(Canvas, FBox2D(FVector2D(Whole.Min.X, (H - 190.0f) * S), Whole.Max), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.7f), true);
-	Button(TEXT("back"), TEXT("BACK"), 24.0f, 24.0f, 184.0f, 58.0f, true, 17, false, -1);
-
-	// top right, where heroes are sold: what the player's wallet holds, as it proved it
-	const USennitePublisher* Seller = Shop(Menu);
-	if (Seller != nullptr && Seller->IsOn()) {
-		bool bKnown = false;
-		const FString Holds = Seller->DBucksLine(bKnown);
-		SenniteUi::Balance(Canvas, FVector2D((W - 24.0f) * S, 24.0f * S), S, Holds, bKnown);
-		Drawing.Add(FString::Printf(TEXT("balance=%s"), *Holds));
-	}
+	StoreTop(Menu);
 
 	const float Left = 48.0f;
 	Text(TEXT("count"), FString::Printf(TEXT("HERO %d OF %d"), Menu->Browse + 1, Heroes.Num()), Left * S, 122.0f * S, 12, SenniteUi::Gold);
@@ -704,64 +808,25 @@ void ASenniteMenuHUD::DrawHeroes(ASenniteMenuController* Menu)
 	// What is done with the hero: chosen, or, for one not had yet, the next thing to do toward having it,
 	// with what that is said under the button.
 	const float BW = 340.0f;
-	const float BX = Left;
 	const float BY = 304.0f;
-	const float Under = (BY + 80.0f) * S;
-	FString Hint;
-	FString Hint2;
+	bool bHint = false;
 	if (bChosen) {
-		Button(TEXT("chosen"), TEXT("CHOSEN"), BX, BY, BW, 66.0f, false);
+		Button(TEXT("chosen"), TEXT("CHOSEN"), Left, BY, BW, 66.0f, false);
 	}
 	else if (bMay) {
-		Button(TEXT("choose"), TEXT("CHOOSE"), BX, BY, BW, 66.0f, true, 19, true);
-	}
-	else if (Server == nullptr || !Server->IsOn()) {
-		Button(TEXT("buy"), TEXT("NO SHOP ON THIS GAME"), BX, BY, BW, 66.0f, false, 14);
-		Hint = TEXT("THIS GAME IS NOT CONNECTED TO THE PUBLISHER'S");
-		Hint2 = TEXT("SERVER, WHERE HEROES ARE SOLD FOR D-BUCKS.");
-	}
-	else if (!Server->bConnected) {
-		Button(TEXT("wallet"), TEXT("CONNECT YOUR WALLET"), BX, BY, BW, 66.0f, !Server->ConnectCode.IsEmpty(), 16, true);
-		Hint = TEXT("HEROES ARE BOUGHT WITH D-BUCKS FROM YOUR DSM WALLET.");
-#if PLATFORM_ANDROID || PLATFORM_IOS
-		Hint2 = TEXT("THIS OPENS YOUR WALLET: APPROVE THIS GAME THERE.");
-#else
-		Hint2 = TEXT("THIS COPIES THE CONNECT CODE FOR YOUR WALLET TO READ.");
-#endif
-	}
-	else if (Server->HeroOnItsWay == Hero.Id.ToString()) {
-		Button(TEXT("buy"), TEXT("ON ITS WAY TO YOUR WALLET"), BX, BY, BW, 66.0f, false, 14);
-	}
-	else if (Server->bBusy) {
-		Button(TEXT("buy"), TEXT("WAITING FOR YOUR WALLET ..."), BX, BY, BW, 66.0f, false, 14);
-	}
-	else if (!Server->bMaterialsKnown) {
-		Button(TEXT("buy"), TEXT("ASKING YOUR WALLET ..."), BX, BY, BW, 66.0f, false, 14);
-	}
-	else if (const FSenniteHeroForSale* ForSale = Server->HeroForSale(Hero.Id.ToString())) {
-		if (Server->DBucks >= ForSale->Price) {
-			Button(TEXT("buy"), FString::Printf(TEXT("BUY  %s D-BUCKS"), *SenniteUi::Grouped(ForSale->Price)), BX, BY, BW, 66.0f, true, 18, true);
-		}
-		else {
-			// too few D-bucks: they are had by trading ERA from the wallet, here as in the shop
-			const bool bEra = FCString::Atod(*Server->Era) >= FCString::Atod(USennitePublisher::TradeEra());
-			Button(TEXT("dbucks"), TEXT("GET D-BUCKS"), BX, BY, BW, 66.0f, bEra, 18, true);
-			Hint = FString::Printf(TEXT("YOUR WALLET HAS %s OF THE %s D-BUCKS IT COSTS."), *SenniteUi::Grouped(Server->DBucks), *SenniteUi::Grouped(ForSale->Price));
-			Hint2 = bEra ? FString::Printf(TEXT("THIS TRADES %s ERA FROM YOUR WALLET FOR D-BUCKS."), USennitePublisher::TradeEra())
-				: FString::Printf(TEXT("A TRADE FOR D-BUCKS TAKES %s ERA: YOUR WALLET HAS %s."), USennitePublisher::TradeEra(), Server->Era.IsEmpty() ? TEXT("NONE") : *Server->Era);
-		}
+		Button(TEXT("choose"), TEXT("CHOOSE"), Left, BY, BW, 66.0f, true, 19, true);
 	}
 	else {
-		Button(TEXT("buy"), TEXT("NOT IN THE SHOP"), BX, BY, BW, 66.0f, false, 14);
+		FForSale Thing;
+		Thing.Kind = TEXT("HEROES");
+		Thing.Buy = TEXT("buy");
+		const FSenniteHeroForSale* ForSale = Server != nullptr ? Server->HeroForSale(Hero.Id.ToString()) : nullptr;
+		Thing.bListed = ForSale != nullptr;
+		Thing.Price = ForSale != nullptr ? ForSale->Price : 0;
+		Thing.bOnItsWay = Server != nullptr && Server->HeroOnItsWay == Hero.Id.ToString();
+		bHint = NextStep(Server, Thing, Left, BY, BW);
 	}
-	if (!Hint.IsEmpty()) {
-		// large enough to read on a phone held at arm's length
-		Text(TEXT("hint"), Hint, (Left + 2.0f) * S, Under, 12, FLinearColor::White, 0.0f, false);
-		Text(TEXT("hint2"), Hint2, (Left + 2.0f) * S, Under + 24.0f * S, 12, FLinearColor::White, 0.0f, false);
-	}
-	if (Server != nullptr && Server->IsOn() && !Server->Message.IsEmpty() && (Server->bBusy || !Server->HeroOnItsWay.IsEmpty())) {
-		Text(TEXT("shop"), Server->Message.ToUpper(), (Left + 2.0f) * S, Under + (Hint.IsEmpty() ? 0.0f : 52.0f * S), 12, SenniteUi::Gold, 0.0f, false);
-	}
+	ShopWord(Server, Server != nullptr && !Server->HeroOnItsWay.IsEmpty(), (Left + 2.0f) * S, (BY + 80.0f + (bHint ? 52.0f : 0.0f)) * S);
 
 	// the arrows, either side of the hero
 	const float HeroX = W * 0.67f;
@@ -802,6 +867,277 @@ void ASenniteMenuHUD::DrawHeroes(ASenniteMenuController* Menu)
 		Tile.Box = Box.ShiftBy(Inset);
 		Buttons.Add(Tile);
 	}
+}
+
+void ASenniteMenuHUD::StoreTop(ASenniteMenuController* Menu)
+{
+	const float W = Canvas->ClipX / S;
+	Button(TEXT("back"), TEXT("BACK"), 24.0f, 24.0f, 184.0f, 58.0f, true, 17, false, -1);
+	// the store's sections, the open one in gold
+	struct FSection
+	{
+		const TCHAR* Action;
+		const TCHAR* Name;
+		ESenniteMenuPage Page;
+	};
+	float X = 232.0f;
+	for (const FSection& Each : { FSection{ TEXT("tab:heroes"), TEXT("HEROES"), ESenniteMenuPage::Heroes }, FSection{ TEXT("tab:skins"), TEXT("SKINS"), ESenniteMenuPage::Skins },
+			FSection{ TEXT("tab:dbucks"), TEXT("D-BUCKS"), ESenniteMenuPage::DBucks } }) {
+		Button(Each.Action, Each.Name, X, 24.0f, 160.0f, 58.0f, true, 16, Menu->Page == Each.Page);
+		if (Menu->Page == Each.Page) {
+			Drawing.Add(FString::Printf(TEXT("section=%s"), Each.Name));
+		}
+		X += 168.0f;
+	}
+	// top right, where things are sold: what the player's wallet holds, as it proved it
+	const USennitePublisher* Seller = Shop(Menu);
+	if (Seller != nullptr && Seller->IsOn()) {
+		bool bKnown = false;
+		const FString Holds = Seller->DBucksLine(bKnown);
+		SenniteUi::Balance(Canvas, FVector2D((W - 24.0f) * S, 24.0f * S), S, Holds, bKnown);
+		Drawing.Add(FString::Printf(TEXT("balance=%s"), *Holds));
+	}
+}
+
+bool ASenniteMenuHUD::NextStep(const USennitePublisher* Server, const FForSale& Thing, float Left, float Y, float Wide)
+{
+	const float Under = (Y + 80.0f) * S;
+	FString Hint;
+	FString Hint2;
+	if (Server == nullptr || !Server->IsOn()) {
+		Button(Thing.Buy, TEXT("NO SHOP ON THIS GAME"), Left, Y, Wide, 66.0f, false, 14);
+		Hint = TEXT("THIS GAME IS NOT CONNECTED TO THE PUBLISHER'S");
+		Hint2 = FString::Printf(TEXT("SERVER, WHERE %s ARE SOLD FOR D-BUCKS."), Thing.Kind);
+	}
+	else if (!Server->bConnected) {
+		Button(TEXT("wallet"), TEXT("CONNECT YOUR WALLET"), Left, Y, Wide, 66.0f, !Server->ConnectCode.IsEmpty(), 16, true);
+		Hint = FString::Printf(TEXT("%s ARE BOUGHT WITH D-BUCKS FROM YOUR DSM WALLET."), Thing.Kind);
+#if PLATFORM_ANDROID || PLATFORM_IOS
+		Hint2 = TEXT("THIS OPENS YOUR WALLET: APPROVE THIS GAME THERE.");
+#else
+		Hint2 = TEXT("THIS COPIES THE CONNECT CODE FOR YOUR WALLET TO READ.");
+#endif
+	}
+	else if (Thing.bOnItsWay) {
+		Button(Thing.Buy, TEXT("ON ITS WAY TO YOUR WALLET"), Left, Y, Wide, 66.0f, false, 14);
+	}
+	else if (Server->bBusy) {
+		Button(Thing.Buy, TEXT("WAITING FOR YOUR WALLET ..."), Left, Y, Wide, 66.0f, false, 14);
+	}
+	else if (!Server->bMaterialsKnown) {
+		Button(Thing.Buy, TEXT("ASKING YOUR WALLET ..."), Left, Y, Wide, 66.0f, false, 14);
+	}
+	else if (!Thing.bListed) {
+		Button(Thing.Buy, TEXT("NOT IN THE SHOP"), Left, Y, Wide, 66.0f, false, 14);
+	}
+	else if (Server->DBucks >= Thing.Price) {
+		Button(Thing.Buy, FString::Printf(TEXT("BUY  %s D-BUCKS"), *SenniteUi::Grouped(Thing.Price)), Left, Y, Wide, 66.0f, true, 18, true);
+	}
+	else {
+		// too few D-bucks: they are had by trading ERA from the wallet, here as in the D-bucks section
+		const bool bEra = FCString::Atod(*Server->Era) >= FCString::Atod(USennitePublisher::TradeEra());
+		Button(TEXT("dbucks"), TEXT("GET D-BUCKS"), Left, Y, Wide, 66.0f, bEra, 18, true);
+		Hint = FString::Printf(TEXT("YOUR WALLET HAS %s OF THE %s D-BUCKS IT COSTS."), *SenniteUi::Grouped(Server->DBucks), *SenniteUi::Grouped(Thing.Price));
+		Hint2 = bEra ? FString::Printf(TEXT("THIS TRADES %s ERA FROM YOUR WALLET FOR D-BUCKS."), USennitePublisher::TradeEra())
+			: FString::Printf(TEXT("A TRADE FOR D-BUCKS TAKES %s ERA: YOUR WALLET HAS %s."), USennitePublisher::TradeEra(), Server->Era.IsEmpty() ? TEXT("NONE") : *Server->Era);
+	}
+	if (!Hint.IsEmpty()) {
+		// large enough to read on a phone held at arm's length
+		Text(TEXT("hint"), Hint, (Left + 2.0f) * S, Under, 12, FLinearColor::White, 0.0f, false);
+		Text(TEXT("hint2"), Hint2, (Left + 2.0f) * S, Under + 24.0f * S, 12, FLinearColor::White, 0.0f, false);
+	}
+	return !Hint.IsEmpty();
+}
+
+void ASenniteMenuHUD::ShopWord(const USennitePublisher* Server, bool bOnItsWay, float X, float Y)
+{
+	if (Server != nullptr && Server->IsOn() && !Server->Message.IsEmpty() && (Server->bBusy || bOnItsWay)) {
+		Text(TEXT("shop"), Server->Message.ToUpper(), X, Y, 12, SenniteUi::Gold, 0.0f, false);
+	}
+}
+
+void ASenniteMenuHUD::DrawSkins(ASenniteMenuController* Menu)
+{
+	const float W = Canvas->ClipX / S;
+	const float H = Canvas->ClipY / S;
+	const FLinearColor White = FLinearColor::White;
+	// as the heroes' section: the skin's name and what is done with it on a shade at the left, the row of
+	// skins on one that rises from the bottom
+	const FBox2D Whole = Screen();
+	SenniteUi::Fade(Canvas, FBox2D(Whole.Min, FVector2D(600.0f * S, Whole.Max.Y)), FLinearColor(0.0f, 0.0f, 0.0f, 0.66f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
+	SenniteUi::Fade(Canvas, FBox2D(FVector2D(Whole.Min.X, (H - 190.0f) * S), Whole.Max), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.7f), true);
+	StoreTop(Menu);
+
+	const float Left = 48.0f;
+	const float BW = 340.0f;
+	const float BY = 304.0f;
+	const USennitePublisher* Server = Shop(Menu);
+	const bool bShop = Server != nullptr && Server->IsOn();
+	if (!bShop || !Server->ShopSkins.IsValidIndex(Menu->BrowseSkin)) {
+		// no shop on this game, or a shop that has listed no skin: nothing is shown as if it were for sale
+		Text(TEXT("name"), TEXT("SKINS"), Left * S, 142.0f * S, 54, White);
+		SenniteUi::Plate(Canvas, FBox2D(FVector2D(Left * S, 226.0f * S), FVector2D((Left + 96.0f) * S, 229.0f * S)), 0.0f, SenniteUi::Gold, SenniteUi::Gold);
+		if (!bShop) {
+			FForSale Thing;
+			Thing.Kind = TEXT("SKINS");
+			Thing.Buy = TEXT("buyskin");
+			NextStep(Server, Thing, Left, BY, BW);
+		}
+		else {
+			Text(TEXT("status"), TEXT("NO SKINS FROM THE SHOP YET"), (Left + 2.0f) * S, 254.0f * S, 13, SenniteUi::Gold);
+		}
+		return;
+	}
+
+	const TArray<FSenniteSkinForSale>& Skins = Server->ShopSkins;
+	const FSenniteSkinForSale& Skin = Skins[Menu->BrowseSkin];
+	const FSenniteHero* Of = SkinHero(Skin.Id);
+	const bool bOwned = Server->bConnected && Server->Owns(Skin.Id);
+	const bool bWorn = bOwned && Server->Wearing == Skin.Id;
+	Text(TEXT("count"), Of != nullptr ? FString::Printf(TEXT("SKIN %d OF %d   FOR %s"), Menu->BrowseSkin + 1, Skins.Num(), *Of->Name) : FString::Printf(TEXT("SKIN %d OF %d"), Menu->BrowseSkin + 1, Skins.Num()),
+		Left * S, 122.0f * S, 12, SenniteUi::Gold);
+	const FString Name = Skin.Name.ToUpper();
+	const float Room = 440.0f * S;
+	const float NamePoints = FMath::Min(54.0f, 54.0f * Room / FMath::Max(1.0f, Width(Name, 54)));
+	Text(TEXT("name"), Name, Left * S, 142.0f * S, NamePoints, White);
+	SenniteUi::Plate(Canvas, FBox2D(FVector2D(Left * S, 226.0f * S), FVector2D((Left + 96.0f) * S, 229.0f * S)), 0.0f, SenniteUi::Gold, SenniteUi::Gold);
+
+	// how the skin is had, on a small plate under its name
+	{
+		const FString Status = bWorn ? FString(TEXT("WORN")) : bOwned ? FString(TEXT("YOURS")) : FString::Printf(TEXT("%s D-BUCKS"), *SenniteUi::Grouped(Skin.Price));
+		const float Wide = Width(Status, 13) + 36.0f * S;
+		const FBox2D Tag(FVector2D(Left * S, 246.0f * S), FVector2D(Left * S + Wide, 280.0f * S));
+		SenniteUi::Plate(Canvas, Tag, 7.0f * S, FLinearColor(0.0f, 0.0f, 0.0f, 0.55f), FLinearColor(0.0f, 0.0f, 0.0f, 0.55f));
+		SenniteUi::Outline(Canvas, Tag, 7.0f * S, bOwned ? SenniteUi::Edge : SenniteUi::Gold.CopyWithNewOpacity(0.8f), FMath::Max(1.0f, 1.5f * S));
+		Text(TEXT("status"), Status, Left * S + 18.0f * S, 254.0f * S, 13, bOwned ? White : SenniteUi::Gold);
+	}
+
+	// what is done with it: worn or taken off once it is the wallet's, and until then the next thing toward having it
+	bool bHint = false;
+	if (bOwned) {
+		Button(bWorn ? TEXT("takeoff") : TEXT("wear"), bWorn ? TEXT("TAKE OFF") : TEXT("WEAR"), Left, BY, BW, 66.0f, true, 19, !bWorn);
+		if (Of != nullptr) {
+			Text(TEXT("hint"), bWorn ? FString::Printf(TEXT("%s WEARS IT IN PLAY WHILE YOUR WALLET HOLDS IT."), *Of->Name) : FString::Printf(TEXT("WORN, %s PLAYS IN IT."), *Of->Name),
+				(Left + 2.0f) * S, (BY + 80.0f) * S, 12, White, 0.0f, false);
+			bHint = true;
+		}
+	}
+	else {
+		FForSale Thing;
+		Thing.Kind = TEXT("SKINS");
+		Thing.Buy = TEXT("buyskin");
+		Thing.bListed = true;
+		Thing.Price = Skin.Price;
+		Thing.bOnItsWay = Server->OnItsWay == Skin.Id;
+		bHint = NextStep(Server, Thing, Left, BY, BW);
+	}
+	ShopWord(Server, !Server->OnItsWay.IsEmpty(), (Left + 2.0f) * S, (BY + 80.0f + (bHint ? 52.0f : 0.0f)) * S);
+
+	// the arrows, either side of the hero wearing it
+	const float HeroX = W * 0.67f;
+	Button(TEXT("prev"), TEXT("<"), HeroX - 330.0f, H * 0.5f - 76.0f, 76.0f, 116.0f, true, 34, false, -1);
+	Button(TEXT("next"), TEXT(">"), FMath::Min(HeroX + 254.0f, W - 100.0f), H * 0.5f - 76.0f, 76.0f, 116.0f, true, 34, false, 1);
+
+	// every skin along the bottom, each on its own tile: the one shown in gold, the one worn marked, and one
+	// not owned faint
+	const float Gap = 8.0f;
+	const float TileWide = FMath::Min(240.0f, (W - 2.0f * Left - Gap * (Skins.Num() - 1)) / FMath::Max(1, Skins.Num()));
+	const float TileHigh = 56.0f;
+	const float TileTop = H - 82.0f;
+	for (int32 Index = 0; Index < Skins.Num(); ++Index) {
+		const FSenniteSkinForSale& Each = Skins[Index];
+		const FName Action(*(FString(SkinOnStage) + Each.Id));
+		const float X = Left + Index * (TileWide + Gap);
+		const FBox2D Box(FVector2D(X * S, TileTop * S), FVector2D((X + TileWide) * S, (TileTop + TileHigh) * S));
+		const bool bHad = Server->bConnected && Server->Owns(Each.Id);
+		const bool bOn = bHad && Server->Wearing == Each.Id;
+		const SenniteUi::EButton State = Action == Held ? SenniteUi::EButton::Pressed
+			: Index == Menu->BrowseSkin ? SenniteUi::EButton::Primary
+			: Action == Hovered ? SenniteUi::EButton::Hover : SenniteUi::EButton::Plain;
+		FLinearColor Ink = SenniteUi::ButtonPlate(Canvas, Box, S, State);
+		if (!bHad && Index != Menu->BrowseSkin) {
+			Ink = FLinearColor(1.0f, 1.0f, 1.0f, 0.5f);
+		}
+		const FString Label = Each.Name.ToUpper();
+		const float Points = FMath::Min(13.0f, 13.0f * (TileWide - 22.0f) * S / FMath::Max(1.0f, Width(Label, 13)));
+		const float High = SenniteUi::Measure(Label, Points, S).Y;
+		SenniteUi::Text(Canvas, Label, Box.GetCenter().X, Box.GetCenter().Y - High * 0.5f, Points, S, Ink, 0.5f);
+		if (bOn) {
+			// the skin worn: a gold line over its tile
+			SenniteUi::Plate(Canvas, FBox2D(FVector2D(Box.Min.X + 14.0f * S, Box.Min.Y - 7.0f * S), FVector2D(Box.Max.X, Box.Min.Y - 4.0f * S)), 0.0f, SenniteUi::Gold, SenniteUi::Gold);
+		}
+		Drawing.Add(FString::Printf(TEXT("tile%d=%s%s%s"), Index, *Label, bOn ? TEXT("  WORN") : TEXT(""), bHad ? TEXT("") : TEXT("  NOT HAD")));
+		FSenniteMenuButton Tile;
+		Tile.Action = Action;
+		Tile.Text = Label;
+		Tile.Box = Box.ShiftBy(Inset);
+		Buttons.Add(Tile);
+	}
+}
+
+void ASenniteMenuHUD::DrawDBucks(ASenniteMenuController* Menu)
+{
+	const FLinearColor White = FLinearColor::White;
+	const FBox2D Whole = Screen();
+	SenniteUi::Fade(Canvas, FBox2D(Whole.Min, FVector2D(600.0f * S, Whole.Max.Y)), FLinearColor(0.0f, 0.0f, 0.0f, 0.66f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
+	StoreTop(Menu);
+
+	const float Left = 48.0f;
+	const float BW = 340.0f;
+	const float BY = 304.0f;
+	const float Under = (BY + 80.0f) * S;
+	const USennitePublisher* Server = Shop(Menu);
+	Text(TEXT("count"), TEXT("WHAT THIS STORE SELLS FOR"), Left * S, 122.0f * S, 12, SenniteUi::Gold);
+	Text(TEXT("name"), TEXT("D-BUCKS"), Left * S, 142.0f * S, 54, White);
+	SenniteUi::Plate(Canvas, FBox2D(FVector2D(Left * S, 226.0f * S), FVector2D((Left + 96.0f) * S, 229.0f * S)), 0.0f, SenniteUi::Gold, SenniteUi::Gold);
+
+	FString Hint;
+	FString Hint2;
+	if (Server == nullptr || !Server->IsOn()) {
+		Button(TEXT("dbucks"), TEXT("NO SHOP ON THIS GAME"), Left, BY, BW, 66.0f, false, 14);
+		Hint = TEXT("THIS GAME IS NOT CONNECTED TO THE PUBLISHER'S");
+		Hint2 = TEXT("SERVER, WHERE D-BUCKS ARE SOLD FOR ERA.");
+	}
+	else {
+		// what the wallet proved it holds, on a small plate under the name; with nothing proved, why there is none to show
+		bool bKnown = false;
+		const FString Holds = Server->DBucksLine(bKnown);
+		const FString Status = bKnown ? FString::Printf(TEXT("YOUR WALLET HAS %s AND %s ERA"), *Holds, Server->Era.IsEmpty() ? TEXT("NO") : *Server->Era) : Holds;
+		const float Wide = Width(Status, 13) + 36.0f * S;
+		const FBox2D Tag(FVector2D(Left * S, 246.0f * S), FVector2D(Left * S + Wide, 280.0f * S));
+		SenniteUi::Plate(Canvas, Tag, 7.0f * S, FLinearColor(0.0f, 0.0f, 0.0f, 0.55f), FLinearColor(0.0f, 0.0f, 0.0f, 0.55f));
+		SenniteUi::Outline(Canvas, Tag, 7.0f * S, bKnown ? SenniteUi::Edge : SenniteUi::Gold.CopyWithNewOpacity(0.8f), FMath::Max(1.0f, 1.5f * S));
+		Text(TEXT("status"), Status, Left * S + 18.0f * S, 254.0f * S, 13, bKnown ? White : SenniteUi::Gold);
+
+		if (!Server->bConnected) {
+			Button(TEXT("wallet"), TEXT("CONNECT YOUR WALLET"), Left, BY, BW, 66.0f, !Server->ConnectCode.IsEmpty(), 16, true);
+			Hint = TEXT("D-BUCKS ARE BOUGHT WITH ERA FROM YOUR DSM WALLET.");
+#if PLATFORM_ANDROID || PLATFORM_IOS
+			Hint2 = TEXT("THIS OPENS YOUR WALLET: APPROVE THIS GAME THERE.");
+#else
+			Hint2 = TEXT("THIS COPIES THE CONNECT CODE FOR YOUR WALLET TO READ.");
+#endif
+		}
+		else if (Server->bBusy) {
+			Button(TEXT("dbucks"), TEXT("WAITING FOR YOUR WALLET ..."), Left, BY, BW, 66.0f, false, 14);
+		}
+		else if (!Server->bMaterialsKnown) {
+			Button(TEXT("dbucks"), TEXT("ASKING YOUR WALLET ..."), Left, BY, BW, 66.0f, false, 14);
+		}
+		else {
+			// ERA traded through the publisher's vault, at the price its reserves set
+			const bool bEra = FCString::Atod(*Server->Era) >= FCString::Atod(USennitePublisher::TradeEra());
+			Button(TEXT("dbucks"), TEXT("GET D-BUCKS"), Left, BY, BW, 66.0f, bEra, 18, true);
+			Hint = bEra ? FString::Printf(TEXT("THIS TRADES %s ERA FROM YOUR WALLET FOR D-BUCKS."), USennitePublisher::TradeEra())
+				: FString::Printf(TEXT("A TRADE FOR D-BUCKS TAKES %s ERA: YOUR WALLET HAS %s."), USennitePublisher::TradeEra(), Server->Era.IsEmpty() ? TEXT("NONE") : *Server->Era);
+			Hint2 = TEXT("D-BUCKS BUY THE HEROES AND SKINS IN THIS STORE.");
+		}
+	}
+	if (!Hint.IsEmpty()) {
+		Text(TEXT("hint"), Hint, (Left + 2.0f) * S, Under, 12, White, 0.0f, false);
+		Text(TEXT("hint2"), Hint2, (Left + 2.0f) * S, Under + 24.0f * S, 12, White, 0.0f, false);
+	}
+	ShopWord(Server, false, (Left + 2.0f) * S, Under + (Hint.IsEmpty() ? 0.0f : 52.0f * S));
 }
 
 void ASenniteMenuHUD::DrawJoin(ASenniteMenuController* Menu)

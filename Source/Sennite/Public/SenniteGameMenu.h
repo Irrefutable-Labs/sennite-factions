@@ -2,7 +2,7 @@
 // the touch screen. The game goes on behind it (others may be playing), and while it is open the hero
 // takes nothing the player presses.
 //
-// MENU: RESUME; SETTINGS; STORE and BASE, which open the base editor (SenniteBaseEditor.h) on the
+// MENU: RESUME; SETTINGS; STORE and BASE EDITOR, which open the base editor (SenniteBaseEditor.h) on the
 // shop's page or the parcel, where there is a publisher's server and so an editor; MAIN MENU, which
 // leaves the game for the first screen; QUIT GAME. Leaving and quitting ask once more first.
 //

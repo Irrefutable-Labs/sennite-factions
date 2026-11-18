@@ -829,6 +829,16 @@ void ASenniteBaseEditor::Tick(float DeltaTime)
 	if (ToggleInput == nullptr) {
 		BindToggle();
 	}
+	if (!bOpenedAsAsked && GetWorld()->URL.HasOption(OpenOption)) {
+		// the first screen's BASE EDITOR opened this map: the planning view, once the player is here and the
+		// publisher's server has said which parcels there are to plan on
+		const USennitePublisher* Server = Publisher();
+		const APlayerController* Controller = GetWorld()->GetFirstPlayerController();
+		if (Server != nullptr && Server->Parcels.Num() > 0 && Controller != nullptr && Controller->IsLocalController() && Controller->GetPawn() != nullptr) {
+			bOpenedAsAsked = true;
+			Show(false);
+		}
+	}
 	SyncStructures();
 	UpdateGhost();
 	UpdateCursorTile();

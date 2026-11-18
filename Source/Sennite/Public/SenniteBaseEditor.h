@@ -80,11 +80,19 @@ public:
 	/** Open the planning view, on the shop's page when asked and a wallet is connected: what the in-game menu's BASE and STORE do. */
 	void Show(bool bShopPage);
 
+	/**
+	 * The option on a map's address that opens the planning view as soon as the player is there: what the
+	 * first screen's BASE EDITOR opens the map with.
+	 */
+	static constexpr const TCHAR* OpenOption = TEXT("Base");
+
 	/** Whether the planning view is open in a world: the fight's own HUD is not drawn over it. */
 	static bool IsPlanning(const UWorld* World);
 
 	/** Whether the planning view is open. */
 	bool bEditing = false;
+	/** Whether the planning view the map's address asked for (OpenOption) has been opened: it is opened once. */
+	bool bOpenedAsAsked = false;
 	/** The parcel being planned. */
 	FString Parcel;
 	/** The near corner of the grid cell the cursor is on, in map units. */
