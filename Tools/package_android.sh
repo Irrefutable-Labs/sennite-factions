@@ -1,6 +1,6 @@
 #!/bin/zsh
-# Builds, cooks and packages the game for Android phones: one APK with the menu and the test range,
-# played by touch, no server and no wallet. Long (the first run cooks every asset the two maps use).
+# Builds, cooks and packages the game for Android phones: one APK with the menu, the test range and the arena,
+# played by touch, no server and no wallet. Long (the first run cooks every asset the three maps use).
 #   Tools/package_android.sh                 the APK, in Saved/Phone/
 #   Tools/package_android.sh -iterate        cook only what changed since the last run
 # Then, with the phone on adb (USB, or wireless: adb pair / adb connect):
@@ -31,7 +31,7 @@ mkdir -p "$OUT"
 touch "$OUT/.started"
 "$UE/Engine/Build/BatchFiles/RunUAT.sh" BuildCookRun -project="$PWD/Sennite.uproject" -platform=Android -cookflavor=ASTC \
   -clientconfig=Development -build -cook -stage -package -pak -archive -archivedirectory="$OUT" \
-  -map=/Game/Maps/Menu+/Game/Maps/TestRange -nop4 -utf8output -unattended -nocompileeditor "$@" 2>&1 | tee "$OUT/package.log"
+  -map=/Game/Maps/Menu+/Game/Maps/TestRange+/Game/Maps/Arena -nop4 -utf8output -unattended -nocompileeditor "$@" 2>&1 | tee "$OUT/package.log"
 rc=${pipestatus[1]}
 echo "package exit $rc"
 APK=$(find "$OUT" -name "*.apk" -newer "$OUT/.started" | head -1)

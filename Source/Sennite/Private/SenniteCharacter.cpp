@@ -41,6 +41,10 @@ DEFINE_LOG_CATEGORY(LogSenniteCharacter);
 ASenniteCharacter::ASenniteCharacter()
 {
 	bReplicates = true;
+	// A hero is sent to the players within a kilometre of it. The engine's own limit is 150 m, and the
+	// middles of two neighbouring plots are 720 m apart over open ground: a hero across it was unseen.
+	// Not every hero to everyone: a player's game is not told where heroes are that it could never see.
+	SetNetCullDistanceSquared(FMath::Square(100000.0f));
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
 

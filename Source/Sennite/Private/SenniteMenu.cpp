@@ -23,7 +23,7 @@
 namespace
 {
 	const TCHAR* MenuMap = TEXT("/Game/Maps/Menu");
-	const TCHAR* PlayMap = TEXT("/Game/Maps/TestRange");
+	const TCHAR* PlayMap = TEXT("/Game/Maps/Arena");
 	/** How far apart the lobby's heroes stand, in cm. */
 	const float Spacing = 190.0f;
 	/** The camera's field of view, across. */

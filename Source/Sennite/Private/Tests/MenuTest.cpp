@@ -5,7 +5,7 @@
 //   on the stage as itself;
 // - a hero bought with D-bucks cannot be chosen on a game with no shop;
 // - CHOOSE makes a free hero the player's, kept in the profile on disk;
-// - PLAY opens the test range, and the player is that hero there.
+// - PLAY opens the arena, and the player is that hero there.
 //
 // Tools/check_menu.sh runs this and reads the result.
 
@@ -232,10 +232,10 @@ namespace
 			APlayerController* Controller = World != nullptr ? World->GetFirstPlayerController() : nullptr;
 			ASenniteCharacter* Hero = Controller != nullptr ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
 			if (Hero == nullptr || !Hero->GetCharacterMovement()->IsMovingOnGround() || Elapsed() < 3.0) {
-				return Elapsed() > 60.0 ? Fail(TEXT("PLAY did not bring the player to the test range with a hero in 60 s")) : false;
+				return Elapsed() > 60.0 ? Fail(TEXT("PLAY did not bring the player to the arena with a hero in 60 s")) : false;
 			}
 			const FSenniteHero& Want = USenniteHeroes::FindOrDefault(Free);
-			Test->TestEqual(TEXT("PLAY opens the test range"), UGameplayStatics::GetCurrentLevelName(World), FString(TEXT("TestRange")));
+			Test->TestEqual(TEXT("PLAY opens the arena"), UGameplayStatics::GetCurrentLevelName(World), FString(TEXT("Arena")));
 			Test->TestEqual(TEXT("The player's state is the hero chosen"), Controller->GetPlayerState<ASennitePlayerState>()->HeroId, Free);
 			Test->TestEqual(TEXT("The character is the hero chosen"), Hero->HeroId, Free);
 			Test->TestEqual(TEXT("It wears the hero's mesh"), FSoftObjectPath(Hero->GetMesh()->GetSkeletalMeshAsset()).ToString(), Want.Mesh.ToString());
