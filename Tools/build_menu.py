@@ -6,6 +6,8 @@ chosen hero and the lobby stands every player's hero in a row.
 The camera and the heroes are the game's own (SenniteMenu.cpp): the map has the ground, the light and
 the game mode (the menu; ?game=lobby makes it the lobby). Phone-level lighting only, as the test range:
 one shadowed sun, an unshadowed sky fill. Writes /Game/Maps/Menu."""
+import os
+
 import unreal
 
 MAP = "/Game/Maps/Menu"
@@ -52,7 +54,11 @@ kc.set_mobility(unreal.ComponentMobility.MOVABLE)
 for key, value in (("real_time_capture", True), ("cast_shadows", False), ("intensity", 1.2)):
     kc.set_editor_property(key, value)
 
-spawn(unreal.SkyAtmosphere, "atmosphere", folder="lights")
+atmosphere = spawn(unreal.SkyAtmosphere, "atmosphere", folder="lights")
+# a daytime sky: the sun here is weak (phone-level lighting), so the sky it lights is brightened on its own
+SKY_BRIGHTNESS = float(os.environ.get("SKY_BRIGHTNESS", "6.0"))
+atmosphere.get_component_by_class(unreal.SkyAtmosphereComponent).set_editor_property(
+    "sky_luminance_factor", unreal.LinearColor(SKY_BRIGHTNESS, SKY_BRIGHTNESS, SKY_BRIGHTNESS, 1.0))
 # A phone draws the SkyAtmosphere only on a mesh whose material is marked as sky: the engine's own sky
 # dome and its sky material, 20 km out, seen and nothing else.
 dome = spawn(unreal.StaticMeshActor, "sky_dome", folder="lights")
