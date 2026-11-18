@@ -14,6 +14,10 @@
 #include "Misc/App.h"
 #include "Misc/Paths.h"
 #include "UnrealClient.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "EngineUtils.h"
+#include "Materials/Material.h"
 
 namespace GameCheck
 {
@@ -115,6 +119,19 @@ namespace GameCheck
 		}
 		Mouse(Controller, EKeys::MouseX, FMath::Clamp(Yaw / 0.25, -40.0, 40.0));
 		Mouse(Controller, EKeys::MouseY, FMath::Clamp(Pitch / 0.25, -40.0, 40.0));
+		return false;
+	}
+
+	/** Whether the map has a mesh drawn with a material marked as sky: a phone draws the sky's atmosphere only on one. */
+	inline bool HasSkyDome(UWorld* World)
+	{
+		for (TActorIterator<AStaticMeshActor> It(World); It; ++It) {
+			const UStaticMeshComponent* Mesh = It->GetStaticMeshComponent();
+			const UMaterialInterface* Face = Mesh != nullptr && Mesh->GetStaticMesh() != nullptr ? Mesh->GetMaterial(0) : nullptr;
+			if (Face != nullptr && Face->GetMaterial() != nullptr && Face->GetMaterial()->bIsSky) {
+				return true;
+			}
+		}
 		return false;
 	}
 

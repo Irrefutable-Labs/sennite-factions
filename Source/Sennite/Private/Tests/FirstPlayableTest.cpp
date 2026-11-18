@@ -113,6 +113,7 @@ namespace
 			}
 			Test->TestEqual(TEXT("The mesh is the hero's, named in DefaultGame.ini"), FSoftObjectPath(Body).ToString(), Chosen.Mesh.ToString());
 			Test->TestEqual(TEXT("The animation class is the hero's own, named in DefaultGame.ini"), FSoftClassPath(Anim->GetClass()).ToString(), Chosen.AnimClass.ToString());
+			Test->TestTrue(TEXT("The test range has a sky dome with a sky material, which a phone needs to draw the sky"), GameCheck::HasSkyDome(World));
 
 			const TArray<FSkeletalMaterial>& Shipped = Body->GetMaterials();
 			int32 Changed = 0;

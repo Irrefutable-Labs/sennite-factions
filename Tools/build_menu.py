@@ -53,6 +53,17 @@ for key, value in (("real_time_capture", True), ("cast_shadows", False), ("inten
     kc.set_editor_property(key, value)
 
 spawn(unreal.SkyAtmosphere, "atmosphere", folder="lights")
+# A phone draws the SkyAtmosphere only on a mesh whose material is marked as sky: the engine's own sky
+# dome and its sky material, 20 km out, seen and nothing else.
+dome = spawn(unreal.StaticMeshActor, "sky_dome", folder="lights")
+dome_mesh = dome.static_mesh_component
+dome_mesh.set_static_mesh(unreal.load_asset("/Engine/EngineSky/SM_SkySphere"))
+dome_mesh.set_material(0, unreal.load_asset("/Engine/EngineSky/SkyAtmosphere/SkyAtmosphere_MaterialSkyDome"))
+dome_mesh.set_collision_enabled(unreal.CollisionEnabled.NO_COLLISION)
+dome_mesh.set_editor_property("cast_shadow", False)
+dome.set_actor_scale3d(unreal.Vector(500.0, 500.0, 500.0))
+if dome_mesh.static_mesh is None or not dome_mesh.get_material(0).get_editor_property("is_sky"):
+    raise RuntimeError("the sky dome did not get its mesh and sky material")
 fog = spawn(unreal.ExponentialHeightFog, "haze", unreal.Vector(0, 0, 0), folder="lights")
 fog.component.set_editor_property("fog_density", 0.01)
 

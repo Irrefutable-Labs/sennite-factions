@@ -152,6 +152,7 @@ namespace
 	 */
 	void CheckLand(FAutomationTestBase* Test, UWorld* World, const ASenniteArena* Arena)
 	{
+		Test->TestTrue(TEXT("The arena has a sky dome with a sky material, which a phone needs to draw the sky"), GameCheck::HasSkyDome(World));
 		const ASenniteArena* Rules = GetDefault<ASenniteArena>();
 		const double Water = -Rules->WaterDepth;
 		const int32 Wanted = (Rules->Land.IsNull() ? 0 : 1) + (Rules->LandWater.IsNull() ? 0 : 1);
