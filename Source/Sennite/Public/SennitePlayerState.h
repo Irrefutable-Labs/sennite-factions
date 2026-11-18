@@ -93,6 +93,26 @@ public:
 	/** On the server: the wallet (signing key) the first hero pass this player showed spoke for. Every later pass must be that wallet's. */
 	FString HeroWallet;
 
+	/**
+	 * The guns bought in the store that this player's wallet proved it owns: a bit for each weapon slot.
+	 * Set on the server, from what the publisher's server says of a pass the player showed; sent to the
+	 * player alone. A crate gives a player the free guns and these (ASenniteCharacter::TakeFromCrate).
+	 */
+	UPROPERTY(Replicated)
+	int32 GunsOwned = 0;
+
+	/**
+	 * Once in, a player whose wallet owns guns bought in the store shows a pass made out to this server.
+	 * Taken once for each player; the server asks the publisher's server what the pass speaks for, as it
+	 * does for a hero, and the player's own game is never taken at its word.
+	 */
+	UFUNCTION(Server, Reliable)
+	void ServerClaimGuns(const FString& Pass);
+
+	/** Whether the claim of guns was taken (on the server), or asked for (on the player's game). */
+	bool bGunClaimTaken = false;
+	bool bGunClaimAsked = false;
+
 	/** Whether the starting claim was taken (on the server), or asked for (on the player's game). */
 	bool bStartingClaimTaken = false;
 	bool bStartingClaimAsked = false;

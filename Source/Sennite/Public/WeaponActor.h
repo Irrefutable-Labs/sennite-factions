@@ -43,6 +43,16 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
 	FString DisplayName;
 
+	/**
+	 * Whether every player has it from a crate. A gun that is not free is bought in the store, by ShopId:
+	 * a crate gives it only to a player whose wallet proved it owns it. Set per weapon class in DefaultGame.ini.
+	 */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
+	bool bFree = false;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
+	FString ShopId;
+
 	/** How long after a shot before the next, and how long a reload takes, in seconds. Set per weapon class in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
 	float FireSeconds = 0.233f;

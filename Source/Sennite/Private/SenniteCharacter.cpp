@@ -1133,6 +1133,18 @@ int32 ASenniteCharacter::GunsHeld() const {
 	return Held;
 }
 
+int32 ASenniteCharacter::BoughtGunsAmong(const TArray<FString>& Owned) {
+	int32 Bought = 0;
+	const TArray<TSubclassOf<AWeaponActor>>& Slots = GetDefault<ASenniteCharacter>()->WeaponClasses;
+	for (int32 Type = 1; Type < Slots.Num(); ++Type) {
+		const AWeaponActor* Gun = Slots[Type] != nullptr ? GetDefault<AWeaponActor>(Slots[Type]) : nullptr;
+		if (Gun != nullptr && !Gun->bFree && !Gun->ShopId.IsEmpty() && Owned.Contains(Gun->ShopId)) {
+			Bought |= 1 << Type;
+		}
+	}
+	return Bought;
+}
+
 bool ASenniteCharacter::TakeFromCrate(int32 Guns, bool bRounds, int32 Bandages, int32 Potions) {
 	ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
 	if (!HasAuthority() || State == nullptr || !State->HealingItemCounts.IsValidIndex(1)) {
@@ -1144,11 +1156,17 @@ bool ASenniteCharacter::TakeFromCrate(int32 Guns, bool bRounds, int32 Bandages, 
 	// each gun the hero does not have yet, with a full magazine; and the crate's rounds for each of its guns
 	int32 ToHand = 0;
 	int32 NewGuns = 0;
+	int32 InStore = 0;
 	for (int32 Type = 1; Type < WeaponClasses.Num(); ++Type) {
 		if ((Guns & (1 << Type)) == 0 || !IsGun(Type) || !State->EquippedWeaponsClips.IsValidIndex(Type) || !State->EquippedWeaponsAmmunition.IsValidIndex(Type)) {
 			continue;
 		}
 		const AWeaponActor* Gun = GetDefault<AWeaponActor>(WeaponClasses[Type]);
+		// a gun bought in the store is this player's only if their wallet proved it owns it; the crate keeps it otherwise
+		if (!Gun->bFree && (State->GunsOwned & (1 << Type)) == 0) {
+			InStore |= 1 << Type;
+			continue;
+		}
 		if (!State->EquippedWeapons.Contains(Type)) {
 			State->EquippedWeapons.Add(Type);
 			State->EquippedWeaponsClips[Type] = Gun->MagazineSize;
@@ -1176,11 +1194,11 @@ bool ASenniteCharacter::TakeFromCrate(int32 Guns, bool bRounds, int32 Bandages, 
 		}
 		ClientGetWeaponTransform(ToHand);
 	}
-	ClientCrateGave(NewGuns, bRounds, Bandages, Potions);
+	ClientCrateGave(NewGuns, InStore, bRounds, Bandages, Potions);
 	return true;
 }
 
-void ASenniteCharacter::ClientCrateGave_Implementation(int32 NewGuns, bool bRounds, int32 Bandages, int32 Potions) {
+void ASenniteCharacter::ClientCrateGave_Implementation(int32 NewGuns, int32 InStore, bool bRounds, int32 Bandages, int32 Potions) {
 	const APlayerController* Own = Cast<APlayerController>(GetController());
 	ASenniteHUD* Hud = Own != nullptr ? Cast<ASenniteHUD>(Own->GetHUD()) : nullptr;
 	if (Hud == nullptr) {
@@ -1201,6 +1219,16 @@ void ASenniteCharacter::ClientCrateGave_Implementation(int32 NewGuns, bool bRoun
 	}
 	if (Potions > 0) {
 		Gave.Add(FString::Printf(TEXT("+%d POTIONS"), Potions));
+	}
+	// and the guns it kept, which are bought in the store
+	TArray<FString> Kept;
+	for (int32 Type = 1; Type < WeaponClasses.Num(); ++Type) {
+		if ((InStore & (1 << Type)) != 0 && IsGun(Type)) {
+			Kept.Add(GetDefault<AWeaponActor>(WeaponClasses[Type])->DisplayName);
+		}
+	}
+	if (Kept.Num() > 0) {
+		Gave.Add(TEXT("IN THE STORE: ") + FString::Join(Kept, TEXT(", ")));
 	}
 	Hud->DrawCrateGave(FString::Join(Gave, TEXT("   ")));
 	// and is heard by the player who opened it

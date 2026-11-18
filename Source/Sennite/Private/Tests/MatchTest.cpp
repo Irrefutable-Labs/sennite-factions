@@ -270,7 +270,9 @@ namespace
 			Test->TestEqual(TEXT("The crate gave the hero who opened it its rifle rounds"), State->EquippedWeaponsAmmunition[1], Arm.RoundsBefore + GetDefault<ASenniteRifle>()->CrateRounds);
 			Test->TestEqual(TEXT("and its shells"), State->EquippedWeaponsAmmunition[2], GetDefault<ASenniteShotgun>()->CrateRounds);
 			Test->TestEqual(TEXT("The rifle has a full magazine"), Hero->CurrentWeapon->CurrentBulletCount, Hero->CurrentWeapon->MagazineSize);
-			Test->TestTrue(TEXT("The crate gave the shotgun, the energy rifle and the sniper too"), State->EquippedWeapons.Contains(2) && State->EquippedWeapons.Contains(3) && State->EquippedWeapons.Contains(4));
+			Test->TestTrue(TEXT("The crate gave the shotgun too"), State->EquippedWeapons.Contains(2));
+			Test->TestTrue(TEXT("It kept the energy rifle and the sniper: they are bought in the store, and this player bought neither"), !State->EquippedWeapons.Contains(3) && !State->EquippedWeapons.Contains(4));
+			Test->TestTrue(TEXT("and gave no rounds for the guns it kept"), State->EquippedWeaponsAmmunition[3] == 0 && State->EquippedWeaponsAmmunition[4] == 0);
 			Test->TestEqual(TEXT("and its pack of bandages"), State->HealingItemCounts[0], GetDefault<ASenniteBandage>()->Count);
 			Test->TestEqual(TEXT("and its potions"), State->HealingItemCounts[1], GetDefault<ASennitePotion>()->Count);
 			Test->TestEqual(TEXT("The opened crate laid nothing on the ground"), GameCheck::LyingAbout(World), 0);
@@ -335,7 +337,7 @@ namespace
 			}
 			Test->TestEqual(TEXT("Opened again, the crate gives its rifle rounds again"), State->EquippedWeaponsAmmunition[1], RoundsMark + GetDefault<ASenniteRifle>()->CrateRounds);
 			Test->TestEqual(TEXT("and its bandages again"), State->HealingItemCounts[0], 2 * GetDefault<ASenniteBandage>()->Count);
-			Test->TestEqual(TEXT("A hero with every gun gets no second one of any: the pickaxe and four guns"), State->EquippedWeapons.Num(), 5);
+			Test->TestEqual(TEXT("A hero with both free guns gets no second one of either: its own weapon and two guns"), State->EquippedWeapons.Num(), 3);
 			Test->TestTrue(TEXT("and the rifle is still in hand"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 1);
 			Test->TestEqual(TEXT("Nothing lies on the ground by the crate"), GameCheck::LyingAbout(World), 0);
 			UE_LOG(LogMatchCheck, Display, TEXT("GAMECHECK crates: opened again; %d rounds more, %d bandages, %d weapons"), State->EquippedWeaponsAmmunition[1], State->HealingItemCounts[0], State->EquippedWeapons.Num());

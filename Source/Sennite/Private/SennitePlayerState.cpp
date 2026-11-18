@@ -68,6 +68,7 @@ void ASennitePlayerState::GetLifetimeReplicatedProps(TArray< FLifetimeProperty >
 	DOREPLIFETIME(ASennitePlayerState, Wallet);
 	DOREPLIFETIME(ASennitePlayerState, HeroId);
 	DOREPLIFETIME_CONDITION(ASennitePlayerState, HeroAudience, COND_OwnerOnly);
+	DOREPLIFETIME_CONDITION(ASennitePlayerState, GunsOwned, COND_OwnerOnly);
 }
 
 void ASennitePlayerState::ServerChooseHero_Implementation(FName Id, const FString& Pass) {
@@ -87,6 +88,38 @@ void ASennitePlayerState::ServerClaimStartingHero_Implementation(FName Id, const
 	}
 	bStartingClaimTaken = true;
 	ClaimHero(Id, Pass);
+}
+
+void ASennitePlayerState::ServerClaimGuns_Implementation(const FString& Pass) {
+	if (bGunClaimTaken) {
+		return;
+	}
+	bGunClaimTaken = true;
+	const UGameInstance* Game = GetGameInstance();
+	USennitePublisher* Shop = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+	if (Shop == nullptr || !Shop->IsOn() || !USennitePublisher::IsHeroPass(Pass)) {
+		UE_LOG(LogTemp, Warning, TEXT("%s showed no pass this server can check for guns bought in the store: they have the free ones"), *GetPlayerName());
+		return;
+	}
+	TWeakObjectPtr<ASennitePlayerState> Self(this);
+	Shop->CheckHeroPass(Pass, [Self](bool bOk, const TArray<FString>& Owned, const FString& SigningKey, const FString& PassWallet) {
+		ASennitePlayerState* State = Self.Get();
+		if (State == nullptr) {
+			return;
+		}
+		// the pass must be this player's wallet's, as for a hero: the match ticket's, or the one their first pass named
+		const bool bTheirs = bOk && (State->Wallet.IsEmpty() || State->Wallet == PassWallet) && (State->HeroWallet.IsEmpty() || State->HeroWallet == SigningKey);
+		if (!bTheirs) {
+			UE_LOG(LogTemp, Warning, TEXT("%s showed a pass for bought guns that is not their wallet's: refused"), *State->GetPlayerName());
+			return;
+		}
+		if (State->HeroWallet.IsEmpty()) {
+			State->HeroWallet = SigningKey;
+		}
+		// THE STORE'S CONTRACT: what the wallet proved it owns names a bought gun by its ShopId, in the same list as its heroes
+		State->GunsOwned = ASenniteCharacter::BoughtGunsAmong(Owned);
+		UE_LOG(LogTemp, Display, TEXT("%s owns bought guns %d"), *State->GetPlayerName(), State->GunsOwned);
+	});
 }
 
 void ASennitePlayerState::ClaimHero(FName Id, const FString& Pass) {
@@ -159,6 +192,9 @@ void ASennitePlayerState::CopyProperties(APlayerState* PlayerState) {
 	Super::CopyProperties(PlayerState);
 	if (ASennitePlayerState* Next = Cast<ASennitePlayerState>(PlayerState)) {
 		Next->HeroId = HeroId;
+		// what the wallet proved to this server stays proved across a change of map
+		Next->GunsOwned = GunsOwned;
+		Next->bGunClaimTaken = bGunClaimTaken;
 	}
 }
 
@@ -215,8 +251,18 @@ void ASennitePlayerState::Tick(float DeltaSeconds) {
 			});
 		}
 	}
-	ASenniteCharacter* SenniteCharacter = Cast<ASenniteCharacter>(GetPawn());
-	if (SenniteCharacter) {
-
+	// the player's own game: guns bought in the store are claimed once in, the same way
+	if (!bGunClaimAsked && Owner != nullptr && Owner->IsLocalController() && Shop != nullptr && Shop->bConnected && USennitePublisher::IsAudience(HeroAudience)) {
+		// THE STORE'S CONTRACT: the wallet's owned list names a bought gun by its ShopId, with its heroes.
+		// Asked for only once the wallet has proved it owns one: until then there is nothing to show.
+		if (ASenniteCharacter::BoughtGunsAmong(Shop->OwnedHeroes) != 0) {
+			bGunClaimAsked = true;
+			TWeakObjectPtr<ASennitePlayerState> Self(this);
+			Shop->AskHeroPass(HeroAudience, [Self](const FString& Pass) {
+				if (ASennitePlayerState* State = Self.Get()) {
+					State->ServerClaimGuns(Pass);
+				}
+			});
+		}
 	}
 }

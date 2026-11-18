@@ -14,6 +14,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "MenuCheck.h"
+#include "SenniteCharacter.h"
 #include "SennitePublisher.h"
 #include "SenniteUi.h"
 #include "HAL/PlatformApplicationMisc.h"
@@ -206,6 +207,13 @@ namespace
 			}
 			Test->TestEqual(TEXT("The publisher's server gave a pass and answered for it"), *PassState, 1);
 			Test->TestTrue(TEXT("The pass speaks for the gun, by the shop's id"), PassSpeaksFor->Contains(Gun));
+			{
+				// what a game server makes of that list (ASenniteCharacter::BoughtGunsAmong, as ASennitePlayerState::ServerClaimGuns
+				// sets GunsOwned from it): this gun is the player's from a crate, and no other bought gun is
+				const int32 Theirs = ASenniteCharacter::BoughtGunsAmong(*PassSpeaksFor);
+				Test->TestTrue(TEXT("From that list a game server makes the bought gun the player's from a crate, and no other bought gun"),
+					Theirs != 0 && Theirs == ASenniteCharacter::BoughtGunsAmong({ Gun }));
+			}
 			UE_LOG(LogWeaponShopCheck, Display, TEXT("GAMECHECK the hero pass speaks for: %s"), *FString::Join(*PassSpeaksFor, TEXT(", ")));
 			Enter(EPhase::Other);
 			return false;
