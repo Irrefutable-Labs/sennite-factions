@@ -101,7 +101,7 @@ public:
 	static bool MayPlay(const UObject* WorldContext, FName Id);
 };
 
-/** What this machine keeps of its player between runs: the hero they chose and the address they last joined. */
+/** What this machine keeps of its player between runs: the hero they chose, the address they last joined, and their settings. */
 UCLASS()
 class SENNITE_API USenniteProfile : public USaveGame
 {
@@ -113,6 +113,22 @@ public:
 
 	UPROPERTY()
 	FString LastAddress;
+
+	/** The settings of the in-game menu (SenniteGameMenu.h). How far a movement of the mouse or a finger turns the view, against the game's own measure. */
+	UPROPERTY()
+	float LookSensitivity = 1.0f;
+
+	/** Whether pushing the mouse or a finger up looks down. */
+	UPROPERTY()
+	bool bInvertLook = false;
+
+	/** How loud the game is, 0 to 1. */
+	UPROPERTY()
+	float Volume = 1.0f;
+
+	/** The graphics quality the player chose, 0 (low) to 3 (epic); -1 while they have chosen none and the device's own is kept. */
+	UPROPERTY()
+	int32 Quality = -1;
 
 	/** This machine's profile, read once from its save slot ("Profile", or -ProfileSlot= on the command line). */
 	static USenniteProfile& Get();

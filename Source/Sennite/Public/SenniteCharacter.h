@@ -450,9 +450,6 @@ protected:
 	UFUNCTION()
 	void HoldPotion();
 
-	UFUNCTION()
-	void OpenSettingsMenu();
-
 	/** Open the weapon crate the hero is beside. */
 	UFUNCTION()
 	void OpenCrate();

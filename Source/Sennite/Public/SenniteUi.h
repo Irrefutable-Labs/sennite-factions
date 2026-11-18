@@ -37,6 +37,14 @@ namespace SenniteUi
 		Disabled,
 	};
 
+	/**
+	 * Where the HUD's canvas begins on the screen while the HUD draws. On a phone the engine draws the HUD
+	 * inside the screen's safe area (clear of the camera's cutout), so what is drawn at a point of the
+	 * canvas is on the screen that far from this corner, and a touch, which comes in the screen's own
+	 * measure, is on the canvas at the touch less this.
+	 */
+	FVector2D CanvasOrigin(const UCanvas* Canvas);
+
 	/** How wide and high a line of text is drawn, at Points for a 720-line screen scaled by Scale. */
 	FVector2D Measure(const FString& Line, float Points, float Scale, bool bBold = true);
 

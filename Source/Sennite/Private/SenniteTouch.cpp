@@ -68,6 +68,8 @@ const TArray<USenniteTouchControls::FButton>& USenniteTouchControls::Buttons()
 		{ TEXT("FLOOR"), EKeys::F, FVector2D(-170.0, 92.0), 26.0f, false },
 		// the base editor (B), left of the building row: only where there is a publisher's server and so an editor
 		{ TEXT("BASE"), EKeys::B, FVector2D(-430.0, 92.0), 26.0f, false },
+		// the in-game menu (Escape), top left, clear of everything: there with or without a hero
+		{ TEXT("MENU"), EKeys::Escape, FVector2D(58.0, 50.0), 26.0f, false },
 		// what to hold, along the bottom: X is from the middle of the screen
 		{ TEXT("RIFLE"), EKeys::Two, FVector2D(-235.0, -62.0), 44.0f, true },
 		{ TEXT("SHOTGUN"), EKeys::Three, FVector2D(-141.0, -62.0), 44.0f, true },
@@ -124,6 +126,10 @@ void USenniteTouchControls::Bind(APlayerController* InController)
 
 FVector2D USenniteTouchControls::ViewportSize() const
 {
+	// the canvas the controls are drawn on, once they have been: on a phone it is the screen's safe area
+	if (!DrawnSize.IsZero()) {
+		return DrawnSize;
+	}
 	FVector2D Size(1280.0, 720.0);
 	if (const ULocalPlayer* Local = Controller ? Controller->GetLocalPlayer() : nullptr) {
 		if (Local->ViewportClient != nullptr) {
@@ -167,6 +173,10 @@ FVector2D USenniteTouchControls::StickRest(const FVector2D& Viewport) const
 
 bool USenniteTouchControls::Shows(const FButton& Button) const
 {
+	if (Button.Key == EKeys::Escape) {
+		// the menu is the player's whether they are playing or watching
+		return true;
+	}
 	const ASenniteCharacter* Hero = Controller ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
 	if (Hero == nullptr) {
 		return false;
@@ -419,11 +429,13 @@ void USenniteTouchControls::Run(bool bRun)
 	}
 }
 
-bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, const FVector2D& At)
+bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, const FVector2D& Screen)
 {
 	if (Controller == nullptr) {
 		return false;
 	}
+	// the touch on the canvas the controls are drawn on
+	const FVector2D At = Screen - DrawnOrigin;
 	const FVector2D Viewport = ViewportSize();
 	const float S = Viewport.Y / 720.0f;
 	FFinger* Finger = Fingers.FindByPredicate([&Id](const FFinger& Each) { return Each.Id == Id; });
@@ -450,7 +462,8 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 			}
 			else {
 				New.Use = EUse::Map;
-				TapMap(At);
+				// the map is the world's, seen through the whole screen
+				TapMap(Screen);
 			}
 			Fingers.Add(New);
 			return true;
@@ -551,25 +564,26 @@ void USenniteTouchControls::ReleaseAll()
 		return;
 	}
 	while (Fingers.Num() > 0) {
-		Touch(Fingers.Last().Id, ETouchType::Ended, Fingers.Last().Last);
+		Touch(Fingers.Last().Id, ETouchType::Ended, Fingers.Last().Last + DrawnOrigin);
 	}
 }
 
 bool USenniteTouchControls::Where(const FString& Name, const FVector2D& Viewport, FVector2D& OutCentre) const
 {
+	const FVector2D Size = DrawnSize.IsZero() ? Viewport : DrawnSize;
 	if (Name == TEXT("STICK")) {
-		OutCentre = StickRest(Viewport);
+		OutCentre = StickRest(Size) + DrawnOrigin;
 		return true;
 	}
 	for (const FButton& Button : Buttons()) {
 		if (Name == Button.Name) {
-			OutCentre = Centre(Button, Viewport);
+			OutCentre = Centre(Button, Size) + DrawnOrigin;
 			return true;
 		}
 	}
 	for (const FButton& Button : EditorButtons()) {
 		if (Name == Button.Name) {
-			OutCentre = Centre(Button, Viewport);
+			OutCentre = Centre(Button, Size) + DrawnOrigin;
 			return true;
 		}
 	}
@@ -586,7 +600,7 @@ bool USenniteTouchControls::WhereKey(const FKey& InKey, FVector2D& OutCentre) co
 	for (const FButton& Button : bPlanning ? EditorButtons() : Buttons()) {
 		// every button of the planning view is on the screen, a dimmed one too
 		if (Button.Key == InKey && (bPlanning || Shows(Button))) {
-			OutCentre = Centre(Button, Viewport);
+			OutCentre = Centre(Button, Viewport) + DrawnOrigin;
 			return true;
 		}
 	}
@@ -599,6 +613,8 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 	if (Canvas == nullptr || Controller == nullptr) {
 		return;
 	}
+	DrawnOrigin = SenniteUi::CanvasOrigin(Canvas);
+	DrawnSize = FVector2D(Canvas->ClipX, Canvas->ClipY);
 	if (Planning()) {
 		DrawEditor(Canvas);
 		return;
@@ -608,9 +624,11 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 	UFont* Font = GEngine->GetLargeFont();
 	const ASenniteCharacter* Hero = Cast<ASenniteCharacter>(Controller->GetPawn());
 	const ASennitePlayerState* State = Controller->GetPlayerState<ASennitePlayerState>();
-	if (Hero == nullptr || State == nullptr || Font == nullptr) {
+	if (Font == nullptr) {
 		return;
 	}
+	// a player who is watching has no hero to move: only MENU is theirs to tap
+	const bool bPlaying = Hero != nullptr && State != nullptr;
 	const FLinearColor Rest(0.0f, 0.0f, 0.0f, 0.3f);
 	const FLinearColor Held(1.0f, 1.0f, 1.0f, 0.35f);
 	const FLinearColor Chosen(0.9f, 0.75f, 0.2f, 0.45f);
@@ -640,16 +658,18 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 	};
 
 	// the stick: where it rests until a thumb comes down on the left, then under the thumb
-	const FVector2D Base = bStickHeld ? StickOrigin : StickRest(Viewport);
-	Disc(Base, StickReach * S, Rest);
-	Ring(Base, StickReach * S, Edge);
-	Disc(Base + Stick * StickReach * S, 34.0f * S, bStickHeld ? Held : FLinearColor(1.0f, 1.0f, 1.0f, 0.2f));
-	LastDrawn.Add(FString::Printf(TEXT("STICK=%.2f,%.2f"), Stick.X, Stick.Y));
+	if (bPlaying) {
+		const FVector2D Base = bStickHeld ? StickOrigin : StickRest(Viewport);
+		Disc(Base, StickReach * S, Rest);
+		Ring(Base, StickReach * S, Edge);
+		Disc(Base + Stick * StickReach * S, 34.0f * S, bStickHeld ? Held : FLinearColor(1.0f, 1.0f, 1.0f, 0.2f));
+		LastDrawn.Add(FString::Printf(TEXT("STICK=%.2f,%.2f"), Stick.X, Stick.Y));
+	}
 
 	const TArray<FButton>& All = Buttons();
 	for (int32 Index = 0; Index < All.Num(); ++Index) {
 		const FButton& Button = All[Index];
-		if (!Shows(Button)) {
+		if (!Shows(Button) || (!bPlaying && Button.Key != EKeys::Escape)) {
 			continue;
 		}
 		const bool bDown = Fingers.ContainsByPredicate([Index](const FFinger& Each) { return Each.Use == EUse::Button && Each.Button == Index; });

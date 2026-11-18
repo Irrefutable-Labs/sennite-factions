@@ -473,6 +473,7 @@ void ASenniteMenuController::Act(FName Action)
 
 FName ASenniteMenuHUD::ButtonAt(const FVector2D& Where) const
 {
+	// Where is on the screen; the buttons are where the canvas drew them
 	for (const FSenniteMenuButton& Each : Buttons) {
 		if (Each.bEnabled && Each.Box.IsInside(Where)) {
 			return Each.Action;

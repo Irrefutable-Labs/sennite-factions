@@ -156,6 +156,17 @@ void ASenniteBaseEditor::Toggle()
 	}
 }
 
+void ASenniteBaseEditor::Show(bool bShopPage)
+{
+	if (!bEditing) {
+		Open();
+	}
+	if (bEditing && bShopPage != bShop) {
+		// the shop sells to a connected wallet: with none, the panel says how to connect one
+		ToggleShop();
+	}
+}
+
 void ASenniteBaseEditor::ChooseParcel(const FString& Id)
 {
 	const USennitePublisher* Server = Publisher();

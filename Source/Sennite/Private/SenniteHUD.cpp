@@ -14,6 +14,7 @@
 #include "SennitePlayerState.h"
 #include "SennitePlayerController.h"
 #include "SenniteTouch.h"
+#include "SenniteGameMenu.h"
 #include "SenniteUi.h"
 #include "Engine/Font.h"
 #include "BuildingActor.h"
@@ -34,10 +35,19 @@ void ASenniteHUD::DrawHUD()
 		DrawStatus();
 		DrawMatch();
 	}
-	ASenniteBaseEditor::DrawOn(this, Canvas);
-	// on a device played by touch, the stick and buttons over the rest; in the planning view, the editor's buttons
-	if (ASennitePlayerController* Player = Cast<ASennitePlayerController>(PlayerOwner)) {
-		if (USenniteTouchControls* Touch = Player->GetTouchControls()) {
+	ASennitePlayerController* Player = Cast<ASennitePlayerController>(PlayerOwner);
+	USenniteGameMenu* Menu = Player != nullptr ? Player->GetGameMenu() : nullptr;
+	// the base editor's panel is where the in-game menu's buttons are: it is not drawn under them
+	if (Menu == nullptr || !Menu->IsOpen()) {
+		ASenniteBaseEditor::DrawOn(this, Canvas);
+	}
+	if (Player != nullptr) {
+		if (Menu != nullptr && Menu->IsOpen()) {
+			// the in-game menu, over the game: its own buttons are what is tapped
+			Menu->Draw(Canvas);
+		}
+		else if (USenniteTouchControls* Touch = Player->GetTouchControls()) {
+			// on a device played by touch, the stick and buttons over the rest; in the planning view, the editor's buttons
 			Touch->Draw(Canvas);
 		}
 	}
@@ -473,34 +483,3 @@ void ASenniteHUD::DrawGameUI() {
 	}
 }
 
-void ASenniteHUD::DrawSettingsMenu() {
-	APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
-	if (PlayerController) {
-		// change the flags back to their default values after going from settings menu to fortnite clone
-		// or change the flags to ui mode if going from fortnite clone to settings menu
-		if (PlayerController->bShowMouseCursor) {
-			PlayerController->bShowMouseCursor = false;
-			PlayerController->bEnableClickEvents = false;
-			PlayerController->bEnableMouseOverEvents = false; 
-			PlayerController->SetInputMode(FInputModeGameOnly());
-			if (SettingsMenuWidget) {
-				SettingsMenuWidget->RemoveFromParent();
-			}
-		}
-		else {
-			PlayerController->bShowMouseCursor = true;
-			PlayerController->bEnableClickEvents = true;
-			PlayerController->bEnableMouseOverEvents = true;
-			PlayerController->SetInputMode(FInputModeGameAndUI());
-			if (SettingsMenuWidgetClass != nullptr)
-			{
-				SettingsMenuWidget = CreateWidget<UUserWidget>(GetWorld(), SettingsMenuWidgetClass);
-
-				if (SettingsMenuWidget)
-				{
-					SettingsMenuWidget->AddToViewport();
-				}
-			}
-		}
-	}
-}

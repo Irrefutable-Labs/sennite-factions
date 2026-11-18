@@ -68,8 +68,6 @@ public:
 
 	void DrawBloodSplash();
 
-	void DrawSettingsMenu();
-
 	/** Health and shield, the held weapon's rounds, the building materials, kills and players left: drawn on the canvas, sized to the screen. */
 	void DrawStatus();
 

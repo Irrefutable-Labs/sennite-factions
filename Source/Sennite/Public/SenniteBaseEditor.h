@@ -77,6 +77,9 @@ public:
 	/** Draw the editor's panel. Called by the game's HUD each frame. */
 	static void DrawOn(AHUD* Hud, UCanvas* Canvas);
 
+	/** Open the planning view, on the shop's page when asked and a wallet is connected: what the in-game menu's BASE and STORE do. */
+	void Show(bool bShopPage);
+
 	/** Whether the planning view is open in a world: the fight's own HUD is not drawn over it. */
 	static bool IsPlanning(const UWorld* World);
 
