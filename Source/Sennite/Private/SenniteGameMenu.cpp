@@ -18,7 +18,7 @@
 
 namespace
 {
-	const TCHAR* MenuMap = TEXT("/Game/Maps/Menu");
+	const TCHAR* FirstScreenMap = TEXT("/Game/Maps/Menu");
 
 	/** How far one press of an arrow changes how the view turns, and the least and most it can be. */
 	constexpr float SensitivityStep = 0.1f;
@@ -217,10 +217,10 @@ void USenniteGameMenu::Act(FName Action)
 		Close();
 		// a player in someone else's game leaves it; a player whose machine runs the game ends it for all in it
 		if (Player->GetNetMode() == NM_Client) {
-			Player->ClientTravel(MenuMap, TRAVEL_Absolute);
+			Player->ClientTravel(FirstScreenMap, TRAVEL_Absolute);
 		}
 		else {
-			UGameplayStatics::OpenLevel(Player, FName(MenuMap));
+			UGameplayStatics::OpenLevel(Player, FName(FirstScreenMap));
 		}
 	}
 	else if (Name == TEXT("quitnow")) {
