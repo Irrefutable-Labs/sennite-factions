@@ -16,6 +16,7 @@ import { decodeChange, encodeChange, type Change } from "../faction/change.js";
 import type { Funding } from "../dsm/contributions.js";
 import type { Member } from "../faction/state.js";
 import { buildingAt, Publisher, Refused, type Structure } from "./publisher.js";
+import { leastOf } from "./swap.js";
 import type { Store } from "./store.js";
 import type { World } from "./world.js";
 
@@ -400,6 +401,47 @@ export class Service {
           // the price is the vault's at the time of the trade: a little less than quoted is taken, much less is not
           const traded = await publisher.shop.buyDbucks(connection, era, Math.floor(quoted * 0.97));
           return traded.ok ? { ok: true, message: `${era} ERA traded for D-bucks` } : { ok: false, message: traded.why };
+        }),
+      };
+    }
+
+    // Swaps through the publisher's vaults (swap.ts): what can be swapped, a price, and the trade.
+    if (is("GET", "shop", "swap")) {
+      return { status: 200, body: await publisher.swap.board() };
+    }
+
+    // What an amount of one object would get in another now: the wallet's answer to DSM's quote through the vaults.
+    if (is("POST", "shop", "swap", "price")) {
+      const player = this.player(req);
+      const connection = await this.connected(player);
+      const { from, to, amount } = await publisher.swap.asked(await body(req));
+      return {
+        status: 202,
+        body: this.start(player, async () => {
+          const price = await publisher.swap.price(connection, from, to, amount);
+          return {
+            ok: true,
+            message: `${price.amountIn} ${from.name} gets ${price.amountOut} ${to.name} now`,
+            data: { price: { from: from.id, to: to.id, amount, amountIn: price.amountIn, amountOut: price.amountOut, out: String(price.out), hops: price.hops } },
+          };
+        }),
+      };
+    }
+
+    // The wallet swaps one object for another, for no less than a little under the price the player was shown.
+    if (is("POST", "shop", "swap", "trades")) {
+      const player = this.player(req);
+      const connection = await this.connected(player);
+      const asked = await body(req);
+      const { from, to, amount } = await publisher.swap.asked(asked);
+      const shown = asked.shown;
+      if (typeof shown !== "string" || !/^[0-9]{1,30}$/.test(shown)) throw new HttpError(400, "a swap names the price it was shown: ask the price first");
+      const atLeast = leastOf(BigInt(shown));
+      return {
+        status: 202,
+        body: this.start(player, async () => {
+          const traded = await publisher.swap.trade(connection, from, to, amount, atLeast);
+          return traded.ok ? { ok: true, message: `${amount} ${from.name} swapped for ${to.name}` } : { ok: false, message: traded.why };
         }),
       };
     }

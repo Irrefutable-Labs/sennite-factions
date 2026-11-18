@@ -362,7 +362,7 @@ void USenniteGameMenu::DrawMain(UCanvas* Canvas)
 	Button(Canvas, TEXT("resume"), TEXT("RESUME"), X, Y, 320.0f, High, true, true);
 	Button(Canvas, TEXT("settings"), TEXT("SETTINGS"), X, Y += Step, 320.0f, High);
 	Button(Canvas, TEXT("store"), TEXT("STORE"), X, Y += Step, 320.0f, High, bEditor);
-	Button(Canvas, TEXT("base"), TEXT("BASE"), X, Y += Step, 320.0f, High, bEditor);
+	Button(Canvas, TEXT("base"), TEXT("BASE EDITOR"), X, Y += Step, 320.0f, High, bEditor);
 	Button(Canvas, TEXT("mainmenu"), TEXT("MAIN MENU"), X, Y += Step, 320.0f, High);
 	Button(Canvas, TEXT("quit"), TEXT("QUIT GAME"), X, Y += Step, 320.0f, High);
 	if (!bEditor) {

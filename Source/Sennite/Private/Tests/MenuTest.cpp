@@ -1,8 +1,9 @@
 // Menu check. Run in the game on the Menu map, with a profile of its own (-ProfileSlot=), by taps on
 // the screen as a phone gives them:
 // - the menu is the first thing shown: no hero to play, the player's hero turning on the stage;
-// - HEROES shows the character select; the arrows go through the heroes, each one standing and turning
-//   on the stage as itself;
+// - STORE opens the store on its heroes, with SKINS and SWAP beside them: on a game with no shop
+//   neither sells anything, and says so; BASE EDITOR is dimmed there too, and says why;
+// - in the heroes the arrows go through the heroes, each one standing and turning on the stage as itself;
 // - a hero bought with D-bucks cannot be chosen on a game with no shop;
 // - CHOOSE makes a free hero the player's, kept in the profile on disk;
 // - PLAY opens the test range, and the player is that hero there.
@@ -55,7 +56,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForMenu, MenuShot, Heroes, ToWraith, Turning, ToLocked, Locked, BackToWraith, Chosen, Play, Done };
+		enum class EPhase { WaitForMenu, MenuShot, Heroes, Skins, DBucks, HeroesAgain, ToWraith, Turning, ToLocked, Locked, BackToWraith, Chosen, Play, Done };
 
 		void Enter(EPhase Next) { Phase = Next; PhaseStart = FPlatformTime::Seconds(); }
 		double Elapsed() const { return FPlatformTime::Seconds() - PhaseStart; }
@@ -102,8 +103,15 @@ namespace
 			Test->TestEqual(TEXT("A new profile's hero is the default hero"), USenniteProfile::Get().PlayingHero(Menu), Default);
 			Test->TestEqual(TEXT("The menu names the player's hero"), MenuCheck::Line(Menu, TEXT("hero")), USenniteHeroes::FindOrDefault(Default).Name);
 			Test->TestEqual(TEXT("The player's hero stands on the stage"), StageMesh(World), USenniteHeroes::FindOrDefault(Default).Mesh.ToString());
-			for (const TCHAR* Action : { TEXT("play"), TEXT("heroes"), TEXT("host"), TEXT("join"), TEXT("quit") }) {
+			for (const TCHAR* Action : { TEXT("play"), TEXT("store"), TEXT("base"), TEXT("host"), TEXT("join"), TEXT("quit") }) {
 				Test->TestTrue(FString::Printf(TEXT("The menu has %s"), Action), MenuCheck::Has(Menu, Action));
+			}
+			{
+				// bases are the publisher's server's to keep: with none on this game there is none to plan
+				bool bBase = true;
+				MenuCheck::Has(Menu, TEXT("base"), &bBase);
+				Test->TestFalse(TEXT("BASE EDITOR is dimmed with no publisher's server"), bBase);
+				Test->TestEqual(TEXT("The menu says why"), MenuCheck::Line(Menu, TEXT("why")), FString(TEXT("THE BASE EDITOR NEEDS THE PUBLISHER'S SERVER")));
 			}
 			{
 				// A phone keeps the menu clear of its screen's rounded corners and camera: the canvas starts in
@@ -136,7 +144,7 @@ namespace
 			if (Elapsed() < 0.3) {
 				return false;
 			}
-			MenuCheck::Tap(Menu, TEXT("heroes"));
+			MenuCheck::Tap(Menu, TEXT("store"));
 			Enter(EPhase::Heroes);
 			return false;
 
@@ -144,10 +152,71 @@ namespace
 			if (Menu->Page != ESenniteMenuPage::Heroes && Elapsed() < 3.0) {
 				return false;
 			}
-			Test->TestTrue(TEXT("A tap on HEROES opens the character select"), Menu->Page == ESenniteMenuPage::Heroes);
+			if (Elapsed() < 0.5) {
+				return false;
+			}
+			Test->TestTrue(TEXT("A tap on STORE opens the store on its heroes"), Menu->Page == ESenniteMenuPage::Heroes);
+			Test->TestEqual(TEXT("The store names the section open"), MenuCheck::Line(Menu, TEXT("section")), FString(TEXT("HEROES")));
+			for (const TCHAR* Action : { TEXT("back"), TEXT("tab:heroes"), TEXT("tab:skins"), TEXT("tab:swap") }) {
+				Test->TestTrue(FString::Printf(TEXT("The store has %s"), Action), MenuCheck::Has(Menu, Action));
+			}
 			Test->TestEqual(TEXT("It opens on the player's own hero"), Heroes[Menu->Browse].Id, USenniteProfile::Get().PlayingHero(Menu));
 			Test->TestTrue(TEXT("The player's own hero is marked chosen"), MenuCheck::Has(Menu, TEXT("chosen")));
 			Test->TestTrue(TEXT("A game with no shop shows no wallet balance"), MenuCheck::Line(Menu, TEXT("balance")).IsEmpty());
+			MenuCheck::Tap(Menu, TEXT("tab:skins"));
+			Enter(EPhase::Skins);
+			return false;
+
+		case EPhase::Skins: {
+			if (Elapsed() < 1.0) {
+				return false;
+			}
+			bool bEnabled = true;
+			Test->TestTrue(TEXT("A tap on SKINS opens the store's skins"), Menu->Page == ESenniteMenuPage::Skins);
+			Test->TestEqual(TEXT("The store names the section open"), MenuCheck::Line(Menu, TEXT("section")), FString(TEXT("SKINS")));
+			Test->TestTrue(TEXT("With no shop on this game it says there is none"), MenuCheck::Has(Menu, TEXT("buyskin"), &bEnabled));
+			Test->TestFalse(TEXT("and no skin can be bought"), bEnabled);
+			Test->TestFalse(TEXT("No skin is shown as if it were for sale"), MenuCheck::Has(Menu, TEXT("next")));
+			Test->TestEqual(TEXT("The player's hero stays on the stage"), StageMesh(World), USenniteHeroes::FindOrDefault(USenniteProfile::Get().PlayingHero(Menu)).Mesh.ToString());
+			GameCheck::Shot(TEXT("Menu"), TEXT("store_skins.png"));
+			Enter(EPhase::DBucks);
+			return false;
+		}
+
+		case EPhase::DBucks: {
+			if (Menu->Page != ESenniteMenuPage::Swap) {
+				// the picture is taken at the end of a frame: nothing is tapped until it is
+				if (Elapsed() > 0.3) {
+					MenuCheck::Tap(Menu, TEXT("tab:swap"));
+					Enter(EPhase::DBucks);
+				}
+				return false;
+			}
+			if (Elapsed() < 1.0) {
+				return false;
+			}
+			bool bEnabled = true;
+			Test->TestEqual(TEXT("A tap on SWAP opens the store's swap"), MenuCheck::Line(Menu, TEXT("section")), FString(TEXT("SWAP")));
+			Test->TestTrue(TEXT("With no shop on this game it says there is none"), MenuCheck::Has(Menu, TEXT("price"), &bEnabled));
+			Test->TestFalse(TEXT("and no price can be asked"), bEnabled);
+			Test->TestFalse(TEXT("Nothing is offered to swap"), MenuCheck::Has(Menu, TEXT("trade")) || MenuCheck::Has(Menu, TEXT("swap:from")));
+			GameCheck::Shot(TEXT("Menu"), TEXT("store_swap.png"));
+			Enter(EPhase::HeroesAgain);
+			return false;
+		}
+
+		case EPhase::HeroesAgain:
+			if (Menu->Page != ESenniteMenuPage::Heroes) {
+				if (Elapsed() > 0.3) {
+					MenuCheck::Tap(Menu, TEXT("tab:heroes"));
+					Enter(EPhase::HeroesAgain);
+				}
+				return false;
+			}
+			if (Elapsed() < 0.5) {
+				return false;
+			}
+			Test->TestEqual(TEXT("A tap on HEROES goes back to the heroes"), MenuCheck::Line(Menu, TEXT("section")), FString(TEXT("HEROES")));
 			// the arrows, to the free hero
 			MenuCheck::Tap(Menu, Heroes[(Menu->Browse + 1) % Heroes.Num()].Id == Free ? FName(TEXT("next")) : FName(TEXT("prev")));
 			Enter(EPhase::ToWraith);

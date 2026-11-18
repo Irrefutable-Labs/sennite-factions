@@ -1,8 +1,12 @@
 // The game's first screen, its character select and its lobby, on the Menu map (Tools/build_menu.py).
 //
-// MENU: PLAY opens the test range on this machine; HEROES opens the character select; HOST opens a
-// lobby others on the network can join; JOIN takes an address, typed on the screen's own keypad or
-// the keyboard; QUIT.
+// MENU: PLAY opens the test range on this machine; STORE opens the store; BASE EDITOR opens the test
+// range on the planning view of the player's base (where there is a publisher's server, and so bases);
+// HOST opens a lobby others on the network can join; JOIN takes an address, typed on the screen's own
+// keypad or the keyboard; QUIT.
+//
+// STORE: what the publisher's shop sells, a section each, named along the top: HEROES, SKINS, SWAP.
+// Top right, beside a wallet, is how many D-bucks the player's wallet proved it holds (on a game with a shop).
 //
 // HEROES: the hero turns on the stage, its name and what is done with it to the left, every hero on a
 // tile along the bottom. A tile shows that hero and the arrows go through the list; CHOOSE makes the hero the
@@ -10,11 +14,20 @@
 // A hero that is not free is bought with D-bucks in the publisher's shop and can be chosen once the
 // player's wallet proves it owns it. The one button under its name is the next thing to do toward that:
 // CONNECT YOUR WALLET (on a phone the DSM wallet opens on the connect code), GET D-BUCKS (a trade of ERA
-// from the wallet) while the wallet holds too few, then BUY. Top right, beside a wallet, is how many D-bucks the player's
-// wallet proved it holds (on a game with a shop).
+// from the wallet) while the wallet holds too few, then BUY.
+//
+// SKINS: each skin the shop sells, on the hero it is a skin of, turning on the stage. Along the bottom are
+// the heroes that have skins and, under them, the skins of the hero shown. One not owned is
+// bought as a hero is; one the wallet proves it owns is worn or taken off (it is on the hero in play only
+// while the wallet proves it owns it).
+//
+// SWAP: one thing the publisher's vaults hold for another (ERA for D-bucks, D-bucks back for ERA, and
+// whatever else the publisher opens a vault for). The player picks what is paid and what is got, types
+// an amount on the screen's keypad, asks the PRICE (the wallet's answer to DSM's own quote through the
+// vaults), and SWAPs at it: the wallet's own trade, for no less than a little under the price shown.
 //
 // LOBBY: the Menu map hosted with ?listen?game=lobby. Every player's hero stands on the stage, and
-// the list says who is in and as which hero. Anyone can change hero (HEROES); the host starts, and
+// the list says who is in and as which hero. Anyone can change hero (HEROES, the store's section); the host starts, and
 // everyone travels to the test range together.
 //
 // Everything is drawn on the canvas, sized to the screen as the HUD is, and every button works by a
@@ -31,12 +44,16 @@
 class ACameraActor;
 class ASkeletalMeshActor;
 class ASennitePlayerState;
+class USennitePublisher;
 
 UENUM()
 enum class ESenniteMenuPage : uint8
 {
 	Main,
+	/** The store's sections. */
 	Heroes,
+	Skins,
+	Swap,
 	Join,
 	Lobby,
 };
@@ -79,6 +96,25 @@ public:
 	/** The hero the character select shows, by its place in the list. */
 	int32 Browse = 0;
 
+	/** The skin the store's skins section shows, by its place in the shop's list. */
+	int32 BrowseSkin = 0;
+
+	/** Whether a page is one of the store's sections. */
+	static bool InStore(ESenniteMenuPage Which) { return Which == ESenniteMenuPage::Heroes || Which == ESenniteMenuPage::Skins || Which == ESenniteMenuPage::Swap; }
+
+	/** The store's swap: what is paid and what is got, by their places among what the publisher's vaults hold, and the amount typed. */
+	int32 SwapFrom = 0;
+	int32 SwapTo = 1;
+	/** Whether the two sides have been set since the vaults were first read: it opens paying ERA, where the vaults hold it. */
+	bool bSwapOpened = false;
+	FString SwapAmount;
+	/** Whether the player has asked a price or a swap on this visit: what the publisher's server says of it is shown. */
+	bool bSwapSaid = false;
+	/** The two sides of the swap as chosen now; false when the publisher's vaults do not hold two things to swap. */
+	bool SwapSides(const USennitePublisher* Server, const struct FSenniteSwapToken*& From, const struct FSenniteSwapToken*& To) const;
+	/** Whether the amount typed is an amount above zero. */
+	bool SwapAmountIsOne() const;
+
 	/** The address typed on the join page. */
 	FString Address;
 
@@ -94,7 +130,7 @@ public:
 	/** The players in the lobby, in the order they joined, and the hero each one is. */
 	TArray<const ASennitePlayerState*> LobbyPlayers() const;
 
-	/** The heroes standing on the stage now, by hero id: what a check reads to see the stage is what the page says. */
+	/** The heroes standing on the stage now, by hero id (a shop skin as "skin:" and its id): what a check reads to see the stage is what the page says. */
 	TArray<FName> StageHeroes() const;
 
 	/** How far the turntable has turned, in degrees. */
@@ -106,6 +142,8 @@ public:
 private:
 	/** The button a press began on, by tap or click; it acts when the press ends on the same button. */
 	FName Pressed;
+	/** When the store's swap next reads the vaults again. */
+	double NextSwapRead = 0.0;
 
 public:
 	/** The button held down now, if any: the menu draws it pressed. */
@@ -154,6 +192,34 @@ public:
 private:
 	void DrawMain(ASenniteMenuController* Menu);
 	void DrawHeroes(ASenniteMenuController* Menu);
+	void DrawSkins(ASenniteMenuController* Menu);
+	void DrawSwap(ASenniteMenuController* Menu);
+
+	/** The top of every section of the store: BACK, the sections' names, and the wallet's D-bucks top right. */
+	void StoreTop(ASenniteMenuController* Menu);
+
+	/** One thing the shop sells, as the button toward having it needs to know it. */
+	struct FForSale
+	{
+		/** What such things are called, as "HEROES". */
+		const TCHAR* Kind = TEXT("");
+		/** What the button that buys it does. */
+		FName Buy;
+		/** Whether the shop lists it, and its price in D-bucks. */
+		bool bListed = false;
+		int32 Price = 0;
+		/** Whether it is sold and given, and the wallet has not proved it owns it yet. */
+		bool bOnItsWay = false;
+	};
+
+	/**
+	 * The one button under something not had yet, the next thing to do toward having it (connect the wallet,
+	 * get D-bucks, buy), with what that is said under it. True if it said something under the button.
+	 */
+	bool NextStep(const USennitePublisher* Server, const FForSale& Thing, float Left, float Y, float Wide);
+
+	/** What the shop says of a request the wallet has not settled, or of something bought that is on its way. */
+	void ShopWord(const USennitePublisher* Server, bool bOnItsWay, float X, float Y);
 	void DrawJoin(ASenniteMenuController* Menu);
 	void DrawLobby(ASenniteMenuController* Menu);
 

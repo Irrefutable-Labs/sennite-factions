@@ -43,6 +43,45 @@ struct FSenniteHeroForSale
 	int32 Price = 0;
 };
 
+/** An object the publisher's vaults trade: what a swap is between. */
+struct FSenniteSwapToken
+{
+	/** The object's id, which a swap names it by. */
+	FString Id;
+	FString Symbol;
+	/** What the game calls it. */
+	FString Name;
+	/** How many digits an amount of it has after the point. */
+	int32 Decimals = 0;
+};
+
+/** One of the publisher's open vaults: the two objects it trades, each side's reserve in its own units, and its fee. */
+struct FSenniteSwapVault
+{
+	FString A;
+	FString B;
+	FString ReserveA;
+	FString ReserveB;
+	/** In hundredths of a percent. */
+	int32 FeeBps = 0;
+};
+
+/** A price the wallet gave for a swap, and the swap it is the price of. Empty From: no price. */
+struct FSenniteSwapPrice
+{
+	FString From;
+	FString To;
+	/** The amount asked about, as the player typed it. */
+	FString Amount;
+	/** What is paid and what it would get, in each object's own units. */
+	FString AmountIn;
+	FString AmountOut;
+	/** What it would get, in the smallest unit: what a swap at this price names. */
+	FString Out;
+	/** How many vaults the swap goes through. */
+	int32 Hops = 0;
+};
+
 /** One skin the wallet proved it owns: an object of which one exists. */
 struct FSenniteOwnedSkin
 {
@@ -300,6 +339,30 @@ public:
 	void CheckHeroPass(const FString& Pass, TFunction<void(bool /* bOk */, const TArray<FString>& /* Heroes */, const FString& /* SigningKey */, const FString& /* Wallet */)> Done);
 	/** Trade ERA for D-bucks through the publisher's vault. */
 	void BuyDBucks(const FString& InEra);
+
+	/**
+	 * Swaps through the publisher's vaults. What can be swapped is what the publisher's server reads from its
+	 * account's open vaults; a price is the wallet's answer to DSM's own quote; a swap is the wallet's own trade.
+	 */
+	TArray<FSenniteSwapToken> SwapTokens;
+	TArray<FSenniteSwapVault> SwapVaults;
+	/** Whether the server has said what can be swapped. */
+	bool bSwapKnown = false;
+	/** Read what can be swapped, and the vaults' reserves, again. */
+	void AskSwap();
+	const FSenniteSwapToken* FindSwapToken(const FString& Id) const { return SwapTokens.FindByPredicate([&Id](const FSenniteSwapToken& T) { return T.Id == Id; }); }
+	/** The open vault that trades these two directly, either way round; null if none does. */
+	const FSenniteSwapVault* FindSwapVault(const FString& One, const FString& Other) const;
+	/** What the wallet proved it holds of a token, in the token's own units; empty when it has proved nothing of it. */
+	FString HoldsOf(const FSenniteSwapToken& Token) const;
+	/** The last price the wallet gave, and the swap it is the price of. */
+	FSenniteSwapPrice SwapPrice;
+	/** Whether the last price is the price of this swap. */
+	bool PricedFor(const FString& From, const FString& To, const FString& Amount) const { return !SwapPrice.From.IsEmpty() && SwapPrice.From == From && SwapPrice.To == To && SwapPrice.Amount == Amount; }
+	/** Ask the wallet what an amount of one object would get in another now. */
+	void AskSwapPrice(const FString& From, const FString& To, const FString& Amount);
+	/** Swap, for no less than a little under the price last given, which must be the price of this swap. */
+	void Swap(const FString& From, const FString& To, const FString& Amount);
 	/** Buy a skin from the shop with D-bucks. */
 	void BuySkin(const FString& SkinId);
 	/** Wear an owned skin, or with an empty id, none. */
@@ -414,6 +477,12 @@ private:
 	bool bPrizesAsked = false;
 	bool bShop = false;
 	bool bShopAsked = false;
+	/** The game's currency, by its symbol, as the shop gave it. */
+	FString CurrencySymbol;
+	bool bSwapAsked = false;
+	/** The request that has not settled yet is a price, or a swap. */
+	bool bPricing = false;
+	bool bSwapping = false;
 	/** When the wallet is next asked to prove what it holds again: a proof older than an hour answers no hero pass. */
 	double NextReprove = 0.0;
 
