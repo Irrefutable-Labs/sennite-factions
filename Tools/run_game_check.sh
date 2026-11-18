@@ -3,7 +3,8 @@
 # SENNITE_MAP (a map's address, options and all).
 #   Tools/run_game_check.sh <test filter> <test name> <folder under Saved/> [more arguments for the game]
 # The check's screenshots and log (check.log) land in Saved/<folder>/; only screenshots this run
-# wrote are listed. Exit status 0 only if the check ran to its end and passed.
+# wrote are listed. Exit status 0 only if the check ran to its end and passed, and nothing else the
+# filter ran failed.
 cd "$(dirname "$0")/.."
 FILTER="$1"; NAME="$2"; FOLDER="$3"
 shift 3 2>/dev/null
@@ -26,7 +27,10 @@ grep -o "GAMECHECK .*" "$OUT/check.log"
 grep "LogAutomationController.*\(Error\|Test Completed\|Fail\)" "$OUT/check.log" | sed 's/^\[[^]]*\]\[[ 0-9]*\]//'
 find "$OUT" -maxdepth 1 -name "*.png" -newer "$OUT/.started"
 
-if grep -q "Test Completed. Result={Success} Name={$NAME}" "$OUT/check.log" && grep -q "GAMECHECK finished" "$OUT/check.log"; then
+# Passed only if the named check passed and ran to its end, and no other check the filter took in
+# failed: a filter that is the start of another check's name runs that one too.
+if grep -q "Test Completed. Result={Success} Name={$NAME}" "$OUT/check.log" && grep -q "GAMECHECK finished" "$OUT/check.log" \
+  && ! grep -q "Test Completed. Result={Fail" "$OUT/check.log"; then
   echo "CHECK PASSED: $FILTER"
 else
   echo "CHECK FAILED: $FILTER (see $OUT/check.log)"

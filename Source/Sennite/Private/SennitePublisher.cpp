@@ -416,6 +416,10 @@ void USennitePublisher::AskShop()
 			Skin.Price = FCString::Atoi(*One->GetStringField(TEXT("price")));
 			ShopSkins.Add(MoveTemp(Skin));
 		}
+		const TSharedPtr<FJsonObject>* Currency = nullptr;
+		if (Json->TryGetObjectField(TEXT("currency"), Currency)) {
+			(*Currency)->TryGetStringField(TEXT("symbol"), CurrencySymbol);
+		}
 		ShopHeroes.Reset();
 		const TArray<TSharedPtr<FJsonValue>>* Heroes = nullptr;
 		if (Json->TryGetArrayField(TEXT("heroes"), Heroes)) {
@@ -428,8 +432,119 @@ void USennitePublisher::AskShop()
 				ShopHeroes.Add(MoveTemp(Hero));
 			}
 		}
+		ShopWeapons.Reset();
+		const TArray<TSharedPtr<FJsonValue>>* Weapons = nullptr;
+		if (Json->TryGetArrayField(TEXT("weapons"), Weapons)) {
+			for (const TSharedPtr<FJsonValue>& Value : *Weapons) {
+				// an entry that is not a gun with an id, a name and a price is not listed
+				const TSharedPtr<FJsonObject>* One = nullptr;
+				FSenniteHeroForSale Gun;
+				FString Price;
+				if (!Value.IsValid() || !Value->TryGetObject(One) || !(*One)->TryGetStringField(TEXT("id"), Gun.Id) || Gun.Id.IsEmpty()
+					|| !(*One)->TryGetStringField(TEXT("name"), Gun.Name) || !(*One)->TryGetStringField(TEXT("price"), Price)) {
+					continue;
+				}
+				Gun.Price = FCString::Atoi(*Price);
+				ShopWeapons.Add(MoveTemp(Gun));
+			}
+		}
 		bShop = true;
 	});
+}
+
+void USennitePublisher::AskSwap()
+{
+	if (bSwapAsked || !IsOn()) {
+		return;
+	}
+	bSwapAsked = true;
+	Send(TEXT("GET"), TEXT("/shop/swap"), nullptr, [this](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+		bSwapAsked = false;
+		const TArray<TSharedPtr<FJsonValue>>* Tokens = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* Vaults = nullptr;
+		if (Status != 200 || !Json.IsValid() || !Json->TryGetArrayField(TEXT("tokens"), Tokens) || !Json->TryGetArrayField(TEXT("vaults"), Vaults)) {
+			return;
+		}
+		// an entry that is not whole (no id, no number of digits, a vault with a side missing) is not listed
+		SwapTokens.Reset();
+		for (const TSharedPtr<FJsonValue>& Value : *Tokens) {
+			const TSharedPtr<FJsonObject>* One = nullptr;
+			FSenniteSwapToken Held;
+			double Decimals = 0.0;
+			if (!Value.IsValid() || !Value->TryGetObject(One) || !(*One)->TryGetStringField(TEXT("id"), Held.Id) || Held.Id.IsEmpty()
+				|| !(*One)->TryGetStringField(TEXT("symbol"), Held.Symbol) || !(*One)->TryGetStringField(TEXT("name"), Held.Name)
+				|| !(*One)->TryGetNumberField(TEXT("decimals"), Decimals) || Decimals < 0.0 || Decimals > 18.0) {
+				continue;
+			}
+			Held.Decimals = int32(Decimals);
+			SwapTokens.Add(MoveTemp(Held));
+		}
+		SwapVaults.Reset();
+		for (const TSharedPtr<FJsonValue>& Value : *Vaults) {
+			const TSharedPtr<FJsonObject>* One = nullptr;
+			FSenniteSwapVault Vault;
+			double FeeBps = 0.0;
+			if (!Value.IsValid() || !Value->TryGetObject(One) || !(*One)->TryGetStringField(TEXT("a"), Vault.A) || !(*One)->TryGetStringField(TEXT("b"), Vault.B)
+				|| !(*One)->TryGetStringField(TEXT("reserveA"), Vault.ReserveA) || !(*One)->TryGetStringField(TEXT("reserveB"), Vault.ReserveB)
+				|| !(*One)->TryGetNumberField(TEXT("feeBps"), FeeBps)) {
+				continue;
+			}
+			Vault.FeeBps = int32(FeeBps);
+			SwapVaults.Add(MoveTemp(Vault));
+		}
+		bSwapKnown = true;
+	});
+}
+
+const FSenniteSwapVault* USennitePublisher::FindSwapVault(const FString& One, const FString& Other) const
+{
+	return SwapVaults.FindByPredicate([&One, &Other](const FSenniteSwapVault& V) { return (V.A == One && V.B == Other) || (V.A == Other && V.B == One); });
+}
+
+FString USennitePublisher::HoldsOf(const FSenniteSwapToken& Of) const
+{
+	if (!bConnected || !bMaterialsKnown) {
+		return FString();
+	}
+	if (Of.Symbol == TEXT("ERA")) {
+		return Era;
+	}
+	if (!CurrencySymbol.IsEmpty() && Of.Symbol == CurrencySymbol) {
+		return FString::FromInt(DBucks);
+	}
+	if (const int32* Held = Materials.Find(Of.Symbol)) {
+		return FString::FromInt(*Held);
+	}
+	return FString();
+}
+
+void USennitePublisher::AskSwapPrice(const FString& From, const FString& To, const FString& Amount)
+{
+	if (bBusy) {
+		return;
+	}
+	SwapPrice = FSenniteSwapPrice();
+	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("from"), From);
+	Body->SetStringField(TEXT("to"), To);
+	Body->SetStringField(TEXT("amount"), Amount);
+	Ask(TEXT("/shop/swap/price"), Body, TEXT("asking your wallet for the price..."));
+	bPricing = bBusy;
+}
+
+void USennitePublisher::Swap(const FString& From, const FString& To, const FString& Amount)
+{
+	if (bBusy || !PricedFor(From, To, Amount)) {
+		return;
+	}
+	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("from"), From);
+	Body->SetStringField(TEXT("to"), To);
+	Body->SetStringField(TEXT("amount"), Amount);
+	Body->SetStringField(TEXT("shown"), SwapPrice.Out);
+	Ask(TEXT("/shop/swap/trades"), Body, TEXT("waiting for the wallet to swap..."));
+	bSwapping = bBusy;
+	bProveAfter = bBusy;
 }
 
 bool USennitePublisher::OpenConnectCode() const
@@ -488,6 +603,19 @@ void USennitePublisher::BuyHero(const FString& HeroId)
 	Ask(TEXT("/shop/heroes"), Body, TEXT("waiting for the wallet to pay for the hero..."));
 	bProveAfter = bBusy;
 	BuyingHero = HeroId;
+}
+
+void USennitePublisher::BuyWeapon(const FString& WeaponId)
+{
+	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("weaponId"), WeaponId);
+	if (bBusy) {
+		return;
+	}
+	Ask(TEXT("/shop/weapons"), Body, TEXT("waiting for the wallet to pay for the gun..."));
+	bProveAfter = bBusy;
+	// bought and given as a hero is: it is the wallet's once the wallet proves it, in the same list
+	BuyingHero = WeaponId;
 }
 
 void USennitePublisher::AskHeroPass(const FString& ForAudience, TFunction<void(const FString&)> Done)
@@ -730,6 +858,8 @@ void USennitePublisher::AskRequest()
 			if (Status == 404) {
 				PendingRequest.Reset();
 				bBusy = false;
+				bPricing = false;
+				bSwapping = false;
 				bLastOk = false;
 				Message = TEXT("the publisher's server no longer knows the request");
 			}
@@ -760,6 +890,28 @@ void USennitePublisher::AskRequest()
 			BuyingHero.Reset();
 		}
 		Message = Json->GetStringField(TEXT("message"));
+		if (bPricing) {
+			// a price: what the wallet said the swap would give now
+			bPricing = false;
+			const TSharedPtr<FJsonObject>* Price = nullptr;
+			if (bLastOk && Json->TryGetObjectField(TEXT("price"), Price)) {
+				// a price is taken whole or not at all: one with a part missing is no price to swap at
+				FSenniteSwapPrice Given;
+				double Hops = 0.0;
+				if ((*Price)->TryGetStringField(TEXT("from"), Given.From) && (*Price)->TryGetStringField(TEXT("to"), Given.To) && (*Price)->TryGetStringField(TEXT("amount"), Given.Amount)
+					&& (*Price)->TryGetStringField(TEXT("amountIn"), Given.AmountIn) && (*Price)->TryGetStringField(TEXT("amountOut"), Given.AmountOut)
+					&& (*Price)->TryGetStringField(TEXT("out"), Given.Out) && (*Price)->TryGetNumberField(TEXT("hops"), Hops)) {
+					Given.Hops = int32(Hops);
+					SwapPrice = Given;
+				}
+			}
+		}
+		if (bSwapping) {
+			// swapped or not, the price shown was the vaults' before it: the next swap asks again, and the reserves are read again
+			bSwapping = false;
+			SwapPrice = FSenniteSwapPrice();
+			AskSwap();
+		}
 		if (bProveAfter) {
 			// what the wallet holds changed with this: ask it again, without holding the player up
 			bProveAfter = false;
@@ -788,6 +940,8 @@ void USennitePublisher::Ask(const FString& Path, const TSharedPtr<FJsonObject>& 
 			return;
 		}
 		bBusy = false;
+		bPricing = false;
+		bSwapping = false;
 		// nothing was started: a skin or hero that was to be bought is not being bought
 		BuyingSkin.Reset();
 		BuyingHero.Reset();
@@ -880,6 +1034,17 @@ void USennitePublisher::ReadHoldings(const FJsonObject& Json)
 	if (Json.TryGetArrayField(TEXT("heroes"), Heroes)) {
 		for (const TSharedPtr<FJsonValue>& Value : *Heroes) {
 			OwnedHeroes.AddUnique(Value->AsObject()->GetStringField(TEXT("heroId")));
+		}
+	}
+	// the guns the wallet owns, in the same list: they are sold and owned as heroes are, and no gun has a hero's id
+	const TArray<TSharedPtr<FJsonValue>>* Weapons = nullptr;
+	if (Json.TryGetArrayField(TEXT("weapons"), Weapons)) {
+		for (const TSharedPtr<FJsonValue>& Value : *Weapons) {
+			const TSharedPtr<FJsonObject>* One = nullptr;
+			FString WeaponId;
+			if (Value.IsValid() && Value->TryGetObject(One) && (*One)->TryGetStringField(TEXT("weaponId"), WeaponId) && !WeaponId.IsEmpty()) {
+				OwnedHeroes.AddUnique(WeaponId);
+			}
 		}
 	}
 	bMaterialsKnown = true;

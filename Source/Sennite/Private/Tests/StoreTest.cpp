@@ -4,7 +4,9 @@
 // - STORE opens on the heroes; SKINS shows each skin the shop lists, on the hero it is a skin of, turning
 //   on the stage in the skin's own mesh, with its price; the arrows and the tiles go through them;
 // - a skin not owned offers the next step toward it: with no wallet connected, connecting one;
-// - D-BUCKS says no wallet is connected, and offers the same;
+// - WEAPONS shows each gun the shop sells, turning on the stage in the hero's place, with its price;
+// - SWAP shows what the publisher's vaults hold to swap, takes an amount from the screen's keypad, and
+//   changes the two sides over; with no wallet connected it offers to connect one, and no price is asked;
 // - BACK goes to the first screen, and BASE EDITOR opens the test range on the planning view of a parcel.
 //
 // Tools/check_store.sh runs this and reads the result.
@@ -39,6 +41,13 @@ namespace
 		return Skin != nullptr ? Skin->Mesh.ToString() : FString();
 	}
 
+	/** The hero a shop skin is a skin of, as the game's list of skins names it. */
+	FName StoreSkinHero(const FString& SkinId)
+	{
+		const FSenniteSkinMesh* Skin = GetDefault<ASenniteBaseEditor>()->Skins.FindByPredicate([&SkinId](const FSenniteSkinMesh& Each) { return Each.Id == SkinId; });
+		return Skin != nullptr ? Skin->Hero : FName();
+	}
+
 	class FStoreRun : public IAutomationLatentCommand
 	{
 	public:
@@ -47,7 +56,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForMenu, Store, Skins, SecondSkin, ByTile, DBucks, Back, Base, Done };
+		enum class EPhase { WaitForMenu, Store, Skins, SecondSkin, ByTile, Weapons, DBucks, Back, Base, Done };
 
 		void Enter(EPhase Next) { Phase = Next; PhaseStart = FPlatformTime::Seconds(); }
 		double Elapsed() const { return FPlatformTime::Seconds() - PhaseStart; }
@@ -57,6 +66,9 @@ namespace
 		double RealStart;
 		EPhase Phase = EPhase::WaitForMenu;
 		double PhaseStart = 0.0;
+		/** How far through the swap section's steps the check is. */
+		int32 Step = 0;
+		int32 WeaponStep = 0;
 	};
 
 	bool FStoreRun::Update()
@@ -121,8 +133,20 @@ namespace
 			Test->TestEqual(TEXT("The stage holds the skin, not a hero as it ships"), Menu->StageHeroes().Num() == 1 ? Menu->StageHeroes()[0].ToString() : FString(), FString(TEXT("skin:")) + Skin.Id);
 			Test->TestFalse(TEXT("A skin not owned has no WEAR"), MenuCheck::Has(Menu, TEXT("wear")));
 			Test->TestFalse(TEXT("It says what the button is for"), MenuCheck::Line(Menu, TEXT("hint")).IsEmpty());
-			for (const FSenniteSkinForSale& Each : Server->ShopSkins) {
-				Test->TestTrue(FString::Printf(TEXT("The skin %s has a tile"), *Each.Id), MenuCheck::Has(Menu, FName(*(FString(TEXT("skin:")) + Each.Id))));
+			{
+				// the row of heroes that have skins, and under it a tile for each skin of the hero shown, and no other's
+				TArray<FName> Wearers;
+				for (const FSenniteSkinForSale& Each : Server->ShopSkins) {
+					const FName Wearer = StoreSkinHero(Each.Id);
+					Wearers.AddUnique(Wearer);
+					Test->TestEqual(FString::Printf(TEXT("The skin %s has a tile only while its hero's skins are shown"), *Each.Id), MenuCheck::Has(Menu, FName(*(FString(TEXT("skin:")) + Each.Id))), Wearer == StoreSkinHero(Skin.Id));
+				}
+				if (Wearers.Num() > 1) {
+					for (const FName Wearer : Wearers) {
+						Test->TestTrue(FString::Printf(TEXT("%s, which has skins, is in the row of heroes"), *Wearer.ToString()), MenuCheck::Has(Menu, FName(*FString::Printf(TEXT("skinsof:%s"), *Wearer.ToString()))));
+					}
+				}
+				UE_LOG(LogStoreCheck, Display, TEXT("GAMECHECK skins: for %d heroes"), Wearers.Num());
 			}
 			UE_LOG(LogStoreCheck, Display, TEXT("GAMECHECK skins: %d listed; %s on the stage as %s; %s"), Server->ShopSkins.Num(), *Skin.Id, *StoreStageMesh(World), *MenuCheck::Line(Menu, TEXT("count")));
 			GameCheck::Shot(TEXT("Store"), TEXT("skins.png"));
@@ -153,41 +177,137 @@ namespace
 		}
 
 		case EPhase::ByTile: {
+			// the last skin the shop lists is another hero's, when more than one hero has skins: that hero's place in
+			// the row brings its skins up, and the skin's own tile shows it
 			const int32 Last = Server->ShopSkins.Num() - 1;
+			const FName Wearer = StoreSkinHero(Server->ShopSkins[Last].Id);
 			if (Menu->BrowseSkin != Last) {
-				if (Elapsed() > 0.3) {
-					Test->TestTrue(TEXT("The last skin's tile can be tapped"), MenuCheck::Tap(Menu, FName(*(FString(TEXT("skin:")) + Server->ShopSkins[Last].Id))));
+				if (Elapsed() > 0.5) {
+					const FName Tile(*(FString(TEXT("skin:")) + Server->ShopSkins[Last].Id));
+					if (MenuCheck::Has(Menu, Tile)) {
+						MenuCheck::Tap(Menu, Tile);
+					}
+					else {
+						Test->TestTrue(TEXT("The last skin's hero can be tapped in the row of heroes"), MenuCheck::Tap(Menu, FName(*FString::Printf(TEXT("skinsof:%s"), *Wearer.ToString()))));
+					}
 					Enter(EPhase::ByTile);
 				}
 				return false;
 			}
-			if (StoreStageMesh(World) != StoreSkinMesh(Server->ShopSkins[Last].Id) || Elapsed() < 1.0) {
+			if (StoreStageMesh(World) != StoreSkinMesh(Server->ShopSkins[Last].Id) || Elapsed() < 1.5) {
 				return Elapsed() > 30.0 ? Fail(TEXT("A tap on a skin's tile did not bring it onto the stage in 30 s")) : false;
 			}
 			Test->TestEqual(TEXT("A tap on a skin's tile shows that skin"), MenuCheck::Line(Menu, TEXT("name")), Server->ShopSkins[Last].Name.ToUpper());
-			MenuCheck::Tap(Menu, TEXT("tab:dbucks"));
+			Test->TestTrue(TEXT("It says which hero it is a skin of"), MenuCheck::Line(Menu, TEXT("count")).EndsWith(FString(TEXT("FOR ")) + USenniteHeroes::FindOrDefault(Wearer).Name));
+			UE_LOG(LogStoreCheck, Display, TEXT("GAMECHECK skins: %s on the stage as %s; %s"), *Server->ShopSkins[Last].Id, *StoreStageMesh(World), *MenuCheck::Line(Menu, TEXT("count")));
+			GameCheck::Shot(TEXT("Store"), TEXT("skins_last.png"));
+			Enter(EPhase::Weapons);
+			return false;
+		}
+
+		case EPhase::Weapons: {
+			if (Menu->Page != ESenniteMenuPage::Weapons) {
+				if (Elapsed() > 0.5) {
+					MenuCheck::Tap(Menu, TEXT("tab:weapons"));
+					Enter(EPhase::Weapons);
+				}
+				return false;
+			}
+			if (Server->ShopWeapons.Num() == 0) {
+				return Elapsed() > 60.0 ? Fail(TEXT("WEAPONS did not show the shop's guns in 60 s")) : false;
+			}
+			const int32 Last = Server->ShopWeapons.Num() - 1;
+			if (WeaponStep == 0) {
+				const FSenniteHeroForSale& Gun = Server->ShopWeapons[0];
+				bool bWallet = false;
+				if (Menu->StageWeapon() != Gun.Id || !StoreStageMesh(World).IsEmpty() || !(MenuCheck::Has(Menu, TEXT("wallet"), &bWallet) && bWallet) || Elapsed() < 2.0) {
+					return Elapsed() > 60.0 ? Fail(FString::Printf(TEXT("The gun %s did not turn on the stage with CONNECT YOUR WALLET under it in 60 s"), *Gun.Id)) : false;
+				}
+				Test->TestEqual(TEXT("The store names the section open"), MenuCheck::Line(Menu, TEXT("section")), FString(TEXT("WEAPONS")));
+				Test->TestEqual(TEXT("The shop sells the energy rifle and the sniper"), Server->ShopWeapons.Num(), 2);
+				Test->TestEqual(TEXT("The first gun is shown by the name it has in play"), MenuCheck::Line(Menu, TEXT("name")), FString(TEXT("ENERGY RIFLE")));
+				Test->TestEqual(TEXT("and its price, as the shop gives it"), MenuCheck::Line(Menu, TEXT("status")), FString::Printf(TEXT("%s D-BUCKS"), *SenniteUi::Grouped(Gun.Price)));
+				Test->TestFalse(TEXT("A gun not owned is not marked bought"), MenuCheck::Has(Menu, TEXT("bought")));
+				Test->TestTrue(TEXT("It says which guns are free"), MenuCheck::Line(Menu, TEXT("free")).Contains(TEXT("FREE")));
+				for (const FSenniteHeroForSale& Each : Server->ShopWeapons) {
+					Test->TestTrue(FString::Printf(TEXT("The gun %s has a tile"), *Each.Id), MenuCheck::Has(Menu, FName(*(FString(TEXT("gun:")) + Each.Id))));
+				}
+				UE_LOG(LogStoreCheck, Display, TEXT("GAMECHECK weapons: %d listed; %s on the stage at %s"), Server->ShopWeapons.Num(), *Menu->StageWeapon(), *MenuCheck::Line(Menu, TEXT("status")));
+				GameCheck::Shot(TEXT("Store"), TEXT("weapons.png"));
+				WeaponStep = 1;
+				Enter(EPhase::Weapons);
+				return false;
+			}
+			if (Menu->BrowseWeapon != Last) {
+				if (Elapsed() > 0.5) {
+					Test->TestTrue(TEXT("The last gun's tile can be tapped"), MenuCheck::Tap(Menu, FName(*(FString(TEXT("gun:")) + Server->ShopWeapons[Last].Id))));
+					Enter(EPhase::Weapons);
+				}
+				return false;
+			}
+			if (Menu->StageWeapon() != Server->ShopWeapons[Last].Id || Elapsed() < 1.5) {
+				return Elapsed() > 30.0 ? Fail(TEXT("A tap on a gun's tile did not bring it onto the stage in 30 s")) : false;
+			}
+			Test->TestEqual(TEXT("A tap on a gun's tile shows that gun"), MenuCheck::Line(Menu, TEXT("name")), FString(TEXT("SNIPER")));
+			GameCheck::Shot(TEXT("Store"), TEXT("weapons_last.png"));
 			Enter(EPhase::DBucks);
 			return false;
 		}
 
 		case EPhase::DBucks: {
-			if (Menu->Page != ESenniteMenuPage::DBucks) {
+			if (Menu->Page != ESenniteMenuPage::Swap) {
 				if (Elapsed() > 1.0) {
-					MenuCheck::Tap(Menu, TEXT("tab:dbucks"));
+					MenuCheck::Tap(Menu, TEXT("tab:swap"));
 					Enter(EPhase::DBucks);
 				}
 				return false;
 			}
-			if (Elapsed() < 1.0) {
+			if (Server->SwapTokens.Num() < 2 || !MenuCheck::Has(Menu, TEXT("swap:from")) || Elapsed() < 1.0) {
+				return Elapsed() > 60.0 ? Fail(TEXT("SWAP did not show what the publisher's vaults hold in 60 s")) : false;
+			}
+			if (Step == 0) {
+				bool bWallet = false;
+				Test->TestEqual(TEXT("The store names the section open"), MenuCheck::Line(Menu, TEXT("section")), FString(TEXT("SWAP")));
+				Test->TestEqual(TEXT("It opens paying ERA"), MenuCheck::Line(Menu, TEXT("pay")), FString(TEXT("ERA")));
+				Test->TestEqual(TEXT("for the game's D-bucks"), MenuCheck::Line(Menu, TEXT("get")), FString(TEXT("D-BUCKS")));
+				Test->TestEqual(TEXT("With no wallet connected it says so"), MenuCheck::Line(Menu, TEXT("holds")), FString(TEXT("NO WALLET CONNECTED")));
+				Test->TestTrue(TEXT("and offers to connect one"), MenuCheck::Has(Menu, TEXT("wallet"), &bWallet) && bWallet);
+				Test->TestFalse(TEXT("No price is asked with no wallet"), MenuCheck::Has(Menu, TEXT("price")) || MenuCheck::Has(Menu, TEXT("trade")));
+				Test->TestEqual(TEXT("No amount is typed yet"), MenuCheck::Line(Menu, TEXT("amount")), FString());
+				Test->TestEqual(TEXT("The player's hero is back on the stage"), StoreStageMesh(World), USenniteHeroes::FindOrDefault(USenniteProfile::Get().PlayingHero(Menu)).Mesh.ToString());
+				UE_LOG(LogStoreCheck, Display, TEXT("GAMECHECK swap: %d things to swap, %d vault(s); pay %s, get %s"), Server->SwapTokens.Num(), Server->SwapVaults.Num(), *MenuCheck::Line(Menu, TEXT("pay")), *MenuCheck::Line(Menu, TEXT("get")));
+				// an amount, by the keypad
+				MenuCheck::Tap(Menu, TEXT("num:2"));
+			}
+			else if (Step == 1) {
+				Test->TestEqual(TEXT("A tap on the keypad types the amount"), MenuCheck::Line(Menu, TEXT("amount")), FString(TEXT("2")));
+				MenuCheck::Tap(Menu, TEXT("num:5"));
+			}
+			else if (Step == 2) {
+				Test->TestEqual(TEXT("and the next digit"), MenuCheck::Line(Menu, TEXT("amount")), FString(TEXT("25")));
+				MenuCheck::Tap(Menu, TEXT("num:del"));
+			}
+			else if (Step == 3) {
+				Test->TestEqual(TEXT("DEL takes the last digit off"), MenuCheck::Line(Menu, TEXT("amount")), FString(TEXT("2")));
+				GameCheck::Shot(TEXT("Store"), TEXT("swap.png"));
+			}
+			else if (Step == 4) {
+				MenuCheck::Tap(Menu, TEXT("swap:flip"));
+			}
+			else if (Step == 5) {
+				Test->TestEqual(TEXT("SWITCH changes the two sides over"), MenuCheck::Line(Menu, TEXT("pay")), FString(TEXT("D-BUCKS")));
+				Test->TestEqual(TEXT("and what was paid is got"), MenuCheck::Line(Menu, TEXT("get")), FString(TEXT("ERA")));
+				bool bPoint = true;
+				MenuCheck::Has(Menu, TEXT("num:."), &bPoint);
+				Test->TestFalse(TEXT("D-bucks are whole: the point is not there to type"), bPoint);
+				GameCheck::Shot(TEXT("Store"), TEXT("swap_switched.png"));
+			}
+			else {
+				Enter(EPhase::Back);
 				return false;
 			}
-			bool bWallet = false;
-			Test->TestEqual(TEXT("The store names the section open"), MenuCheck::Line(Menu, TEXT("section")), FString(TEXT("D-BUCKS")));
-			Test->TestEqual(TEXT("With no wallet connected it says so"), MenuCheck::Line(Menu, TEXT("status")), FString(TEXT("NO WALLET CONNECTED")));
-			Test->TestTrue(TEXT("and offers to connect one"), MenuCheck::Has(Menu, TEXT("wallet"), &bWallet) && bWallet);
-			Test->TestEqual(TEXT("The player's hero is back on the stage"), StoreStageMesh(World), USenniteHeroes::FindOrDefault(USenniteProfile::Get().PlayingHero(Menu)).Mesh.ToString());
-			GameCheck::Shot(TEXT("Store"), TEXT("dbucks.png"));
-			Enter(EPhase::Back);
+			++Step;
+			Enter(EPhase::DBucks);
 			return false;
 		}
 

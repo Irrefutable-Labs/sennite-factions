@@ -56,6 +56,10 @@ struct FSenniteSkinMesh
 	UPROPERTY()
 	FString Id;
 
+	/** The hero it is a skin of, by the hero's id: the one whose skeleton the mesh has. */
+	UPROPERTY()
+	FName Hero;
+
 	UPROPERTY()
 	FSoftObjectPath Mesh;
 };

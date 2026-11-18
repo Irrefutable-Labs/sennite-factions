@@ -9,7 +9,23 @@
     { "id": "magma", "name": "Dekker Magma", "price": "800" },
     { "id": "energized", "name": "Dekker Energized", "price": "800" },
     { "id": "frost", "name": "Dekker Frost", "price": "600" },
-    { "id": "valentine", "name": "Dekker Valentine", "price": "600" }
+    { "id": "valentine", "name": "Dekker Valentine", "price": "600" },
+    { "id": "wraith-lunar-ops", "name": "Wraith Lunar Ops", "price": "600" },
+    { "id": "wraith-od-green", "name": "Wraith OD Green", "price": "600" },
+    { "id": "crunch-black-gold", "name": "Crunch Black and Gold", "price": "600" },
+    { "id": "crunch-military", "name": "Crunch Military", "price": "600" },
+    { "id": "crunch-titanium", "name": "Crunch Titanium", "price": "600" },
+    { "id": "crunch-valentine", "name": "Crunch Valentine", "price": "600" },
+    { "id": "crunch-black-site", "name": "Crunch Black Site", "price": "1000" },
+    { "id": "crunch-crash-site", "name": "Crunch Crash Site", "price": "1000" },
+    { "id": "drongo-alien-invader", "name": "Drongo Alien Invader", "price": "600" },
+    { "id": "drongo-scavenger", "name": "Drongo Scavenger", "price": "600" },
+    { "id": "howitzer-domed", "name": "Howitzer Domed", "price": "800" },
+    { "id": "rampage-redneck", "name": "Rampage Redneck", "price": "600" },
+    { "id": "rampage-elemental", "name": "Rampage Elemental", "price": "800" },
+    { "id": "sevarog-chronos", "name": "Sevarog Chronos", "price": "600" },
+    { "id": "sevarog-blood-red", "name": "Sevarog Blood Red", "price": "600" },
+    { "id": "sevarog-masked-reaper", "name": "Sevarog Masked Reaper", "price": "800" }
   ],
   "heroes": [
     { "id": "crunch", "name": "Crunch", "price": "1200" },
@@ -18,5 +34,9 @@
     { "id": "rampage", "name": "Rampage", "price": "1200" },
     { "id": "sevarog", "name": "Sevarog", "price": "1200" },
     { "id": "trooper", "name": "Sci-Fi Trooper", "price": "1200" }
+  ],
+  "weapons": [
+    { "id": "energy-rifle", "name": "Energy Rifle", "price": "900" },
+    { "id": "sniper", "name": "Sniper", "price": "900" }
   ]
 }

@@ -5,7 +5,7 @@
 // HOST opens a lobby others on the network can join; JOIN takes an address, typed on the screen's own
 // keypad or the keyboard; QUIT.
 //
-// STORE: what the publisher's shop sells, a section each, named along the top: HEROES, SKINS, D-BUCKS.
+// STORE: what the publisher's shop sells, a section each, named along the top: HEROES, SKINS, WEAPONS, SWAP.
 // Top right, beside a wallet, is how many D-bucks the player's wallet proved it holds (on a game with a shop).
 //
 // HEROES: the hero turns on the stage, its name and what is done with it to the left, every hero on a
@@ -16,11 +16,19 @@
 // CONNECT YOUR WALLET (on a phone the DSM wallet opens on the connect code), GET D-BUCKS (a trade of ERA
 // from the wallet) while the wallet holds too few, then BUY.
 //
-// SKINS: each skin the shop sells, on the hero it is a skin of, turning on the stage. One not owned is
+// SKINS: each skin the shop sells, on the hero it is a skin of, turning on the stage. Along the bottom are
+// the heroes that have skins and, under them, the skins of the hero shown. One not owned is
 // bought as a hero is; one the wallet proves it owns is worn or taken off (it is on the hero in play only
 // while the wallet proves it owns it).
 //
-// D-BUCKS: what the wallet proved it holds, and a trade of ERA from the wallet for more.
+// WEAPONS: each gun the shop sells, turning on the stage, with its price. The rifle and the shotgun are free
+// and come out of every crate; a gun the shop sells comes out of a crate only for a player whose wallet
+// proves it owns it. It is bought as a hero is, once.
+//
+// SWAP: one thing the publisher's vaults hold for another (ERA for D-bucks, D-bucks back for ERA, and
+// whatever else the publisher opens a vault for). The player picks what is paid and what is got, types
+// an amount on the screen's keypad, asks the PRICE (the wallet's answer to DSM's own quote through the
+// vaults), and SWAPs at it: the wallet's own trade, for no less than a little under the price shown.
 //
 // LOBBY: the Menu map hosted with ?listen?game=lobby. Every player's hero stands on the stage, and
 // the list says who is in and as which hero. Anyone can change hero (HEROES, the store's section); the host starts, and
@@ -39,6 +47,7 @@
 
 class ACameraActor;
 class ASkeletalMeshActor;
+class AStaticMeshActor;
 class ASennitePlayerState;
 class USennitePublisher;
 
@@ -49,7 +58,8 @@ enum class ESenniteMenuPage : uint8
 	/** The store's sections. */
 	Heroes,
 	Skins,
-	DBucks,
+	Weapons,
+	Swap,
 	Join,
 	Lobby,
 };
@@ -96,7 +106,26 @@ public:
 	int32 BrowseSkin = 0;
 
 	/** Whether a page is one of the store's sections. */
-	static bool InStore(ESenniteMenuPage Which) { return Which == ESenniteMenuPage::Heroes || Which == ESenniteMenuPage::Skins || Which == ESenniteMenuPage::DBucks; }
+	static bool InStore(ESenniteMenuPage Which) { return Which == ESenniteMenuPage::Heroes || Which == ESenniteMenuPage::Skins || Which == ESenniteMenuPage::Weapons || Which == ESenniteMenuPage::Swap; }
+
+	/** The gun the store's weapons section shows, by its place in the shop's list. */
+	int32 BrowseWeapon = 0;
+
+	/** The gun turning on the stage now, by the shop's id; empty when a hero stands there. What a check reads. */
+	FString StageWeapon() const { return StageGunId; }
+
+	/** The store's swap: what is paid and what is got, by their places among what the publisher's vaults hold, and the amount typed. */
+	int32 SwapFrom = 0;
+	int32 SwapTo = 1;
+	/** Whether the two sides have been set since the vaults were first read: it opens paying ERA, where the vaults hold it. */
+	bool bSwapOpened = false;
+	FString SwapAmount;
+	/** Whether the player has asked a price or a swap on this visit: what the publisher's server says of it is shown. */
+	bool bSwapSaid = false;
+	/** The two sides of the swap as chosen now; false when the publisher's vaults do not hold two things to swap. */
+	bool SwapSides(const USennitePublisher* Server, const struct FSenniteSwapToken*& From, const struct FSenniteSwapToken*& To) const;
+	/** Whether the amount typed is an amount above zero. */
+	bool SwapAmountIsOne() const;
 
 	/** The address typed on the join page. */
 	FString Address;
@@ -125,6 +154,8 @@ public:
 private:
 	/** The button a press began on, by tap or click; it acts when the press ends on the same button. */
 	FName Pressed;
+	/** When the store's swap next reads the vaults again. */
+	double NextSwapRead = 0.0;
 
 public:
 	/** The button held down now, if any: the menu draws it pressed. */
@@ -145,6 +176,13 @@ private:
 
 	UPROPERTY()
 	TArray<TObjectPtr<ASkeletalMeshActor>> Figures;
+
+	/** The gun the store shows, on the stage in the hero's place, and which one it is. */
+	UPROPERTY()
+	TObjectPtr<AStaticMeshActor> StageGun;
+
+	FString StageGunId;
+	void StandGun(const FString& WeaponId);
 
 	TArray<FName> FigureHeroes;
 };
@@ -174,7 +212,8 @@ private:
 	void DrawMain(ASenniteMenuController* Menu);
 	void DrawHeroes(ASenniteMenuController* Menu);
 	void DrawSkins(ASenniteMenuController* Menu);
-	void DrawDBucks(ASenniteMenuController* Menu);
+	void DrawWeapons(ASenniteMenuController* Menu);
+	void DrawSwap(ASenniteMenuController* Menu);
 
 	/** The top of every section of the store: BACK, the sections' names, and the wallet's D-bucks top right. */
 	void StoreTop(ASenniteMenuController* Menu);

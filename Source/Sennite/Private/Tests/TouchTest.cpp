@@ -162,6 +162,8 @@ namespace
 			if (Hero == nullptr || State == nullptr || GEngine->GameViewport == nullptr || !Hero->GetCharacterMovement()->IsMovingOnGround()) {
 				return FPlatformTime::Seconds() - RealStart > 60.0 ? Fail(TEXT("No ASenniteCharacter standing on the ground after 60 s")) : false;
 			}
+			// this player's wallet owns both guns sold in the store: set as the server sets it once the publisher's server says so
+			State->GunsOwned = (1 << 3) | (1 << 4);
 			Controls = Controller->GetTouchControls();
 			if (Controls == nullptr) {
 				return Fail(TEXT("No touch controls: run with bAlwaysShowTouchInterface set, as Tools/check_touch.sh does"));

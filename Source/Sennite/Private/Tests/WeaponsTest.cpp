@@ -46,7 +46,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, OwnWeapon, OpenCrate, FromCrate, HoldShotgun, HoldRifle, Fire, HoldFire, OtherGuns, Done };
+		enum class EPhase { WaitForPawn, OwnWeapon, OpenCrate, FromCrate, HoldShotgun, HoldRifle, Fire, HoldFire, BoughtGuns, OtherGuns, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -242,6 +242,12 @@ namespace
 			}
 			Test->TestTrue(TEXT("Opening the crate gives her the rifle"), State->EquippedWeapons.Contains(1));
 			Test->TestTrue(TEXT("Opening the crate gives her the shotgun"), State->EquippedWeapons.Contains(2));
+			// the energy rifle and the sniper are bought in the store: she has bought neither, so the crate keeps them
+			Test->TestEqual(TEXT("She owns no gun bought in the store"), State->GunsOwned, 0);
+			Test->TestTrue(TEXT("The crate kept the energy rifle and the sniper, and their rounds"), !State->EquippedWeapons.Contains(3) && !State->EquippedWeapons.Contains(4)
+				&& State->EquippedWeaponsAmmunition[3] == 0 && State->EquippedWeaponsAmmunition[4] == 0);
+			GameCheck::Key(Controller, EKeys::Six, IE_Pressed);
+			GameCheck::Key(Controller, EKeys::Six, IE_Released);
 			Enter(EPhase::FromCrate, World);
 			return false;
 
@@ -249,7 +255,7 @@ namespace
 			if (Elapsed(World) < 1.0) {
 				return false;
 			}
-			// the first weapon the crate gave is the one in hand, and nothing was laid on the ground
+			// the first weapon the crate gave is the one in hand (key 6 brought no energy rifle: she has none), and nothing was laid on the ground
 			CheckHeld(Hero, ASenniteRifle::StaticClass(), TEXT("rifle from the crate"));
 			Test->TestEqual(TEXT("The opened crate laid nothing on the ground"), GameCheck::LyingAbout(World), 0);
 			GameCheck::Key(Controller, EKeys::Three, IE_Pressed);
@@ -371,10 +377,41 @@ namespace
 			Test->TestTrue(TEXT("Let go, the rifle stops: no more than the shot already asked for"), Hero->CurrentWeapon != nullptr && RoundsWhenLetGo - Hero->CurrentWeapon->CurrentBulletCount <= 1);
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK held fire: rounds %d -> %d in a second held, %d a second after letting go"), RoundsBefore, RoundsWhenLetGo,
 				Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1);
+			// Her wallet now owns both guns sold in the store: set as the server sets it once the publisher's
+			// server says so of a pass she showed. The crate beside her, full again, gives them when opened.
+			State->GunsOwned = (1 << 3) | (1 << 4);
+			Enter(EPhase::BoughtGuns, World);
+			Step = 0;
+			return false;
+
+		case EPhase::BoughtGuns: {
+			const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
+			const ASenniteCrate* Beside = ASenniteCrate::Nearest(World, Hero->GetActorLocation(), Rules->Reach + Rules->Across, false);
+			if (Beside == nullptr) {
+				return Fail(TEXT("She is no longer beside the crate"));
+			}
+			if (Step == 0) {
+				if (Beside->bOpen) {
+					return Elapsed(World) > Rules->RestockSeconds + 20.0 ? Fail(TEXT("The crate was not full again in time")) : false;
+				}
+				Step = 1;
+				GameCheck::Key(Controller, EKeys::E, IE_Pressed);
+				GameCheck::Key(Controller, EKeys::E, IE_Released);
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (!State->EquippedWeapons.Contains(3) || !State->EquippedWeapons.Contains(4)) {
+				return Elapsed(World) > 8.0 ? Fail(TEXT("The crate did not give the guns her wallet owns")) : false;
+			}
+			Test->TestEqual(TEXT("With the bought guns hers, the crate gives rounds for each"), State->EquippedWeaponsAmmunition[3], GetDefault<ASenniteEnergyRifle>()->CrateRounds);
+			Test->TestEqual(TEXT("and for the sniper"), State->EquippedWeaponsAmmunition[4], GetDefault<ASenniteSniper>()->CrateRounds);
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK bought guns: none from the first crate; owned, the crate gave both, %d and %d rounds"),
+				State->EquippedWeaponsAmmunition[3], State->EquippedWeaponsAmmunition[4]);
 			OtherGun = 0;
 			Enter(EPhase::OtherGuns, World);
 			Step = 0;
 			return false;
+		}
 
 		case EPhase::OtherGuns: {
 			// the energy rifle (6) and the sniper (7): each comes to both hands, and a pull of the trigger sends its own bolt

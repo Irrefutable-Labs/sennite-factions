@@ -269,6 +269,9 @@ public:
 	/** A bit for each gun the hero has (bit n for weapon slot n). */
 	int32 GunsHeld() const;
 
+	/** A bit for each gun bought in the store whose ShopId is among these: what a wallet's owned list makes its player's. */
+	static int32 BoughtGunsAmong(const TArray<FString>& Owned);
+
 	/** A shot left the gun in hand: it kicks. */
 	void KickGun();
 
@@ -482,7 +485,7 @@ protected:
 
 	/** What a crate this player opened gave, for the HUD to say. */
 	UFUNCTION(Client, Reliable)
-	void ClientCrateGave(int32 NewGuns, bool bRounds, int32 Bandages, int32 Potions);
+	void ClientCrateGave(int32 NewGuns, int32 InStore, bool bRounds, int32 Bandages, int32 Potions);
 
 
 	/*UFUNCTION(Server, WithValidation)

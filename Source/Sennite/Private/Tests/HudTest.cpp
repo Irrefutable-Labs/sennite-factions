@@ -143,6 +143,8 @@ namespace
 				return false;
 			}
 			Hides(Hud, TEXT("mode"), TEXT("a piece name after leaving build mode"));
+			// this player's wallet owns both guns sold in the store: set as the server sets it once the publisher's server says so
+			State->GunsOwned = (1 << 3) | (1 << 4);
 			Hides(Hud, TEXT("crate"), TEXT("how to open a crate away from one"));
 			Enter(EPhase::OpenCrate, World);
 			return false;

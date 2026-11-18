@@ -1,7 +1,7 @@
 // Menu check. Run in the game on the Menu map, with a profile of its own (-ProfileSlot=), by taps on
 // the screen as a phone gives them:
 // - the menu is the first thing shown: no hero to play, the player's hero turning on the stage;
-// - STORE opens the store on its heroes, with SKINS and D-BUCKS beside them: on a game with no shop
+// - STORE opens the store on its heroes, with SKINS and SWAP beside them: on a game with no shop
 //   neither sells anything, and says so; BASE EDITOR is dimmed there too, and says why;
 // - in the heroes the arrows go through the heroes, each one standing and turning on the stage as itself;
 // - a hero bought with D-bucks cannot be chosen on a game with no shop;
@@ -56,7 +56,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForMenu, MenuShot, Heroes, Skins, DBucks, HeroesAgain, ToWraith, Turning, ToLocked, Locked, BackToWraith, Chosen, Play, Done };
+		enum class EPhase { WaitForMenu, MenuShot, Heroes, Skins, Weapons, DBucks, HeroesAgain, ToWraith, Turning, ToLocked, Locked, BackToWraith, Chosen, Play, Done };
 
 		void Enter(EPhase Next) { Phase = Next; PhaseStart = FPlatformTime::Seconds(); }
 		double Elapsed() const { return FPlatformTime::Seconds() - PhaseStart; }
@@ -157,7 +157,7 @@ namespace
 			}
 			Test->TestTrue(TEXT("A tap on STORE opens the store on its heroes"), Menu->Page == ESenniteMenuPage::Heroes);
 			Test->TestEqual(TEXT("The store names the section open"), MenuCheck::Line(Menu, TEXT("section")), FString(TEXT("HEROES")));
-			for (const TCHAR* Action : { TEXT("back"), TEXT("tab:heroes"), TEXT("tab:skins"), TEXT("tab:dbucks") }) {
+			for (const TCHAR* Action : { TEXT("back"), TEXT("tab:heroes"), TEXT("tab:skins"), TEXT("tab:weapons"), TEXT("tab:swap") }) {
 				Test->TestTrue(FString::Printf(TEXT("The store has %s"), Action), MenuCheck::Has(Menu, Action));
 			}
 			Test->TestEqual(TEXT("It opens on the player's own hero"), Heroes[Menu->Browse].Id, USenniteProfile::Get().PlayingHero(Menu));
@@ -179,15 +179,39 @@ namespace
 			Test->TestFalse(TEXT("No skin is shown as if it were for sale"), MenuCheck::Has(Menu, TEXT("next")));
 			Test->TestEqual(TEXT("The player's hero stays on the stage"), StageMesh(World), USenniteHeroes::FindOrDefault(USenniteProfile::Get().PlayingHero(Menu)).Mesh.ToString());
 			GameCheck::Shot(TEXT("Menu"), TEXT("store_skins.png"));
+			Enter(EPhase::Weapons);
+			return false;
+		}
+
+		case EPhase::Weapons: {
+			if (Menu->Page != ESenniteMenuPage::Weapons) {
+				// the picture is taken at the end of a frame: nothing is tapped until it is
+				if (Elapsed() > 0.3) {
+					MenuCheck::Tap(Menu, TEXT("tab:weapons"));
+					Enter(EPhase::Weapons);
+				}
+				return false;
+			}
+			if (Elapsed() < 1.0) {
+				return false;
+			}
+			bool bEnabled = true;
+			Test->TestEqual(TEXT("A tap on WEAPONS opens the store's weapons"), MenuCheck::Line(Menu, TEXT("section")), FString(TEXT("WEAPONS")));
+			Test->TestTrue(TEXT("With no shop on this game it says there is none"), MenuCheck::Has(Menu, TEXT("buygun"), &bEnabled));
+			Test->TestFalse(TEXT("and no gun can be bought"), bEnabled);
+			Test->TestFalse(TEXT("No gun is shown as if it were for sale"), MenuCheck::Has(Menu, TEXT("next")));
+			Test->TestTrue(TEXT("No gun is on the stage"), Menu->StageWeapon().IsEmpty());
+			Test->TestTrue(TEXT("It says which guns are free"), MenuCheck::Line(Menu, TEXT("free")).Contains(TEXT("FREE")));
+			GameCheck::Shot(TEXT("Menu"), TEXT("store_weapons.png"));
 			Enter(EPhase::DBucks);
 			return false;
 		}
 
 		case EPhase::DBucks: {
-			if (Menu->Page != ESenniteMenuPage::DBucks) {
+			if (Menu->Page != ESenniteMenuPage::Swap) {
 				// the picture is taken at the end of a frame: nothing is tapped until it is
 				if (Elapsed() > 0.3) {
-					MenuCheck::Tap(Menu, TEXT("tab:dbucks"));
+					MenuCheck::Tap(Menu, TEXT("tab:swap"));
 					Enter(EPhase::DBucks);
 				}
 				return false;
@@ -196,10 +220,11 @@ namespace
 				return false;
 			}
 			bool bEnabled = true;
-			Test->TestEqual(TEXT("A tap on D-BUCKS opens the store's D-bucks"), MenuCheck::Line(Menu, TEXT("section")), FString(TEXT("D-BUCKS")));
-			Test->TestTrue(TEXT("With no shop on this game it says there is none"), MenuCheck::Has(Menu, TEXT("dbucks"), &bEnabled));
-			Test->TestFalse(TEXT("and no D-bucks can be bought"), bEnabled);
-			GameCheck::Shot(TEXT("Menu"), TEXT("store_dbucks.png"));
+			Test->TestEqual(TEXT("A tap on SWAP opens the store's swap"), MenuCheck::Line(Menu, TEXT("section")), FString(TEXT("SWAP")));
+			Test->TestTrue(TEXT("With no shop on this game it says there is none"), MenuCheck::Has(Menu, TEXT("price"), &bEnabled));
+			Test->TestFalse(TEXT("and no price can be asked"), bEnabled);
+			Test->TestFalse(TEXT("Nothing is offered to swap"), MenuCheck::Has(Menu, TEXT("trade")) || MenuCheck::Has(Menu, TEXT("swap:from")));
+			GameCheck::Shot(TEXT("Menu"), TEXT("store_swap.png"));
 			Enter(EPhase::HeroesAgain);
 			return false;
 		}
