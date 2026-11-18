@@ -127,6 +127,17 @@ void ASenniteMenuController::PlayerTick(float DeltaTime)
 	if (!IsLocalController()) {
 		return;
 	}
+	// what the menu said to do in the wallet is done once the wallet is connected
+	if (bNoteForWallet) {
+		const USennitePublisher* Server = Shop(this);
+		if (Note.IsEmpty() || Server == nullptr) {
+			bNoteForWallet = false;
+		}
+		else if (Server->bConnected) {
+			bNoteForWallet = false;
+			Note.Reset();
+		}
+	}
 	// a client learns it is in a lobby when the lobby's game state reaches it
 	if (Page == ESenniteMenuPage::Main && InLobby()) {
 		Page = ESenniteMenuPage::Lobby;
@@ -408,6 +419,7 @@ void ASenniteMenuController::Act(FName Action)
 		const UGameInstance* Game = GetGameInstance();
 		const USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
 		if (Server != nullptr && Server->OpenConnectCode()) {
+			bNoteForWallet = true;
 #if PLATFORM_ANDROID || PLATFORM_IOS
 			Note = TEXT("APPROVE THIS GAME IN YOUR DSM WALLET, THEN COME BACK");
 #else
@@ -743,11 +755,12 @@ void ASenniteMenuHUD::DrawHeroes(ASenniteMenuController* Menu)
 		Button(TEXT("buy"), TEXT("NOT IN THE SHOP"), BX, BY, BW, 66.0f, false, 14);
 	}
 	if (!Hint.IsEmpty()) {
-		Text(TEXT("hint"), Hint, (Left + 2.0f) * S, Under, 10, SenniteUi::Dim, 0.0f, false);
-		Text(TEXT("hint2"), Hint2, (Left + 2.0f) * S, Under + 20.0f * S, 10, SenniteUi::Dim, 0.0f, false);
+		// large enough to read on a phone held at arm's length
+		Text(TEXT("hint"), Hint, (Left + 2.0f) * S, Under, 12, FLinearColor::White, 0.0f, false);
+		Text(TEXT("hint2"), Hint2, (Left + 2.0f) * S, Under + 24.0f * S, 12, FLinearColor::White, 0.0f, false);
 	}
 	if (Server != nullptr && Server->IsOn() && !Server->Message.IsEmpty() && (Server->bBusy || !Server->HeroOnItsWay.IsEmpty())) {
-		Text(TEXT("shop"), Server->Message.ToUpper(), (Left + 2.0f) * S, Under + (Hint.IsEmpty() ? 0.0f : 44.0f * S), 10, White, 0.0f, false);
+		Text(TEXT("shop"), Server->Message.ToUpper(), (Left + 2.0f) * S, Under + (Hint.IsEmpty() ? 0.0f : 52.0f * S), 12, SenniteUi::Gold, 0.0f, false);
 	}
 
 	// the arrows, either side of the hero

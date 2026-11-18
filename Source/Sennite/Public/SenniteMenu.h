@@ -85,6 +85,9 @@ public:
 	/** What the menu says about the last thing asked (a hero that cannot be chosen, an address that is not one). */
 	FString Note;
 
+	/** The note says what to do in the wallet to connect it: it goes once the wallet is connected. */
+	bool bNoteForWallet = false;
+
 	/** Do what a button does. Public so a check can name what it tapped; the input goes through the same buttons. */
 	void Act(FName Action);
 
