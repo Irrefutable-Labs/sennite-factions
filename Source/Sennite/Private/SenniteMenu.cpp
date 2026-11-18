@@ -126,6 +126,25 @@ bool ASenniteMenuController::InLobby() const
 	return GetWorld() != nullptr && GetWorld()->GetGameState<ASenniteLobbyState>() != nullptr;
 }
 
+bool ASenniteMenuController::SwapSides(const USennitePublisher* Server, const FSenniteSwapToken*& From, const FSenniteSwapToken*& To) const
+{
+	const int32 Count = Server != nullptr ? Server->SwapTokens.Num() : 0;
+	if (Count < 2) {
+		return false;
+	}
+	const int32 Paid = FMath::Clamp(SwapFrom, 0, Count - 1);
+	// what is got is never what is paid
+	const int32 Got = FMath::Clamp(SwapTo, 0, Count - 1) == Paid ? (Paid + 1) % Count : FMath::Clamp(SwapTo, 0, Count - 1);
+	From = &Server->SwapTokens[Paid];
+	To = &Server->SwapTokens[Got];
+	return true;
+}
+
+bool ASenniteMenuController::SwapAmountIsOne() const
+{
+	return !SwapAmount.IsEmpty() && !SwapAmount.EndsWith(TEXT(".")) && FCString::Atod(*SwapAmount) > 0.0;
+}
+
 TArray<const ASennitePlayerState*> ASenniteMenuController::LobbyPlayers() const
 {
 	TArray<const ASennitePlayerState*> Players;
@@ -178,6 +197,23 @@ void ASenniteMenuController::PlayerTick(float DeltaTime)
 		else if (Server->bConnected) {
 			bNoteForWallet = false;
 			Note.Reset();
+		}
+	}
+	// the store's swap shows the vaults as they are: they are read again every few seconds while it is open
+	if (Page == ESenniteMenuPage::Swap && FPlatformTime::Seconds() >= NextSwapRead) {
+		const UGameInstance* Game = GetGameInstance();
+		if (USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr) {
+			Server->AskSwap();
+		}
+		NextSwapRead = FPlatformTime::Seconds() + 10.0;
+	}
+	if (Page == ESenniteMenuPage::Swap && !bSwapOpened) {
+		// the first time the vaults are read: what a wallet comes with, ERA, is what is paid, for the first other thing
+		const USennitePublisher* Server = Shop(this);
+		if (Server != nullptr && Server->SwapTokens.Num() >= 2) {
+			bSwapOpened = true;
+			SwapFrom = FMath::Max(0, Server->SwapTokens.IndexOfByPredicate([](const FSenniteSwapToken& Held) { return Held.Symbol == TEXT("ERA"); }));
+			SwapTo = SwapFrom == 0 ? 1 : 0;
 		}
 	}
 	// a client learns it is in a lobby when the lobby's game state reaches it
@@ -337,6 +373,28 @@ bool ASenniteMenuController::InputKey(const FInputKeyEventArgs& Params)
 			return true;
 		}
 	}
+	if (Page == ESenniteMenuPage::Swap) {
+		if (Key == EKeys::Enter) {
+			Act(TEXT("price"));
+			return true;
+		}
+		if (Key == EKeys::BackSpace) {
+			Act(TEXT("num:del"));
+			return true;
+		}
+		if (Key == EKeys::Period || Key == EKeys::Decimal) {
+			Act(TEXT("num:."));
+			return true;
+		}
+		static const FKey Digits[] = { EKeys::Zero, EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine };
+		static const FKey Pad[] = { EKeys::NumPadZero, EKeys::NumPadOne, EKeys::NumPadTwo, EKeys::NumPadThree, EKeys::NumPadFour, EKeys::NumPadFive, EKeys::NumPadSix, EKeys::NumPadSeven, EKeys::NumPadEight, EKeys::NumPadNine };
+		for (int32 Digit = 0; Digit < 10; ++Digit) {
+			if (Key == Digits[Digit] || Key == Pad[Digit]) {
+				Act(FName(*FString::Printf(TEXT("num:%d"), Digit)));
+				return true;
+			}
+		}
+	}
 	if (Page == ESenniteMenuPage::Join) {
 		if (Key == EKeys::Enter) {
 			Act(TEXT("connect"));
@@ -416,9 +474,81 @@ void ASenniteMenuController::Act(FName Action)
 		BrowseSkin = Server != nullptr ? FMath::Max(0, Server->ShopSkins.IndexOfByPredicate([Server](const FSenniteSkinForSale& Skin) { return Skin.Id == Server->Wearing; })) : 0;
 		Note.Reset();
 	}
-	else if (Name == TEXT("tab:dbucks")) {
-		Page = ESenniteMenuPage::DBucks;
+	else if (Name == TEXT("tab:swap")) {
+		Page = ESenniteMenuPage::Swap;
+		bSwapSaid = false;
+		NextSwapRead = 0.0;
 		Note.Reset();
+	}
+	else if (Name == TEXT("swap:from") || Name == TEXT("swap:to") || Name == TEXT("swap:flip")) {
+		const USennitePublisher* Server = Shop(this);
+		const int32 Count = Server != nullptr ? Server->SwapTokens.Num() : 0;
+		if (Count < 2) {
+			return;
+		}
+		SwapFrom = FMath::Clamp(SwapFrom, 0, Count - 1);
+		SwapTo = FMath::Clamp(SwapTo, 0, Count - 1);
+		if (Name == TEXT("swap:flip")) {
+			Swap(SwapFrom, SwapTo);
+		}
+		else {
+			// the next thing the vaults hold; if that is the other side's, the two change places
+			int32& Side = Name == TEXT("swap:from") ? SwapFrom : SwapTo;
+			int32& Other = Name == TEXT("swap:from") ? SwapTo : SwapFrom;
+			const int32 Was = Side;
+			Side = (Side + 1) % Count;
+			if (Side == Other) {
+				Other = Was;
+			}
+		}
+		// an amount typed with more digits after the point than what is now paid has is typed again
+		int32 Point = INDEX_NONE;
+		if (SwapAmount.FindChar(TEXT('.'), Point) && SwapAmount.Len() - Point - 1 > Server->SwapTokens[SwapFrom].Decimals) {
+			SwapAmount.Reset();
+		}
+	}
+	else if (Name.StartsWith(TEXT("num:"))) {
+		const USennitePublisher* Server = Shop(this);
+		const FSenniteSwapToken* From = nullptr;
+		const FSenniteSwapToken* To = nullptr;
+		if (Server == nullptr || !SwapSides(Server, From, To)) {
+			return;
+		}
+		const FString Typed = Name.Mid(4);
+		int32 Point = INDEX_NONE;
+		const bool bPoint = SwapAmount.FindChar(TEXT('.'), Point);
+		if (Typed == TEXT("del")) {
+			SwapAmount.LeftChopInline(1);
+		}
+		else if (Typed == TEXT(".")) {
+			// one point, and only in an amount of something that has digits after it
+			if (!bPoint && From->Decimals > 0 && SwapAmount.Len() < 9) {
+				SwapAmount += SwapAmount.IsEmpty() ? TEXT("0.") : TEXT(".");
+			}
+		}
+		else if (Typed.Len() == 1 && FChar::IsDigit(Typed[0]) && SwapAmount.Len() < 10 && (!bPoint || SwapAmount.Len() - Point - 1 < From->Decimals)) {
+			// a whole number does not start with a zero that says nothing
+			if (SwapAmount == TEXT("0")) {
+				SwapAmount.Reset();
+			}
+			SwapAmount += Typed;
+		}
+	}
+	else if (Name == TEXT("price") || Name == TEXT("trade")) {
+		const UGameInstance* Game = GetGameInstance();
+		USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+		const FSenniteSwapToken* From = nullptr;
+		const FSenniteSwapToken* To = nullptr;
+		if (Server == nullptr || !Server->IsOn() || !Server->bConnected || Server->bBusy || !SwapSides(Server, From, To) || !SwapAmountIsOne()) {
+			return;
+		}
+		bSwapSaid = true;
+		if (Name == TEXT("price")) {
+			Server->AskSwapPrice(From->Id, To->Id, SwapAmount);
+		}
+		else {
+			Server->Swap(From->Id, To->Id, SwapAmount);
+		}
 	}
 	else if (Name == TEXT("base")) {
 		// the player's base is on the map the game is played on: it opens there, on the planning view
@@ -694,7 +824,7 @@ void ASenniteMenuHUD::DrawHUD()
 	case ESenniteMenuPage::Main: DrawMain(Menu); break;
 	case ESenniteMenuPage::Heroes: DrawHeroes(Menu); break;
 	case ESenniteMenuPage::Skins: DrawSkins(Menu); break;
-	case ESenniteMenuPage::DBucks: DrawDBucks(Menu); break;
+	case ESenniteMenuPage::Swap: DrawSwap(Menu); break;
 	case ESenniteMenuPage::Join: DrawJoin(Menu); break;
 	case ESenniteMenuPage::Lobby: DrawLobby(Menu); break;
 	}
@@ -882,7 +1012,7 @@ void ASenniteMenuHUD::StoreTop(ASenniteMenuController* Menu)
 	};
 	float X = 232.0f;
 	for (const FSection& Each : { FSection{ TEXT("tab:heroes"), TEXT("HEROES"), ESenniteMenuPage::Heroes }, FSection{ TEXT("tab:skins"), TEXT("SKINS"), ESenniteMenuPage::Skins },
-			FSection{ TEXT("tab:dbucks"), TEXT("D-BUCKS"), ESenniteMenuPage::DBucks } }) {
+			FSection{ TEXT("tab:swap"), TEXT("SWAP"), ESenniteMenuPage::Swap } }) {
 		Button(Each.Action, Each.Name, X, 24.0f, 160.0f, 58.0f, true, 16, Menu->Page == Each.Page);
 		if (Menu->Page == Each.Page) {
 			Drawing.Add(FString::Printf(TEXT("section=%s"), Each.Name));
@@ -934,7 +1064,7 @@ bool ASenniteMenuHUD::NextStep(const USennitePublisher* Server, const FForSale& 
 		Button(Thing.Buy, FString::Printf(TEXT("BUY  %s D-BUCKS"), *SenniteUi::Grouped(Thing.Price)), Left, Y, Wide, 66.0f, true, 18, true);
 	}
 	else {
-		// too few D-bucks: they are had by trading ERA from the wallet, here as in the D-bucks section
+		// too few D-bucks: a trade of ERA from the wallet brings more, here at one tap; the SWAP section trades any amount
 		const bool bEra = FCString::Atod(*Server->Era) >= FCString::Atod(USennitePublisher::TradeEra());
 		Button(TEXT("dbucks"), TEXT("GET D-BUCKS"), Left, Y, Wide, 66.0f, bEra, 18, true);
 		Hint = FString::Printf(TEXT("YOUR WALLET HAS %s OF THE %s D-BUCKS IT COSTS."), *SenniteUi::Grouped(Server->DBucks), *SenniteUi::Grouped(Thing.Price));
@@ -1075,69 +1205,121 @@ void ASenniteMenuHUD::DrawSkins(ASenniteMenuController* Menu)
 	}
 }
 
-void ASenniteMenuHUD::DrawDBucks(ASenniteMenuController* Menu)
+void ASenniteMenuHUD::DrawSwap(ASenniteMenuController* Menu)
 {
+	const float W = Canvas->ClipX / S;
 	const FLinearColor White = FLinearColor::White;
-	const FBox2D Whole = Screen();
-	SenniteUi::Fade(Canvas, FBox2D(Whole.Min, FVector2D(600.0f * S, Whole.Max.Y)), FLinearColor(0.0f, 0.0f, 0.0f, 0.66f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
+	// the whole screen is shaded, as where an address is typed: the keypad is read over the stage
+	SenniteUi::Fade(Canvas, Screen(), FLinearColor(0.0f, 0.0f, 0.0f, 0.66f), FLinearColor(0.0f, 0.0f, 0.0f, 0.4f), false);
 	StoreTop(Menu);
 
 	const float Left = 48.0f;
-	const float BW = 340.0f;
-	const float BY = 304.0f;
-	const float Under = (BY + 80.0f) * S;
+	const float Wide = 542.0f;
 	const USennitePublisher* Server = Shop(Menu);
-	Text(TEXT("count"), TEXT("WHAT THIS STORE SELLS FOR"), Left * S, 122.0f * S, 12, SenniteUi::Gold);
-	Text(TEXT("name"), TEXT("D-BUCKS"), Left * S, 142.0f * S, 54, White);
-	SenniteUi::Plate(Canvas, FBox2D(FVector2D(Left * S, 226.0f * S), FVector2D((Left + 96.0f) * S, 229.0f * S)), 0.0f, SenniteUi::Gold, SenniteUi::Gold);
+	Text(TEXT("count"), TEXT("SWAP THROUGH THE PUBLISHER'S VAULTS"), Left * S, 102.0f * S, 12, SenniteUi::Gold);
 
-	FString Hint;
-	FString Hint2;
+	const FSenniteSwapToken* From = nullptr;
+	const FSenniteSwapToken* To = nullptr;
 	if (Server == nullptr || !Server->IsOn()) {
-		Button(TEXT("dbucks"), TEXT("NO SHOP ON THIS GAME"), Left, BY, BW, 66.0f, false, 14);
-		Hint = TEXT("THIS GAME IS NOT CONNECTED TO THE PUBLISHER'S");
-		Hint2 = TEXT("SERVER, WHERE D-BUCKS ARE SOLD FOR ERA.");
+		Button(TEXT("price"), TEXT("NO SHOP ON THIS GAME"), Left, 150.0f, 340.0f, 66.0f, false, 14);
+		Text(TEXT("hint"), TEXT("THIS GAME IS NOT CONNECTED TO THE PUBLISHER'S"), (Left + 2.0f) * S, 230.0f * S, 12, White, 0.0f, false);
+		Text(TEXT("hint2"), TEXT("SERVER, WHOSE VAULTS SWAPS GO THROUGH."), (Left + 2.0f) * S, 254.0f * S, 12, White, 0.0f, false);
+		return;
+	}
+	if (!Menu->SwapSides(Server, From, To)) {
+		// nothing is offered that the vaults do not hold
+		Text(TEXT("status"), Server->bSwapKnown ? TEXT("THE PUBLISHER HAS NO VAULT OPEN: NOTHING CAN BE SWAPPED NOW") : TEXT("ASKING WHAT CAN BE SWAPPED ..."), (Left + 2.0f) * S, 150.0f * S, 13, SenniteUi::Gold);
+		return;
+	}
+
+	const auto Field = [this](float X, float Y, float Width, float Height) {
+		const FBox2D Box(FVector2D(X * S, Y * S), FVector2D((X + Width) * S, (Y + Height) * S));
+		SenniteUi::Plate(Canvas, Box, 10.0f * S, FLinearColor(0.0f, 0.0f, 0.0f, 0.7f), FLinearColor(0.02f, 0.03f, 0.05f, 0.7f));
+		SenniteUi::Outline(Canvas, Box, 10.0f * S, SenniteUi::Gold.CopyWithNewOpacity(0.85f), FMath::Max(1.0f, 1.5f * S));
+	};
+	const FString Paid = From->Name.ToUpper();
+	const FString Got = To->Name.ToUpper();
+	const bool bAmount = Menu->SwapAmountIsOne();
+	const bool bPriced = bAmount && Server->PricedFor(From->Id, To->Id, Menu->SwapAmount);
+
+	// what is paid: which thing, and how much of it, typed on the keypad
+	Text(TEXT("paylabel"), TEXT("YOU PAY"), (Left + 2.0f) * S, 128.0f * S, 11, SenniteUi::Gold);
+	Button(TEXT("swap:from"), Paid, Left, 148.0f, 210.0f, 64.0f, true, 17, false, 1);
+	Field(Left + 222.0f, 148.0f, Wide - 222.0f, 64.0f);
+	const bool bBlink = FMath::Fmod(GetWorld()->GetRealTimeSeconds(), 1.0) < 0.5;
+	Text(TEXT("amount"), Menu->SwapAmount + (bBlink ? TEXT("_") : TEXT(" ")), (Left + 242.0f) * S, 162.0f * S, 24, White);
+	// the amount without the blinking mark, for a check to read
+	Drawing.Pop();
+	Drawing.Add(FString::Printf(TEXT("amount=%s"), *Menu->SwapAmount));
+	Drawing.Add(FString::Printf(TEXT("pay=%s"), *Paid));
+	{
+		const FString Holds = Server->HoldsOf(*From);
+		bool bKnown = false;
+		const FString Why = Server->DBucksLine(bKnown);
+		Text(TEXT("holds"), !Holds.IsEmpty() ? FString::Printf(TEXT("YOUR WALLET HAS %s %s"), *Holds, *Paid) : bKnown ? FString::Printf(TEXT("YOUR WALLET HAS PROVED NO %s"), *Paid) : Why,
+			(Left + 2.0f) * S, 220.0f * S, 12, White, 0.0f, false);
+	}
+
+	// the two change places
+	Button(TEXT("swap:flip"), TEXT("SWITCH"), Left, 250.0f, 210.0f, 46.0f, true, 14);
+
+	// what is got: which thing, and how much the wallet said the vaults would give
+	Text(TEXT("getlabel"), TEXT("YOU GET"), (Left + 2.0f) * S, 312.0f * S, 11, SenniteUi::Gold);
+	Button(TEXT("swap:to"), Got, Left, 332.0f, 210.0f, 64.0f, true, 17, false, 1);
+	Field(Left + 222.0f, 332.0f, Wide - 222.0f, 64.0f);
+	Drawing.Add(FString::Printf(TEXT("get=%s"), *Got));
+	if (bPriced) {
+		Text(TEXT("gets"), Server->SwapPrice.AmountOut, (Left + 242.0f) * S, 346.0f * S, 24, White);
+		Text(TEXT("least"), FString::Printf(TEXT("THE PRICE NOW, THROUGH %d VAULT%s. THE SWAP TAKES NO LESS THAN 97%% OF IT."), Server->SwapPrice.Hops, Server->SwapPrice.Hops == 1 ? TEXT("") : TEXT("S")),
+			(Left + 2.0f) * S, 404.0f * S, 12, White, 0.0f, false);
 	}
 	else {
-		// what the wallet proved it holds, on a small plate under the name; with nothing proved, why there is none to show
-		bool bKnown = false;
-		const FString Holds = Server->DBucksLine(bKnown);
-		const FString Status = bKnown ? FString::Printf(TEXT("YOUR WALLET HAS %s AND %s ERA"), *Holds, Server->Era.IsEmpty() ? TEXT("NO") : *Server->Era) : Holds;
-		const float Wide = Width(Status, 13) + 36.0f * S;
-		const FBox2D Tag(FVector2D(Left * S, 246.0f * S), FVector2D(Left * S + Wide, 280.0f * S));
-		SenniteUi::Plate(Canvas, Tag, 7.0f * S, FLinearColor(0.0f, 0.0f, 0.0f, 0.55f), FLinearColor(0.0f, 0.0f, 0.0f, 0.55f));
-		SenniteUi::Outline(Canvas, Tag, 7.0f * S, bKnown ? SenniteUi::Edge : SenniteUi::Gold.CopyWithNewOpacity(0.8f), FMath::Max(1.0f, 1.5f * S));
-		Text(TEXT("status"), Status, Left * S + 18.0f * S, 254.0f * S, 13, bKnown ? White : SenniteUi::Gold);
+		Text(TEXT("unpriced"), TEXT("ASK THE PRICE"), (Left + 242.0f) * S, 352.0f * S, 14, SenniteUi::Dim);
+	}
 
-		if (!Server->bConnected) {
-			Button(TEXT("wallet"), TEXT("CONNECT YOUR WALLET"), Left, BY, BW, 66.0f, !Server->ConnectCode.IsEmpty(), 16, true);
-			Hint = TEXT("D-BUCKS ARE BOUGHT WITH ERA FROM YOUR DSM WALLET.");
+	// the price, then the swap at it; with no wallet connected, the way to connect one
+	const float BY = 440.0f;
+	if (!Server->bConnected) {
+		Button(TEXT("wallet"), TEXT("CONNECT YOUR WALLET"), Left, BY, 340.0f, 66.0f, !Server->ConnectCode.IsEmpty(), 16, true);
+		Text(TEXT("hint"), TEXT("A SWAP IS YOUR DSM WALLET'S OWN TRADE."), (Left + 2.0f) * S, (BY + 80.0f) * S, 12, White, 0.0f, false);
 #if PLATFORM_ANDROID || PLATFORM_IOS
-			Hint2 = TEXT("THIS OPENS YOUR WALLET: APPROVE THIS GAME THERE.");
+		Text(TEXT("hint2"), TEXT("THIS OPENS YOUR WALLET: APPROVE THIS GAME THERE."), (Left + 2.0f) * S, (BY + 104.0f) * S, 12, White, 0.0f, false);
 #else
-			Hint2 = TEXT("THIS COPIES THE CONNECT CODE FOR YOUR WALLET TO READ.");
+		Text(TEXT("hint2"), TEXT("THIS COPIES THE CONNECT CODE FOR YOUR WALLET TO READ."), (Left + 2.0f) * S, (BY + 104.0f) * S, 12, White, 0.0f, false);
 #endif
-		}
-		else if (Server->bBusy) {
-			Button(TEXT("dbucks"), TEXT("WAITING FOR YOUR WALLET ..."), Left, BY, BW, 66.0f, false, 14);
-		}
-		else if (!Server->bMaterialsKnown) {
-			Button(TEXT("dbucks"), TEXT("ASKING YOUR WALLET ..."), Left, BY, BW, 66.0f, false, 14);
+	}
+	else {
+		Button(TEXT("price"), TEXT("PRICE"), Left, BY, 210.0f, 66.0f, bAmount && !Server->bBusy, 18, !bPriced);
+		Button(TEXT("trade"), Server->bBusy ? TEXT("WAITING FOR YOUR WALLET ...") : TEXT("SWAP"), Left + 222.0f, BY, Wide - 222.0f, 66.0f, bPriced && !Server->bBusy, Server->bBusy ? 13 : 18, bPriced);
+		// the vault that trades the two directly, as it stands
+		if (const FSenniteSwapVault* Vault = Server->FindSwapVault(From->Id, To->Id)) {
+			const FSenniteSwapToken* A = Server->FindSwapToken(Vault->A);
+			const FSenniteSwapToken* B = Server->FindSwapToken(Vault->B);
+			Text(TEXT("vault"), FString::Printf(TEXT("THE VAULT HOLDS %s %s AND %s %s. ITS FEE IS %s%%."), *Vault->ReserveA, A != nullptr ? *A->Name.ToUpper() : TEXT(""), *Vault->ReserveB, B != nullptr ? *B->Name.ToUpper() : TEXT(""),
+				*FString::SanitizeFloat(Vault->FeeBps / 100.0, 0)), (Left + 2.0f) * S, (BY + 80.0f) * S, 12, SenniteUi::Dim, 0.0f, false);
 		}
 		else {
-			// ERA traded through the publisher's vault, at the price its reserves set
-			const bool bEra = FCString::Atod(*Server->Era) >= FCString::Atod(USennitePublisher::TradeEra());
-			Button(TEXT("dbucks"), TEXT("GET D-BUCKS"), Left, BY, BW, 66.0f, bEra, 18, true);
-			Hint = bEra ? FString::Printf(TEXT("THIS TRADES %s ERA FROM YOUR WALLET FOR D-BUCKS."), USennitePublisher::TradeEra())
-				: FString::Printf(TEXT("A TRADE FOR D-BUCKS TAKES %s ERA: YOUR WALLET HAS %s."), USennitePublisher::TradeEra(), Server->Era.IsEmpty() ? TEXT("NONE") : *Server->Era);
-			Hint2 = TEXT("D-BUCKS BUY THE HEROES AND SKINS IN THIS STORE.");
+			Text(TEXT("vault"), TEXT("NO ONE VAULT HOLDS BOTH: THE PRICE SAYS WHETHER OTHERS LEAD FROM ONE TO THE OTHER."), (Left + 2.0f) * S, (BY + 80.0f) * S, 12, SenniteUi::Dim, 0.0f, false);
+		}
+		// what the publisher's server says of the price or the swap asked here: waiting, done, or why not
+		if (!Server->Message.IsEmpty() && (Server->bBusy || Menu->bSwapSaid)) {
+			Text(TEXT("shop"), Server->Message.ToUpper(), (Left + 2.0f) * S, (BY + 104.0f) * S, 12, SenniteUi::Gold, 0.0f, false);
 		}
 	}
-	if (!Hint.IsEmpty()) {
-		Text(TEXT("hint"), Hint, (Left + 2.0f) * S, Under, 12, White, 0.0f, false);
-		Text(TEXT("hint2"), Hint2, (Left + 2.0f) * S, Under + 24.0f * S, 12, White, 0.0f, false);
+
+	// the keypad: what an amount is typed with on a phone. The point is for what has digits after it.
+	static const TCHAR* Keys[] = { TEXT("1"), TEXT("2"), TEXT("3"), TEXT("4"), TEXT("5"), TEXT("6"), TEXT("7"), TEXT("8"), TEXT("9"), TEXT("."), TEXT("0"), TEXT("del") };
+	const float KW = 104.0f;
+	const float KH = 86.0f;
+	const float Gap = 10.0f;
+	const float X0 = W - 36.0f - 3.0f * KW - 2.0f * Gap;
+	const float Y0 = 120.0f;
+	for (int32 Index = 0; Index < 12; ++Index) {
+		const FString Key(Keys[Index]);
+		const bool bDelete = Key == TEXT("del");
+		const bool bEnabled = bDelete ? !Menu->SwapAmount.IsEmpty() : Key == TEXT(".") ? From->Decimals > 0 : true;
+		Button(FName(*(TEXT("num:") + Key)), bDelete ? FString(TEXT("DEL")) : Key, X0 + (Index % 3) * (KW + Gap), Y0 + (Index / 3) * (KH + Gap), KW, KH, bEnabled, bDelete ? 16 : 28);
 	}
-	ShopWord(Server, false, (Left + 2.0f) * S, Under + (Hint.IsEmpty() ? 0.0f : 52.0f * S));
 }
 
 void ASenniteMenuHUD::DrawJoin(ASenniteMenuController* Menu)

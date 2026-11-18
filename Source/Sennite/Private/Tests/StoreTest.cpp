@@ -4,7 +4,8 @@
 // - STORE opens on the heroes; SKINS shows each skin the shop lists, on the hero it is a skin of, turning
 //   on the stage in the skin's own mesh, with its price; the arrows and the tiles go through them;
 // - a skin not owned offers the next step toward it: with no wallet connected, connecting one;
-// - D-BUCKS says no wallet is connected, and offers the same;
+// - SWAP shows what the publisher's vaults hold to swap, takes an amount from the screen's keypad, and
+//   changes the two sides over; with no wallet connected it offers to connect one, and no price is asked;
 // - BACK goes to the first screen, and BASE EDITOR opens the test range on the planning view of a parcel.
 //
 // Tools/check_store.sh runs this and reads the result.
@@ -57,6 +58,8 @@ namespace
 		double RealStart;
 		EPhase Phase = EPhase::WaitForMenu;
 		double PhaseStart = 0.0;
+		/** How far through the swap section's steps the check is. */
+		int32 Step = 0;
 	};
 
 	bool FStoreRun::Update()
@@ -165,29 +168,65 @@ namespace
 				return Elapsed() > 30.0 ? Fail(TEXT("A tap on a skin's tile did not bring it onto the stage in 30 s")) : false;
 			}
 			Test->TestEqual(TEXT("A tap on a skin's tile shows that skin"), MenuCheck::Line(Menu, TEXT("name")), Server->ShopSkins[Last].Name.ToUpper());
-			MenuCheck::Tap(Menu, TEXT("tab:dbucks"));
+			MenuCheck::Tap(Menu, TEXT("tab:swap"));
 			Enter(EPhase::DBucks);
 			return false;
 		}
 
 		case EPhase::DBucks: {
-			if (Menu->Page != ESenniteMenuPage::DBucks) {
+			if (Menu->Page != ESenniteMenuPage::Swap) {
 				if (Elapsed() > 1.0) {
-					MenuCheck::Tap(Menu, TEXT("tab:dbucks"));
+					MenuCheck::Tap(Menu, TEXT("tab:swap"));
 					Enter(EPhase::DBucks);
 				}
 				return false;
 			}
-			if (Elapsed() < 1.0) {
+			if (Server->SwapTokens.Num() < 2 || !MenuCheck::Has(Menu, TEXT("swap:from")) || Elapsed() < 1.0) {
+				return Elapsed() > 60.0 ? Fail(TEXT("SWAP did not show what the publisher's vaults hold in 60 s")) : false;
+			}
+			if (Step == 0) {
+				bool bWallet = false;
+				Test->TestEqual(TEXT("The store names the section open"), MenuCheck::Line(Menu, TEXT("section")), FString(TEXT("SWAP")));
+				Test->TestEqual(TEXT("It opens paying ERA"), MenuCheck::Line(Menu, TEXT("pay")), FString(TEXT("ERA")));
+				Test->TestEqual(TEXT("for the game's D-bucks"), MenuCheck::Line(Menu, TEXT("get")), FString(TEXT("D-BUCKS")));
+				Test->TestEqual(TEXT("With no wallet connected it says so"), MenuCheck::Line(Menu, TEXT("holds")), FString(TEXT("NO WALLET CONNECTED")));
+				Test->TestTrue(TEXT("and offers to connect one"), MenuCheck::Has(Menu, TEXT("wallet"), &bWallet) && bWallet);
+				Test->TestFalse(TEXT("No price is asked with no wallet"), MenuCheck::Has(Menu, TEXT("price")) || MenuCheck::Has(Menu, TEXT("trade")));
+				Test->TestEqual(TEXT("No amount is typed yet"), MenuCheck::Line(Menu, TEXT("amount")), FString());
+				Test->TestEqual(TEXT("The player's hero is back on the stage"), StoreStageMesh(World), USenniteHeroes::FindOrDefault(USenniteProfile::Get().PlayingHero(Menu)).Mesh.ToString());
+				UE_LOG(LogStoreCheck, Display, TEXT("GAMECHECK swap: %d things to swap, %d vault(s); pay %s, get %s"), Server->SwapTokens.Num(), Server->SwapVaults.Num(), *MenuCheck::Line(Menu, TEXT("pay")), *MenuCheck::Line(Menu, TEXT("get")));
+				// an amount, by the keypad
+				MenuCheck::Tap(Menu, TEXT("num:2"));
+			}
+			else if (Step == 1) {
+				Test->TestEqual(TEXT("A tap on the keypad types the amount"), MenuCheck::Line(Menu, TEXT("amount")), FString(TEXT("2")));
+				MenuCheck::Tap(Menu, TEXT("num:5"));
+			}
+			else if (Step == 2) {
+				Test->TestEqual(TEXT("and the next digit"), MenuCheck::Line(Menu, TEXT("amount")), FString(TEXT("25")));
+				MenuCheck::Tap(Menu, TEXT("num:del"));
+			}
+			else if (Step == 3) {
+				Test->TestEqual(TEXT("DEL takes the last digit off"), MenuCheck::Line(Menu, TEXT("amount")), FString(TEXT("2")));
+				GameCheck::Shot(TEXT("Store"), TEXT("swap.png"));
+			}
+			else if (Step == 4) {
+				MenuCheck::Tap(Menu, TEXT("swap:flip"));
+			}
+			else if (Step == 5) {
+				Test->TestEqual(TEXT("SWITCH changes the two sides over"), MenuCheck::Line(Menu, TEXT("pay")), FString(TEXT("D-BUCKS")));
+				Test->TestEqual(TEXT("and what was paid is got"), MenuCheck::Line(Menu, TEXT("get")), FString(TEXT("ERA")));
+				bool bPoint = true;
+				MenuCheck::Has(Menu, TEXT("num:."), &bPoint);
+				Test->TestFalse(TEXT("D-bucks are whole: the point is not there to type"), bPoint);
+				GameCheck::Shot(TEXT("Store"), TEXT("swap_switched.png"));
+			}
+			else {
+				Enter(EPhase::Back);
 				return false;
 			}
-			bool bWallet = false;
-			Test->TestEqual(TEXT("The store names the section open"), MenuCheck::Line(Menu, TEXT("section")), FString(TEXT("D-BUCKS")));
-			Test->TestEqual(TEXT("With no wallet connected it says so"), MenuCheck::Line(Menu, TEXT("status")), FString(TEXT("NO WALLET CONNECTED")));
-			Test->TestTrue(TEXT("and offers to connect one"), MenuCheck::Has(Menu, TEXT("wallet"), &bWallet) && bWallet);
-			Test->TestEqual(TEXT("The player's hero is back on the stage"), StoreStageMesh(World), USenniteHeroes::FindOrDefault(USenniteProfile::Get().PlayingHero(Menu)).Mesh.ToString());
-			GameCheck::Shot(TEXT("Store"), TEXT("dbucks.png"));
-			Enter(EPhase::Back);
+			++Step;
+			Enter(EPhase::DBucks);
 			return false;
 		}
 

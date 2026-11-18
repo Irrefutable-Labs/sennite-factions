@@ -29,6 +29,7 @@ import { party, publishAuthored, readAuthored, type Party } from "../dsm/routes.
 import { Matches } from "./matches.js";
 import { Refused } from "./refused.js";
 import { Shop, type Purse } from "./shop.js";
+import { Swap } from "./swap.js";
 import type { Store } from "./store.js";
 import type { Economy, MatchWorld, ShopWorld } from "./world.js";
 
@@ -135,6 +136,8 @@ export class Publisher {
   readonly cells: AccountCells;
   readonly contributions: Contributions;
   readonly shop: Shop;
+  /** Swaps through the account's vaults (swap.ts). */
+  readonly swap: Swap;
   readonly matches: Matches;
   readonly #mirrors = new Map<string, Mirror>();
   readonly #walking = new Map<string, Promise<void>>();
@@ -144,6 +147,7 @@ export class Publisher {
     this.cells = new AccountCells(options.app, options.store);
     this.contributions = new Contributions(options.app, options.store, options.catalogue);
     this.shop = new Shop(options.app, options.store, options.shop);
+    this.swap = new Swap(options.app, options.shop.currency);
     this.matches = new Matches({
       app: options.app,
       store: options.store,
