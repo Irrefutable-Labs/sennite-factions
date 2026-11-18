@@ -26,8 +26,9 @@
 # Saved/Match_Kills/, Saved/Match_Wipe/.
 #
 # SENNITE_TOUCH=1 plays the base editor and people checks by touch, as on a phone: each key the check
-# presses is a tap on the button that presses it, and the cursor is moved by a tap on the map. Only
-# those two read it: SENNITE_TOUCH=1 npx vitest run --config vitest.game.config.ts test/game/base-editor.test.ts test/game/people.test.ts
+# presses is a tap on the button that presses it, and the cursor is moved by a tap on the map:
+# SENNITE_TOUCH=1 npx vitest run --config vitest.game.config.ts test/game/base-editor.test.ts test/game/people.test.ts
+# The shop check (shop.test.ts) reads it too, only to show the touch buttons over the shop; it presses keys.
 #
 # Needs, as the suites on DSM do (Server/README.md):
 #   DSM_APP_HOST_BIN   the dsm-app-host binary

@@ -5,4 +5,7 @@
 # Runs with a profile of its own (MenuCheck), new each run. Screenshots and log in Saved/Menu/.
 cd "$(dirname "$0")/.."
 rm -f Saved/SaveGames/MenuCheck.sav
-SENNITE_MAP=/Game/Maps/Menu exec Tools/run_game_check.sh Sennite.Menu.ChooseAndPlay ChooseAndPlay Menu -ProfileSlot=MenuCheck
+# The run has a screen with a safe zone, as a phone's has (the engine's own r.DebugSafeZone.TitleRatio):
+# the menu is drawn in from the screen's edges, and every tap of this check lands where its button is drawn.
+SENNITE_MAP=/Game/Maps/Menu exec Tools/run_game_check.sh Sennite.Menu.ChooseAndPlay ChooseAndPlay Menu -ProfileSlot=MenuCheck \
+  -SafeZoneCheck "-ini:Engine:[SystemSettings]:r.DebugSafeZone.TitleRatio=0.9"

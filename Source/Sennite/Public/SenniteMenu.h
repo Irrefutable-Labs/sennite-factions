@@ -4,10 +4,14 @@
 // lobby others on the network can join; JOIN takes an address, typed on the screen's own keypad or
 // the keyboard; QUIT.
 //
-// HEROES: the hero turns on the stage. The arrows go through the list; CHOOSE makes the hero the
+// HEROES: the hero turns on the stage, its name and what is done with it to the left, every hero on a
+// tile along the bottom. A tile shows that hero and the arrows go through the list; CHOOSE makes the hero the
 // player's, kept on this machine between runs (USenniteProfile) and sent to every server they join.
-// A hero that is not free is bought with D-bucks in the publisher's shop (BUY) and can be chosen once
-// the player's wallet proves it owns it.
+// A hero that is not free is bought with D-bucks in the publisher's shop and can be chosen once the
+// player's wallet proves it owns it. The one button under its name is the next thing to do toward that:
+// CONNECT YOUR WALLET (on a phone the DSM wallet opens on the connect code), GET D-BUCKS (a trade of ERA
+// from the wallet) while the wallet holds too few, then BUY. Top right, beside a wallet, is how many D-bucks the player's
+// wallet proved it holds (on a game with a shop).
 //
 // LOBBY: the Menu map hosted with ?listen?game=lobby. Every player's hero stands on the stage, and
 // the list says who is in and as which hero. Anyone can change hero (HEROES); the host starts, and
@@ -37,7 +41,7 @@ enum class ESenniteMenuPage : uint8
 	Lobby,
 };
 
-/** A button as the last frame drew it: what it does, where it is on the screen, and whether it does anything now. */
+/** A button as the last frame drew it: what it does, where it is on the screen (in the screen's own measure, as taps and clicks come), and whether it does anything now. */
 struct FSenniteMenuButton
 {
 	FName Action;
@@ -166,6 +170,16 @@ private:
 	/** The button under the mouse, and the one held down, this frame. */
 	FName Hovered;
 	FName Held;
+
+	/** The whole screen, in the canvas's own measure: on a phone the canvas starts inside the screen's safe zone. */
+	FBox2D Screen() const;
+
+	/**
+	 * How far the canvas starts in from the screen's top left corner: nothing on a desktop, a phone's safe
+	 * zone on a phone. A tap or a click comes in the screen's measure, so each button is kept where it is
+	 * on the screen: where it was drawn, moved by this.
+	 */
+	FVector2D Inset = FVector2D::ZeroVector;
 
 	/** How wide a line of text is drawn at a point size, on the screen. */
 	float Width(const FString& Line, float Points) const;

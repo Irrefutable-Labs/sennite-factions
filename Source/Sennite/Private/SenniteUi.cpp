@@ -189,3 +189,45 @@ void SenniteUi::Panel(UCanvas* Canvas, const FBox2D& Box, float Scale)
 	// the gold edge runs down the left side below the cut corner
 	Plate(Canvas, FBox2D(FVector2D(Box.Min.X, Box.Min.Y + Cut), FVector2D(Box.Min.X + 3.0f * Scale, Box.Max.Y)), 0.0f, Gold, GoldDeep);
 }
+
+FString SenniteUi::Grouped(int32 Number)
+{
+	FString Digits = FString::FromInt(FMath::Abs(Number));
+	for (int32 At = Digits.Len() - 3; At > 0; At -= 3) {
+		Digits.InsertAt(At, TEXT(","));
+	}
+	return Number < 0 ? TEXT("-") + Digits : Digits;
+}
+
+void SenniteUi::Wallet(UCanvas* Canvas, const FVector2D& At, float Size)
+{
+	if (Canvas == nullptr) {
+		return;
+	}
+	const auto Point = [&](float X, float Y) { return At + FVector2D(X * Size, Y * Size); };
+	// the notes' edge showing over the wallet's top, the wallet itself, the strap that closes it, and its stud
+	Triangles(Canvas, { Point(0.14f, 0.12f), Point(0.78f, 0.12f), Point(0.90f, 0.30f), Point(0.04f, 0.30f) }, [](const FVector2D&) { return FLinearColor(1.0f, 0.93f, 0.7f, 1.0f); });
+	Plate(Canvas, FBox2D(Point(0.0f, 0.26f), Point(1.0f, 0.90f)), 0.12f * Size, Gold, GoldDeep);
+	Plate(Canvas, FBox2D(Point(0.58f, 0.46f), Point(1.0f, 0.70f)), 0.0f, Ink, Ink);
+	Plate(Canvas, FBox2D(Point(0.68f, 0.53f), Point(0.78f, 0.63f)), 0.0f, Gold, Gold);
+}
+
+FBox2D SenniteUi::Balance(UCanvas* Canvas, const FVector2D& TopRight, float Scale, const FString& Line, bool bKnown)
+{
+	const float High = 46.0f * Scale;
+	const float Icon = 26.0f * Scale;
+	const float Pad = 14.0f * Scale;
+	const float Gap = 11.0f * Scale;
+	const float Points = bKnown ? 16.0f : 12.0f;
+	const FVector2D Size = Measure(Line, Points, Scale);
+	const FBox2D Box(FVector2D(TopRight.X - (Pad + Icon + Gap + float(Size.X) + Pad + 4.0f * Scale), TopRight.Y), FVector2D(TopRight.X, TopRight.Y + High));
+	if (Canvas == nullptr) {
+		return Box;
+	}
+	const float Cut = 10.0f * Scale;
+	Plate(Canvas, Box, Cut, FLinearColor(0.045f, 0.058f, 0.090f, 0.90f), FLinearColor(0.012f, 0.016f, 0.028f, 0.90f));
+	Outline(Canvas, Box, Cut, Gold.CopyWithNewOpacity(0.75f), FMath::Max(1.0f, 1.5f * Scale));
+	Wallet(Canvas, FVector2D(Box.Min.X + Pad, Box.Min.Y + (High - Icon) * 0.5f), Icon);
+	Text(Canvas, Line, Box.Min.X + Pad + Icon + Gap, Box.Min.Y + (High - float(Size.Y)) * 0.5f, Points, Scale, bKnown ? FLinearColor::White : Dim);
+	return Box;
+}

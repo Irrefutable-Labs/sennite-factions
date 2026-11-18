@@ -21,6 +21,8 @@ import { accounts, GAME, type Accounts } from "../real-dsm/stage.js";
 import { becomeContacts, send, spendable, takeUp } from "../real-dsm/wallets.js";
 
 const REPO = fileURLToPath(new URL("../../..", import.meta.url));
+/** SENNITE_TOUCH=1: the game shows its touch buttons, as on a phone, so the shop is seen as a phone shows it. This check still presses the keys themselves. */
+const TOUCH = process.env.SENNITE_TOUCH ? ["-ini:Input:[/Script/Engine.InputSettings]:bAlwaysShowTouchInterface=True"] : [];
 const SAVED = join(REPO, "Saved", "BaseShop");
 const CODE_FILE = join(SAVED, "connect-code.txt");
 const WORN_FILE = join(SAVED, "worn.txt");
@@ -72,7 +74,7 @@ describe("the shop in the game", () => {
 
     rmSync(CODE_FILE, { force: true });
     rmSync(WORN_FILE, { force: true });
-    const game = spawn(join(REPO, "Tools", "run_game_check.sh"), ["Sennite.BaseShop", "BuyWearAndSell", "BaseShop", `-PublisherUrl=${url}`], { cwd: REPO });
+    const game = spawn(join(REPO, "Tools", "run_game_check.sh"), ["Sennite.BaseShop", "BuyWearAndSell", "BaseShop", `-PublisherUrl=${url}`, ...TOUCH], { cwd: REPO });
     let output = "";
     game.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
     game.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));

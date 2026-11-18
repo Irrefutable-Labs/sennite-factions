@@ -22,6 +22,7 @@
 // H opens the shop: D-bucks bought with ERA through the publisher's vault, and skins bought with
 // D-bucks. W and S choose; F buys. What is bought is the wallet's: it goes to the inventory.
 //
+// On both pages the D-bucks the wallet proved it holds are top right, beside a wallet.
 // I opens the inventory: what the wallet proves it holds of D-bucks and ERA, and each skin it owns.
 // W and S choose a skin; F wears it or takes it off. A skin need not be worn to be owned, and it is
 // on the hero only while the wallet proves it owns it.

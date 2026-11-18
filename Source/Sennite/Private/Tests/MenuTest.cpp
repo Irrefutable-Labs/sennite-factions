@@ -20,6 +20,8 @@
 #include "Animation/SkeletalMeshActor.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "EngineUtils.h"
+#include "Framework/Application/SlateApplication.h"
+#include "GenericPlatform/GenericApplication.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
@@ -103,6 +105,26 @@ namespace
 			for (const TCHAR* Action : { TEXT("play"), TEXT("heroes"), TEXT("host"), TEXT("join"), TEXT("quit") }) {
 				Test->TestTrue(FString::Printf(TEXT("The menu has %s"), Action), MenuCheck::Has(Menu, Action));
 			}
+			{
+				// A phone keeps the menu clear of its screen's rounded corners and camera: the canvas starts in
+				// from the screen's edge. A finger lands on the screen, so each button must take taps where it is
+				// drawn, in there, and not that far to its left. -SafeZoneCheck says this run has such a screen.
+				FDisplayMetrics Metrics;
+				FSlateApplication::Get().GetCachedDisplayMetrics(Metrics);
+				const FVector2D Pad(Metrics.TitleSafePaddingSize.X, Metrics.TitleSafePaddingSize.Y);
+				const ASenniteMenuHUD* Drawn = MenuCheck::Hud(Menu);
+				double Leftmost = 1.0e9;
+				double Topmost = 1.0e9;
+				for (const FSenniteMenuButton& Each : Drawn != nullptr ? Drawn->Buttons : TArray<FSenniteMenuButton>()) {
+					Leftmost = FMath::Min(Leftmost, Each.Box.Min.X);
+					Topmost = FMath::Min(Topmost, Each.Box.Min.Y);
+				}
+				Test->TestTrue(TEXT("Every button takes taps inside the screen's safe zone, where it is drawn"), Leftmost >= Pad.X * 0.9 && Topmost >= Pad.Y * 0.9);
+				if (FParse::Param(FCommandLine::Get(), TEXT("SafeZoneCheck"))) {
+					Test->TestTrue(TEXT("This run's screen has a safe zone, as a phone's has"), Pad.X > 8.0);
+				}
+				UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK safe zone: %.0f by %.0f pixels in; the buttons take taps from %.0f, %.0f"), Pad.X, Pad.Y, Leftmost, Topmost);
+			}
 			GameCheck::Shot(TEXT("Menu"), TEXT("menu.png"));
 			UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK menu: hero=%s free=%s bought=%s"), *Default.ToString(), *Free.ToString(), *Locked.ToString());
 			Enter(EPhase::MenuShot);
@@ -125,6 +147,7 @@ namespace
 			Test->TestTrue(TEXT("A tap on HEROES opens the character select"), Menu->Page == ESenniteMenuPage::Heroes);
 			Test->TestEqual(TEXT("It opens on the player's own hero"), Heroes[Menu->Browse].Id, USenniteProfile::Get().PlayingHero(Menu));
 			Test->TestTrue(TEXT("The player's own hero is marked chosen"), MenuCheck::Has(Menu, TEXT("chosen")));
+			Test->TestTrue(TEXT("A game with no shop shows no wallet balance"), MenuCheck::Line(Menu, TEXT("balance")).IsEmpty());
 			// the arrows, to the free hero
 			MenuCheck::Tap(Menu, Heroes[(Menu->Browse + 1) % Heroes.Num()].Id == Free ? FName(TEXT("next")) : FName(TEXT("prev")));
 			Enter(EPhase::ToWraith);
@@ -192,20 +215,17 @@ namespace
 			}
 			Test->TestEqual(TEXT("Tapping a bought hero's button does not make it the player's"), USenniteProfile::Get().Hero == Locked, false);
 			Test->TestTrue(TEXT("The character select stays open"), Menu->Page == ESenniteMenuPage::Heroes);
+			// every hero has a tile along the bottom: a tap on the free hero's brings it up at once
+			Test->TestTrue(TEXT("The free hero has a tile"), MenuCheck::Tap(Menu, FName(*FString::Printf(TEXT("hero:%s"), *Free.ToString()))));
 			Enter(EPhase::BackToWraith);
 			return false;
 
 		case EPhase::BackToWraith:
-			if (Heroes[Menu->Browse].Id != Free) {
-				if (Elapsed() > 0.3) {
-					MenuCheck::Tap(Menu, TEXT("prev"));
-					Enter(EPhase::BackToWraith);
-				}
+			if (Elapsed() < 0.5 || (Heroes[Menu->Browse].Id != Free && Elapsed() < 3.0)) {
 				return false;
 			}
-			if (Elapsed() < 0.5) {
-				return false;
-			}
+			Test->TestEqual(TEXT("A tap on a hero's tile shows that hero"), Heroes[Menu->Browse].Id, Free);
+			Test->TestEqual(TEXT("It stands on the stage as itself"), StageMesh(World), USenniteHeroes::FindOrDefault(Free).Mesh.ToString());
 			Test->TestTrue(TEXT("The free hero can be chosen"), MenuCheck::Tap(Menu, TEXT("choose")));
 			Enter(EPhase::Chosen);
 			return false;

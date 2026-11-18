@@ -224,6 +224,13 @@ public:
 
 	/** The connect code this player's wallet reads; empty until the server gave one. */
 	FString ConnectCode;
+	/**
+	 * Hand the connect code to the player's wallet: copied, for a wallet on another device to be given;
+	 * on a phone it is a link, and the DSM wallet on the same phone opens on it. False with no code yet.
+	 */
+	bool OpenConnectCode() const;
+	/** How much ERA one trade for D-bucks takes from the wallet, in the shop and on the character select. */
+	static const TCHAR* TradeEra() { return TEXT("2"); }
 	bool bConnected = false;
 	/** The connected wallet's DSM identity, as people read it. */
 	FString Wallet;
@@ -249,6 +256,12 @@ public:
 	FString OnItsWay;
 
 	bool Owns(const FString& SkinId) const { return OwnedSkins.Contains(SkinId); }
+
+	/**
+	 * What a screen that sells something says of the wallet's D-bucks: the amount the wallet proved it
+	 * holds, or, with none proved, why there is none to show. bKnown is whether it is an amount.
+	 */
+	FString DBucksLine(bool& bKnown) const;
 
 	/** The heroes the shop sells, and those the wallet proved it owns (by the shop's hero id). */
 	TArray<FSenniteHeroForSale> ShopHeroes;

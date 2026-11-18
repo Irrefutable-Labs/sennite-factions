@@ -27,13 +27,15 @@
 #include "SenniteMatch.h"
 #include "SenniteMatchBases.h"
 #include "GameFramework/PlayerStart.h"
+#include "SennitePlayerController.h"
 #include "SennitePublisher.h"
 #include "SenniteStructure.h"
+#include "SenniteTouch.h"
 
 namespace
 {
 	/** How much ERA the shop's first row trades for D-bucks. */
-	const TCHAR* EraForDBucks = TEXT("2");
+	const TCHAR* EraForDBucks = USennitePublisher::TradeEra();
 
 	/** How much the commit button commits: everything still needed, or a part of it. */
 	const int32 Amounts[] = { 0, 100, 50, 10 };
@@ -479,14 +481,9 @@ void ASenniteBaseEditor::Rebuild()
 void ASenniteBaseEditor::CopyCode()
 {
 	USennitePublisher* Server = Publisher();
-	if (Server == nullptr || Server->ConnectCode.IsEmpty()) {
+	if (Server == nullptr || !Server->OpenConnectCode()) {
 		return;
 	}
-	FPlatformApplicationMisc::ClipboardCopy(*Server->ConnectCode);
-#if PLATFORM_ANDROID || PLATFORM_IOS
-	// on a phone the code is a link the DSM wallet opens
-	FPlatformProcess::LaunchURL(*Server->ConnectCode, nullptr, nullptr);
-#endif
 	Server->Message = TEXT("the connect code is copied: read it in your DSM wallet");
 }
 
@@ -973,6 +970,23 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 		Line(TEXT("faction"), TEXT("ANOTHER FACTION'S PARCEL"), 11, Dim);
 	}
 
+	// Top right on the pages where something is bought or worn: what the wallet proved it holds of D-bucks,
+	// beside a wallet. On a phone the editor's buttons fill that corner, and it stands to their left.
+	auto Balance = [&]() {
+		float Right = Canvas->ClipX - 24.0f * S;
+		ASennitePlayerController* Player = Cast<ASennitePlayerController>(Hud->GetOwningPlayerController());
+		const USenniteTouchControls* Touch = Player != nullptr ? Player->GetTouchControls() : nullptr;
+		FVector2D Close;
+		if (Touch != nullptr && Touch->WhereKey(EKeys::B, Close)) {
+			// CLOSE is the grid's top left button
+			Right = FMath::Min(Right, float(Close.X) - 58.0f * S);
+		}
+		bool bKnown = false;
+		const FString Holds = Server->DBucksLine(bKnown);
+		SenniteUi::Balance(Canvas, FVector2D(Right, 16.0f * S), S, Holds, bKnown);
+		Editor->LastDrawn.Add(FString::Printf(TEXT("balance=%s"), *Holds));
+	};
+
 	const FString Purse = Server->bMaterialsKnown ? FString::Printf(TEXT("D-BUCKS %d   ERA %s"), Server->DBucks, *Server->Era) : FString(TEXT("M: show what the wallet holds"));
 	if (Editor->bInventory && Server->bConnected) {
 		// what the wallet proves it holds: a skin is owned whether or not it is worn
@@ -1000,6 +1014,7 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 			Line(TEXT("message"), Server->Message, 11, Server->bBusy ? Dim : Server->bLastOk ? Good : Short);
 		}
 		Draw();
+		Balance();
 		return;
 	}
 
@@ -1024,6 +1039,7 @@ void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)
 			Line(TEXT("message"), Server->Message, 11, Server->bBusy ? Dim : Server->bLastOk ? Good : Short);
 		}
 		Draw();
+		Balance();
 		return;
 	}
 
