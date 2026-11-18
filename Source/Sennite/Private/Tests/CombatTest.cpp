@@ -377,8 +377,8 @@ namespace
 				for (TActorIterator<ASenniteCrate> It(World); It; ++It) {
 					if (It->bLeft) {
 						++Left;
-						// the four guns the joining player's crate gave them, and no rounds
-						bHoldsTheirs = (It->Guns & 30) == 30 && !It->bRounds && !It->bOpen;
+						// the two free guns the joining player's crate gave them and neither bought one, and no rounds
+						bHoldsTheirs = (It->Guns & 30) == 6 && !It->bRounds && !It->bOpen;
 						const UPrimitiveComponent* Body = Cast<UPrimitiveComponent>(It->GetComponentByClass(UStaticMeshComponent::StaticClass()));
 						bWalkedThrough = Body != nullptr && Body->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Overlap;
 					}
