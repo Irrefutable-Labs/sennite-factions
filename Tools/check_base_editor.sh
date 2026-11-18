@@ -17,7 +17,10 @@
 # nobody wins; once a faction is first to the kills to win, its fallen opponent returning on its own
 # base; once a faction's base is wiped and it is out. The match server tells the publisher's server
 # how each ended. A third game, whose wallet is in neither faction, joins one of them: it is given
-# no ticket and no hero, and is put out. The publisher's account and every wallet are real dsm-app-host accounts on a
+# no ticket and no hero, and is put out. In a seventh (HeroShopTest.cpp), a player whose wallet holds
+# D-bucks buys a hero in the character select, chooses it, hosts a lobby, and comes in as it once the
+# lobby's server has checked the hero pass with the publisher's server; then plays it on the test range.
+# The publisher's account and every wallet are real dsm-app-host accounts on a
 # storage set; nothing stands in for DSM. Screenshots and logs in Saved/BaseEditor/,
 # Saved/BasePeople/, Saved/BaseShop/, Saved/BaseSession/, Saved/BasePrize/ and Saved/Match_Time/,
 # Saved/Match_Kills/, Saved/Match_Wipe/.
