@@ -350,6 +350,46 @@ namespace
 		return FMath::PointDistToSegment(FVector(At.X, At.Y, 0.0), FVector(From.X, From.Y, 0.0), FVector(To.X, To.Y, 0.0));
 	}
 
+	/** How far outside a connector's strip a place is: the strip runs from one plot's edge to the other's, past where the ends of the connector meet the land, and is the connector's width across. */
+	double OutsideStrip(const FArenaPlan& Plan, const FArenaConnector& Connector, const FVector& At)
+	{
+		const FVector Local = Connector.Frame.InverseTransformPosition(FVector(At.X, At.Y, 0.0));
+		const double Neck = Plan.Reach - Plan.Size.BaseRadius + 400.0;
+		const double Along = FMath::Max3(-Neck - Local.X, Local.X - (Plan.Size.ConnectorLength + Neck), 0.0);
+		const double Across = FMath::Max(FMath::Abs(Local.Y) - Plan.Size.ConnectorWidth * 0.5, 0.0);
+		return FMath::Sqrt(Along * Along + Across * Across);
+	}
+
+	/** How far a place is off every plot and every connector's strip: the nearer of them. */
+	double OffPlotsAndStrips(const FArenaPlan& Plan, const FVector& At)
+	{
+		double Off = TNumericLimits<double>::Max();
+		for (const FVector& Base : Plan.Bases) {
+			Off = FMath::Min(Off, FVector::Dist2D(At, Base) - Plan.Size.BaseRadius);
+		}
+		for (const FArenaConnector& Connector : Plan.Connectors) {
+			Off = FMath::Min(Off, OutsideStrip(Plan, Connector, At));
+		}
+		return Off;
+	}
+
+	/** Where a grove past the plots' rims may stand a tree or bush: 4 m and more off every plot and strip. */
+	bool GroveAt(const FArenaPlan& Plan, const FVector& At)
+	{
+		return OffPlotsAndStrips(Plan, At) >= 399.0;
+	}
+
+	/** Where Plan's own pieces begin to differ from Bare's, which has none of some kind it has: the first index they differ at, and how many it has more. */
+	template <typename TPiece, typename TSame>
+	TPair<int32, int32> Inserted(const TArray<TPiece>& Plan, const TArray<TPiece>& Bare, TSame Same)
+	{
+		int32 First = 0;
+		while (First < Bare.Num() && First < Plan.Num() && Same(Plan[First], Bare[First])) {
+			++First;
+		}
+		return TPair<int32, int32>(First, Plan.Num() - Bare.Num());
+	}
+
 	/** What the dressing promises of a rock's height: a rock of cover hides a hero (1.92 m, no crouch) if its top stands 2 m over the lowest ground at its foot; an outcrop is 4 m and more. */
 	constexpr double HidesHero = 200.0;
 	constexpr double TallFrom = 240.0;
@@ -372,6 +412,7 @@ namespace
 		FArenaSizes Empty = Size;
 		Empty.CoverPerBase = Empty.CoverPerWay = Empty.OutcropsPerBase = Empty.CragsPerBase = Empty.FramesPerBase = Empty.StonesPerBase = Empty.PatchesPerBase = 0;
 		Empty.TreesPerBase = Empty.BushesPerBase = 0;
+		Empty.OuterRocksPerBase = Empty.OuterPatchesPerBase = Empty.GrovesPerBase = 0;
 		const ASenniteCrate* Crates = GetDefault<ASenniteCrate>();
 		// the rocks of each style (blocky, slabs, rubble)
 		const TArray<TArray<EArenaScenery>> OfStyle = {
@@ -693,6 +734,22 @@ namespace
 			bRocksStop = bRocksStop && Met != nullptr && Met->GetStaticMesh() == Mesh && Hit.Location.Z > Foot + Box.Z * 0.3;
 			++Rocks;
 		}
+		// the trees and bushes of the groves past the rims: each foot on the ground's own mesh where it stands
+		bool bGrovesOnGround = true;
+		int32 GroveRead = 0;
+		double GroveFurthest = 0.0;
+		for (const FArenaProp& Piece : Plan.Props) {
+			const FVector At = Piece.Transform.GetLocation();
+			if ((!IsTree(Piece) && !IsBush(Piece)) || !GroveAt(Plan, At)) {
+				continue;
+			}
+			double Here = 0.0;
+			const bool bRead = GroundAt(At.X, At.Y, Here);
+			GroveFurthest = FMath::Max(GroveFurthest, FMath::Abs(Here - At.Z));
+			bGrovesOnGround = bGrovesOnGround && bRead && FMath::Abs(Here - At.Z) <= 2.0;
+			++GroveRead;
+		}
+		Test->TestTrue(FString::Printf(TEXT("Every tree and bush of a grove past the rims stands on the ground as drawn (furthest %.1f cm)"), GroveFurthest), bGrovesOnGround && GroveRead > 0);
 		Test->TestTrue(TEXT("A line down onto every rock and crag meets that rock itself"), bRocksStop && Rocks > 0);
 		Test->TestTrue(TEXT("A line down onto every column of a steel frame meets its steel at the beams' height"), bColumnsStop && Columns > 0);
 		Test->TestTrue(TEXT("Every column block of a steel frame stands where the frame's own mesh has a column"), bColumnsInMesh && Columns > 0);
@@ -761,6 +818,168 @@ namespace
 	}
 
 	/**
+	 * The land past the plots' rims, held against plans for many seeds. Its pieces are found as what a
+	 * plan has that the same plan made with none of it does not, all in one run, the rest of the plan
+	 * the same in the same order. Every piece of it stands 4 m and more off every plot and every
+	 * connector's strip, and every rock and patch by its whole reach; its rocks are cover rocks of the
+	 * nearest plot's style and stand over no block; its trees, bushes and patches stand on dry ground,
+	 * its trees stand 7 m apart and more, each over its trunk block and
+	 * keeping its room from every rock, its bushes 2 m from every rock and 2.5 m from every trunk;
+	 * every plot has half or more of the rocks the settings ask for past its rim, and trees of half or
+	 * more of its groves; and with no groves, its rocks and patches are what they are with them.
+	 */
+	void CheckOuterLand(FAutomationTestBase* Test)
+	{
+		const FArenaSizes Size = ASenniteArena::Sizes();
+		FArenaSizes NoOuter = Size;
+		NoOuter.OuterRocksPerBase = NoOuter.OuterPatchesPerBase = NoOuter.GrovesPerBase = 0;
+		FArenaSizes NoGroves = Size;
+		NoGroves.GrovesPerBase = 0;
+		const TArray<TArray<EArenaScenery>> OfStyle = {
+			{ EArenaScenery::CoverRock02, EArenaScenery::CoverRock04, EArenaScenery::CoverRock08 },
+			{ EArenaScenery::CoverRock06, EArenaScenery::CoverRock07, EArenaScenery::CoverRock05 },
+			{ EArenaScenery::CoverRock07, EArenaScenery::CoverRock04, EArenaScenery::CoverRock05, EArenaScenery::CoverRock08 },
+		};
+		const auto SameProp = [](const FArenaProp& A, const FArenaProp& B) { return A.Scenery == B.Scenery && A.bFit == B.bFit && A.Transform.Equals(B.Transform, 0.01); };
+		const auto SameBox = [](const FArenaBox& A, const FArenaBox& B) { return A.Centre.Equals(B.Centre, 0.01) && A.Size.Equals(B.Size, 0.01) && A.Rotation.Equals(B.Rotation, 0.0001) && A.Tint == B.Tint; };
+		bool bOneRun = true, bOff = true, bKinds = true, bOfStyle = true, bNoRockBlocks = true, bDry = true;
+		bool bApart = true, bTrunks = true, bTreeRoom = true, bBushRoom = true, bRocksWithoutGroves = true;
+		int32 Plans = 0, Rocks = 0, Outcrops = 0, Patches = 0, Trees = 0, Bushes = 0, ShortRocks = 0, ShortTrees = 0;
+		double Nearest = TNumericLimits<double>::Max();
+		for (int32 Seed = 1; Seed <= 40; ++Seed) {
+			for (int32 Bases = 2; Bases <= static_cast<int32>(EConnectorKind::Count); ++Bases) {
+				const FArenaPlan Plan = ASenniteArena::MakePlan(Seed, Bases, INDEX_NONE, Size);
+				const FArenaPlan Without = ASenniteArena::MakePlan(Seed, Bases, INDEX_NONE, NoOuter);
+				const FArenaPlan Groveless = ASenniteArena::MakePlan(Seed, Bases, INDEX_NONE, NoGroves);
+				++Plans;
+				// its pieces and blocks: one run of each the plan has more, the rest of the plan the same, in the same order
+				const TPair<int32, int32> Props = Inserted(Plan.Props, Without.Props, SameProp);
+				const TPair<int32, int32> Boxes = Inserted(Plan.Boxes, Without.Boxes, SameBox);
+				bOneRun = bOneRun && Props.Value > 0 && Boxes.Value >= 0 && Plan.Bases == Without.Bases && Plan.Craft.Num() == Without.Craft.Num();
+				for (int32 Index = Props.Key; bOneRun && Index < Without.Props.Num(); ++Index) {
+					bOneRun = SameProp(Plan.Props[Index + Props.Value], Without.Props[Index]);
+				}
+				for (int32 Index = Boxes.Key; bOneRun && Index < Without.Boxes.Num(); ++Index) {
+					bOneRun = SameBox(Plan.Boxes[Index + Boxes.Value], Without.Boxes[Index]);
+				}
+				if (!bOneRun) {
+					continue;
+				}
+				TArray<FArenaProp> Outer;
+				for (int32 Index = Props.Key; Index < Props.Key + Props.Value; ++Index) {
+					Outer.Add(Plan.Props[Index]);
+				}
+				TArray<FArenaBox> Blocks;
+				for (int32 Index = Boxes.Key; Index < Boxes.Key + Boxes.Value; ++Index) {
+					Blocks.Add(Plan.Boxes[Index]);
+				}
+				TArray<int32> RocksOn, TreesOn;
+				RocksOn.SetNumZeroed(Bases);
+				TreesOn.SetNumZeroed(Bases);
+				// the rocks: where, how far they reach, and how far a trunk keeps from them
+				TArray<FVector4> Solid;
+				TArray<FVector> Trunks;
+				int32 TrunksMet = 0;
+				for (const FArenaProp& Piece : Outer) {
+					const FVector At = Piece.Transform.GetLocation();
+					const bool bRock = IsSolidDressing(Piece);
+					const bool bPatch = Piece.Scenery == EArenaScenery::StonyGround;
+					const FVector Box = BoxOf(Piece);
+					const double Reach = bRock || bPatch ? 0.5 * FVector2D(Box.X, Box.Y).Size() : 0.0;
+					const double Off = OffPlotsAndStrips(Plan, At) - Reach;
+					Nearest = FMath::Min(Nearest, Off);
+					bOff = bOff && Off >= 399.0;
+					bKinds = bKinds && (bRock || bPatch || IsTree(Piece) || IsBush(Piece)) && !IsCrag(Piece) && Piece.Scenery != EArenaScenery::SteelFrame;
+					int32 Base = 0;
+					for (int32 Each = 1; Each < Bases; ++Each) {
+						Base = FVector::Dist2D(At, Plan.Bases[Each]) < FVector::Dist2D(At, Plan.Bases[Base]) ? Each : Base;
+					}
+					if (bRock) {
+						bOfStyle = bOfStyle && OfStyle[Plan.Styles[Base]].Contains(Piece.Scenery);
+						const FRotator Turned = Piece.Transform.Rotator();
+						bNoRockBlocks = bNoRockBlocks && !Plan.Boxes.ContainsByPredicate([&](const FArenaBox& Block) {
+							const FVector Local = Turned.UnrotateVector(Block.Centre - At);
+							return FMath::Abs(Local.X) <= Box.X * 0.5 && FMath::Abs(Local.Y) <= Box.Y * 0.5 && FMath::Abs(Local.Z) < Box.Z;
+						});
+						Solid.Emplace(At.X, At.Y, Reach, Box.Z >= OutcropFrom ? 600.0 : 400.0);
+						RocksOn[Base] += Box.Z >= TallFrom ? 1 : 0;
+						Rocks += Box.Z >= TallFrom ? 1 : 0;
+						Outcrops += Box.Z >= OutcropFrom ? 1 : 0;
+						continue;
+					}
+					// on dry ground (that it stands on the ground as drawn, CheckDressingBuilt reads from the ground's own mesh)
+					const double Land = ASenniteArena::GroundHeight(Plan, At.X, At.Y);
+					if (bPatch) {
+						bDry = bDry && Land >= -300.0;
+						++Patches;
+						continue;
+					}
+					bDry = bDry && At.Z >= -251.0;
+					if (IsTree(Piece)) {
+						bApart = bApart && !Trunks.ContainsByPredicate([&At](const FVector& Other) { return FVector::Dist2D(At, Other) < 699.0; });
+						Trunks.Add(At);
+						const bool bTrunk = Blocks.ContainsByPredicate([&At](const FArenaBox& Block) {
+							return Block.Tint == EArenaTint::Hidden && FVector::Dist2D(Block.Centre, At) < 1.0 && Block.Size.Z >= 200.0 && FMath::IsNearlyEqual(Block.Centre.Z - Block.Size.Z * 0.5, At.Z, 1.0);
+						});
+						bTrunks = bTrunks && bTrunk;
+						TrunksMet += bTrunk ? 1 : 0;
+						++TreesOn[Base];
+						++Trees;
+					}
+					else {
+						++Bushes;
+					}
+				}
+				// every block of it is a trunk
+				bTrunks = bTrunks && TrunksMet == Blocks.Num();
+				for (const FArenaProp& Piece : Outer) {
+					const FVector2D At(Piece.Transform.GetLocation());
+					if (!IsTree(Piece) && !IsBush(Piece)) {
+						continue;
+					}
+					for (const FVector4& Rock : Solid) {
+						const double Apart = FVector2D::Distance(At, FVector2D(Rock.X, Rock.Y));
+						bTreeRoom = bTreeRoom && (!IsTree(Piece) || Apart >= Rock.Z + Rock.W - 1.0);
+						bBushRoom = bBushRoom && (!IsBush(Piece) || Apart >= Rock.Z + 199.0);
+					}
+					for (const FVector& Trunk : Trunks) {
+						bBushRoom = bBushRoom && (!IsBush(Piece) || FVector2D::Distance(At, FVector2D(Trunk)) >= 249.0);
+					}
+				}
+				for (int32 Base = 0; Base < Bases; ++Base) {
+					ShortRocks += RocksOn[Base] * 2 >= Size.OuterRocksPerBase ? 0 : 1;
+					ShortTrees += TreesOn[Base] >= Size.GrovesPerBase * 2 ? 0 : 1;
+				}
+				// with no groves, the rocks and patches are the same, in the same order
+				const TPair<int32, int32> Stony = Inserted(Groveless.Props, Without.Props, SameProp);
+				int32 Kept = 0;
+				for (const FArenaProp& Piece : Outer) {
+					if (IsTree(Piece) || IsBush(Piece)) {
+						continue;
+					}
+					bRocksWithoutGroves = bRocksWithoutGroves && Kept < Stony.Value && Stony.Key == Props.Key && SameProp(Piece, Groveless.Props[Stony.Key + Kept]);
+					++Kept;
+				}
+				bRocksWithoutGroves = bRocksWithoutGroves && Kept == Stony.Value;
+			}
+		}
+		Test->TestTrue(TEXT("The land past the rims is one run of pieces and of blocks the plan has more than with none of it; the rest of the plan is the same, in the same order"), bOneRun);
+		Test->TestTrue(FString::Printf(TEXT("Every piece past the rims stands 4 m and more off every plot and every connector's strip, rocks and patches by their whole reach (nearest %.1f m)"), Nearest / 100.0), bOff);
+		Test->TestTrue(TEXT("Past the rims stand only cover rocks, patches of stony ground, trees and bushes"), bKinds);
+		Test->TestTrue(TEXT("Every rock past a plot's rim is of that plot's style"), bOfStyle);
+		Test->TestTrue(TEXT("Rocks past the rims stand over no block: they are solid by their own shapes"), bNoRockBlocks);
+		Test->TestTrue(TEXT("Every tree, bush and patch past the rims is on dry ground"), bDry);
+		Test->TestTrue(TEXT("Trees past the rims stand 7 m apart and more"), bApart);
+		Test->TestTrue(TEXT("Every tree past the rims stands over its trunk block, and every block there is a trunk"), bTrunks && Trees > 0);
+		Test->TestTrue(TEXT("Every tree past the rims keeps its room from every rock there"), bTreeRoom);
+		Test->TestTrue(TEXT("Every bush past the rims keeps 2 m from every rock and 2.5 m from every trunk there"), bBushRoom && Bushes > 0);
+		Test->TestTrue(FString::Printf(TEXT("Every plot has half or more of the rocks the settings ask for past its rim, and trees of half or more of its groves (plots short of rocks %d, of trees %d)"), ShortRocks, ShortTrees), ShortRocks + ShortTrees == 0);
+		Test->TestTrue(TEXT("With no groves, the rocks and patches past the rims are what they are with them"), bRocksWithoutGroves);
+		UE_LOG(LogArenaCheck, Display, TEXT("GAMECHECK outer land: over %d plans, %d rocks (%d outcrops), %d patches, %d trees, %d bushes past the rims; nearest to a plot or strip %.1f m"),
+			Plans, Rocks, Outcrops, Patches, Trees, Bushes, Nearest / 100.0);
+	}
+
+	/**
 	 * The trees and bushes round the bases, held against plans for many seeds: every base has trees
 	 * and bushes; each stands on its plot's land, off its pad, on the ground; none stands in a way out; trees
 	 * stand apart; every tree has its trunk block; and the rest of the arena (its bases, connectors,
@@ -773,8 +992,9 @@ namespace
 		FArenaSizes Bare = Size;
 		Bare.TreesPerBase = 0;
 		Bare.BushesPerBase = 0;
+		Bare.GrovesPerBase = 0;
 		bool bEveryBaseHasSome = true, bOnTheRim = true, bWaysOutClear = true, bApart = true, bTrunks = true, bRestUnchanged = true, bForest = true;
-		int32 Trees = 0, Bushes = 0, Plans = 0, ForestTrees = 0;
+		int32 Trees = 0, Bushes = 0, Plans = 0, ForestTrees = 0, GroveGreen = 0;
 		for (int32 Seed = 1; Seed <= 60; ++Seed) {
 			for (int32 Bases = 2; Bases <= static_cast<int32>(EConnectorKind::Count); ++Bases) {
 				const FArenaPlan Plan = ASenniteArena::MakePlan(Seed, Bases, INDEX_NONE, Size);
@@ -809,6 +1029,12 @@ namespace
 						const bool bTrunk = Plan.Boxes.ContainsByPredicate([&At](const FArenaBox& Block) {
 							return Block.Tint == EArenaTint::Hidden && FVector::Dist2D(Block.Centre, At) < 1.0 && FMath::IsNearlyEqual(Block.Centre.Z - Block.Size.Z * 0.5, At.Z, 1.0);
 						});
+						if (!bInForest && GroveAt(Plan, At)) {
+							// one of a grove past the plots' rims: CheckOuterLand holds it to its rules
+							TrunkBlocks += IsTree(Piece) && bTrunk ? 1 : 0;
+							++GroveGreen;
+							continue;
+						}
 						bForest = bForest && IsTree(Piece) && bInForest && bTrunk && FMath::IsNearlyEqual(At.Z, ASenniteArena::GroundHeight(Plan, At.X, At.Y), 1.0);
 						TrunkBlocks += bTrunk ? 1 : 0;
 						++ForestTrees;
@@ -875,9 +1101,9 @@ namespace
 		Test->TestTrue(TEXT("No tree or bush stands in a way out of its base"), bWaysOutClear);
 		Test->TestTrue(TEXT("Trees stand at least 9 m apart"), bApart);
 		Test->TestTrue(TEXT("Every tree has a trunk block standing on the base where it stands"), bTrunks);
-		Test->TestTrue(TEXT("Every tree that is not on a plot is one of a forest under a tree-top boardwalk, on the ground, with its trunk"), bForest && ForestTrees > 0);
+		Test->TestTrue(TEXT("Every tree that is not on a plot or in a grove past the plots' rims is one of a forest under a tree-top boardwalk, on the ground, with its trunk"), bForest && ForestTrees > 0);
 		Test->TestTrue(TEXT("But for its trees and bushes, an arena is what its seed makes when the settings ask for none"), bRestUnchanged);
-		UE_LOG(LogArenaCheck, Display, TEXT("GAMECHECK green: %d trees and %d bushes on plots, and %d forest trees, over %d plans"), Trees, Bushes, ForestTrees, Plans);
+		UE_LOG(LogArenaCheck, Display, TEXT("GAMECHECK green: %d trees and %d bushes on plots, %d forest trees, and %d trees and bushes of groves past the rims, over %d plans"), Trees, Bushes, ForestTrees, GroveGreen, Plans);
 	}
 
 	/**
@@ -956,6 +1182,7 @@ namespace
 				NoTrees.TreesPerBase = 0;
 				NoTrees.BushesPerBase = 0;
 				NoTrees.CoverPerBase = NoTrees.CoverPerWay = NoTrees.OutcropsPerBase = NoTrees.CragsPerBase = NoTrees.FramesPerBase = NoTrees.StonesPerBase = NoTrees.PatchesPerBase = 0;
+				NoTrees.OuterRocksPerBase = NoTrees.OuterPatchesPerBase = NoTrees.GrovesPerBase = 0;
 				bEveryConnectorBuilt &= ASenniteArena::MakePlan(Seed, Bases, INDEX_NONE, NoTrees).Boxes.Num() > 0 && Plan.Bases.Num() == Bases;
 				if (Bases == 2) {
 					KindsAsOnlyConnector.Add(static_cast<int32>(Plan.Connectors[0].Kind));
@@ -1026,6 +1253,7 @@ namespace
 			CheckGround(Test);
 			CheckGreen(Test);
 			CheckDressing(Test);
+			CheckOuterLand(Test);
 			CheckGroundBuilt(Test, World, Arena);
 			CheckLand(Test, World, Arena);
 			CheckTrees(Test, World, Arena);
@@ -1133,6 +1361,29 @@ namespace
 				return false;
 			}
 			if (Elapsed(World) < 6.6) {
+				return false;
+			}
+			if (Step == 7) {
+				// and from over the plot's rim at its back, looking down over the land past it to the shore
+				Step = 8;
+				const FVector Out = (Plan.Connectors[0].Frame.GetLocation() - Plan.Bases[0]).GetSafeNormal2D();
+				const FVector Rim = Plan.Bases[0] - Out * (Size.BaseRadius * 0.8);
+				const FVector Eye = Rim + FVector(0.0, 0.0, ASenniteArena::GroundHeight(Plan, Rim.X, Rim.Y) + 4500.0);
+				const FVector Look = Plan.Bases[0] - Out.RotateAngleAxis(40.0, FVector::UpVector) * (Size.BaseRadius + 2500.0);
+				if (Above.IsValid()) {
+					Above->SetActorLocationAndRotation(Eye, (Look + FVector(0.0, 0.0, ASenniteArena::GroundHeight(Plan, Look.X, Look.Y)) - Eye).Rotation());
+				}
+				return false;
+			}
+			if (Elapsed(World) < 7.4) {
+				return false;
+			}
+			if (Step == 8) {
+				Step = 9;
+				GameCheck::Shot(TEXT("Arena"), *FString::Printf(TEXT("%s_outer_land.png"), *Kind));
+				return false;
+			}
+			if (Elapsed(World) < 8.2) {
 				return false;
 			}
 			if (Hero == nullptr) {

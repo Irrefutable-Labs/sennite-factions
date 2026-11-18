@@ -106,6 +106,13 @@ struct FArenaSizes
 	int32 FramesPerBase = 1;
 	int32 StonesPerBase = 24;
 	int32 PatchesPerBase = 6;
+	/**
+	 * The land past each plot's rim, out to the shore: rocks of the plot's style (some outcrops, some
+	 * with a low rock beside), patches of stony ground by them, and groves of trees with bushes.
+	 */
+	int32 OuterRocksPerBase = 8;
+	int32 OuterPatchesPerBase = 4;
+	int32 GrovesPerBase = 4;
 };
 
 /** One block of the arena: a box, in the world. */
@@ -243,6 +250,16 @@ public:
 
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	int32 PatchesPerBase = 6;
+
+	/** The land past each plot's rim: rocks, patches of stony ground, groves of trees with bushes. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	int32 OuterRocksPerBase = 8;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	int32 OuterPatchesPerBase = 4;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	int32 GrovesPerBase = 4;
 
 	/** The level ground in the middle of a plot, where a faction's buildings stand. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")

@@ -629,6 +629,91 @@ namespace
 		}
 	};
 
+	/** The drawn ground under a footprint X by Y turned Yaw about At, at its middle, its corners and the middles of its sides: the lowest and highest of them. */
+	TPair<double, double> FootingOf(FDrawnGround& Drawn, const FVector2D& At, double Yaw, double X, double Y)
+	{
+		double Low = TNumericLimits<double>::Max();
+		double High = -TNumericLimits<double>::Max();
+		for (const double SideX : { -0.5, 0.0, 0.5 }) {
+			for (const double SideY : { -0.5, 0.0, 0.5 }) {
+				const FVector2D Point = At + FVector2D(FRotator(0.0, Yaw, 0.0).RotateVector(FVector(SideX * X, SideY * Y, 0.0)));
+				const double Here = Drawn.Height(Point.X, Point.Y);
+				Low = FMath::Min(Low, Here);
+				High = FMath::Max(High, Here);
+			}
+		}
+		return TPair<double, double>(Low, High);
+	}
+
+	/**
+	 * A patch of stony ground Box in size, turned Spin, laid on the slope of the drawn ground at At, its
+	 * rim at or a little under it all round; none where the ground there is under Lowest, or bends
+	 * under it more than half its height. Whether it was laid.
+	 */
+	bool LayPatch(FArenaPlan& Plan, FDrawnGround& Drawn, const FVector2D& At, double Spin, const FVector& Box, double Lowest)
+	{
+		const double Ground = Drawn.Height(At.X, At.Y);
+		if (Ground < Lowest) {
+			return false;
+		}
+		const FVector Slope(Drawn.Height(At.X - 200.0, At.Y) - Drawn.Height(At.X + 200.0, At.Y), Drawn.Height(At.X, At.Y - 200.0) - Drawn.Height(At.X, At.Y + 200.0), 400.0);
+		const FQuat Lay = FQuat::FindBetweenNormals(FVector::UpVector, Slope.GetSafeNormal()) * FRotator(0.0, Spin, 0.0).Quaternion();
+		FVector Centre(At.X, At.Y, Ground + Box.Z * 0.5);
+		// how far its rim stands over the drawn ground, most and least, round it
+		double Over = -TNumericLimits<double>::Max();
+		double Under = TNumericLimits<double>::Max();
+		for (const double SideX : { -0.5, 0.0, 0.5 }) {
+			for (const double SideY : { -0.5, 0.0, 0.5 }) {
+				const FVector Rim = Centre + Lay.RotateVector(FVector(SideX * Box.X, SideY * Box.Y, -Box.Z * 0.5));
+				const double Gap = Rim.Z - Drawn.Height(Rim.X, Rim.Y);
+				Over = FMath::Max(Over, Gap);
+				Under = FMath::Min(Under, Gap);
+			}
+		}
+		if (Over - Under > Box.Z * 0.5) {
+			return false;
+		}
+		Centre.Z -= Over + 5.0;
+		FArenaProp Piece;
+		Piece.Scenery = EArenaScenery::StonyGround;
+		Piece.Transform = FTransform(Lay, Centre, Box);
+		Piece.bFit = true;
+		Plan.Props.Add(Piece);
+		return true;
+	}
+
+	/** A tree at At, turned and grown as Stream draws, over a trunk block, which is what a hero or a shot meets; the block is seen only if the tree is missing. */
+	void StandTree(FArenaPlan& Plan, FRandomStream& Stream, const FVector& At)
+	{
+		const int32 TreeKinds = static_cast<int32>(EArenaScenery::BushA) - static_cast<int32>(EArenaScenery::TreeA);
+		// drawn one at a time, in this order
+		const FRotator Turned(0.0f, Stream.FRandRange(0.0f, 360.0f), 0.0f);
+		const float Grown = Stream.FRandRange(0.8f, 1.2f);
+		FArenaProp Piece;
+		Piece.Scenery = static_cast<EArenaScenery>(static_cast<int32>(EArenaScenery::TreeA) + Stream.RandRange(0, TreeKinds - 1));
+		Piece.Transform = FTransform(Turned, At, FVector(Grown));
+		Plan.Props.Add(Piece);
+		FArenaBox Trunk;
+		Trunk.Size = FVector(60.0f, 60.0f, 300.0f) * Grown;
+		Trunk.Centre = At + FVector(0.0f, 0.0f, Trunk.Size.Z * 0.5f);
+		Trunk.Rotation = Turned.Quaternion();
+		Trunk.Tint = EArenaTint::Hidden;
+		Plan.Boxes.Add(Trunk);
+	}
+
+	/** A bush at At, of a kind and turned and grown as Stream draws: scenery alone, which stops nothing. */
+	void StandBush(FArenaPlan& Plan, FRandomStream& Stream, const FVector& At)
+	{
+		const int32 BushKinds = static_cast<int32>(EArenaScenery::CoverRock02) - static_cast<int32>(EArenaScenery::BushA);
+		FArenaProp Piece;
+		Piece.Scenery = static_cast<EArenaScenery>(static_cast<int32>(EArenaScenery::BushA) + Stream.RandRange(0, BushKinds - 1));
+		// drawn one at a time, in this order: inside one call the order would be the compiler's to choose
+		const float Turned = Stream.FRandRange(0.0f, 360.0f);
+		const float Grown = Stream.FRandRange(0.8f, 1.4f);
+		Piece.Transform = FTransform(FRotator(0.0f, Turned, 0.0f), At, FVector(Grown));
+		Plan.Props.Add(Piece);
+	}
+
 	FVector2D Toward(double Degrees)
 	{
 		return FVector2D(FMath::Cos(FMath::DegreesToRadians(Degrees)), FMath::Sin(FMath::DegreesToRadians(Degrees)));
@@ -777,17 +862,7 @@ namespace
 		/** The drawn ground under a footprint turned Yaw, at its middle, its corners and the middles of its sides: the lowest and highest of them. */
 		TPair<double, double> Footing(const FVector2D& At, double Yaw, double X, double Y)
 		{
-			double Low = TNumericLimits<double>::Max();
-			double High = -TNumericLimits<double>::Max();
-			for (const double SideX : { -0.5, 0.0, 0.5 }) {
-				for (const double SideY : { -0.5, 0.0, 0.5 }) {
-					const FVector2D Point = At + FVector2D(FRotator(0.0, Yaw, 0.0).RotateVector(FVector(SideX * X, SideY * Y, 0.0)));
-					const double Here = Drawn.Height(Point.X, Point.Y);
-					Low = FMath::Min(Low, Here);
-					High = FMath::Max(High, Here);
-				}
-			}
-			return TPair<double, double>(Low, High);
+			return FootingOf(Drawn, At, Yaw, X, Y);
 		}
 
 		/** The way a piece turns so its long side lies across a line running the way Facing points. */
@@ -1076,29 +1151,7 @@ namespace
 					|| (FrameAt != INDEX_NONE && FVector2D::Distance(At, Taken[FrameAt].At) < Taken[FrameAt].Reach + Reach)) {
 					continue;
 				}
-				const double Ground = Drawn.Height(At.X, At.Y);
-				if (Ground < -300.0) {
-					continue;
-				}
-				const FVector Slope(Drawn.Height(At.X - 200.0, At.Y) - Drawn.Height(At.X + 200.0, At.Y), Drawn.Height(At.X, At.Y - 200.0) - Drawn.Height(At.X, At.Y + 200.0), 400.0);
-				const FQuat Lay = FQuat::FindBetweenNormals(FVector::UpVector, Slope.GetSafeNormal()) * FRotator(0.0, Spin, 0.0).Quaternion();
-				FVector Centre(At.X, At.Y, Ground + Box.Z * 0.5);
-				// how far its rim stands over the drawn ground, most and least, round it
-				double Over = -TNumericLimits<double>::Max();
-				double Under = TNumericLimits<double>::Max();
-				for (const double SideX : { -0.5, 0.0, 0.5 }) {
-					for (const double SideY : { -0.5, 0.0, 0.5 }) {
-						const FVector Rim = Centre + Lay.RotateVector(FVector(SideX * Box.X, SideY * Box.Y, -Box.Z * 0.5));
-						const double Gap = Rim.Z - Drawn.Height(Rim.X, Rim.Y);
-						Over = FMath::Max(Over, Gap);
-						Under = FMath::Min(Under, Gap);
-					}
-				}
-				if (Over - Under > Box.Z * 0.5) {
-					continue;
-				}
-				Centre.Z -= Over + 5.0;
-				Seen(EArenaScenery::StonyGround, Centre, Lay, Box);
+				LayPatch(Plan, Drawn, At, Spin, Box, -300.0);
 			}
 		}
 
@@ -1120,7 +1173,7 @@ namespace
 	 * the rest of the arena is what its seed makes with none. What it stood up, for the trees and bushes
 	 * to keep clear of.
 	 */
-	TArray<FTaken> DressPlots(FArenaPlan& Plan, const FArenaSizes& Size)
+	TArray<FTaken> DressPlots(FArenaPlan& Plan, const FArenaSizes& Size, FDrawnGround& Drawn)
 	{
 		const int32 Bases = Plan.Bases.Num();
 		// two plots a connector joins never share a style; round a ring of three or more, the last differs from the first too
@@ -1139,11 +1192,225 @@ namespace
 			Plan.Dryness[Base] = FMath::Clamp(StyleDryness[Plan.Styles[Base]] + Look.FRandRange(-0.1f, 0.1f), 0.0f, 1.0f);
 		}
 		TArray<FTaken> Taken;
-		FDrawnGround Drawn(Plan);
 		for (int32 Base = 0; Base < Bases; ++Base) {
 			FPlotDresser(Plan, Size, Base, Taken, Drawn).Dress();
 		}
 		return Taken;
+	}
+
+	/**
+	 * The land past the plots' rims, out to the shore. What stands there keeps OuterMargin and more
+	 * from every plot and from every connector's strip, so nothing of it is on the ground the plots'
+	 * dressing and the connectors are made for; it is dressed from OuterNear to OuterFar past a plot's
+	 * rim (the land reaches 10 to 60 m past it, then the shore goes down 45 m to the lake's bed).
+	 */
+	constexpr double OuterMargin = 400.0;
+	constexpr double OuterNear = 600.0;
+	constexpr double OuterFar = 6000.0;
+	/** Trees, bushes and patches stand on dry ground, where the land has not begun to go down to the water; a rock may stand a little way down the shore. */
+	constexpr double DryFrom = -250.0;
+	constexpr double RockFrom = -400.0;
+	/** Trees of a grove stand this far apart and more, within this far of its middle; its bushes within this far, and this far from a trunk. */
+	constexpr double GroveApart = 700.0;
+	constexpr double GroveTrees = 1300.0;
+	constexpr double GroveBushes = 1600.0;
+	constexpr double BushFromTrunk = 250.0;
+
+	/** Off every plot and every connector's strip by OuterMargin and more, for something reaching this far. */
+	bool OffPlotsAndStrips(const FArenaPlan& Plan, const FVector2D& At, double Reach)
+	{
+		for (const FVector& Base : Plan.Bases) {
+			if (FVector2D::Distance(At, FVector2D(Base)) - Reach < Plan.Size.BaseRadius + OuterMargin) {
+				return false;
+			}
+		}
+		for (const FArenaConnector& Connector : Plan.Connectors) {
+			if (InStrip(Plan, Connector, At.X, At.Y).Outside - Reach < OuterMargin) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** The land past one plot's rim, from a random stream of its own: its rocks and patches, or its groves. */
+	struct FOuterDresser
+	{
+		FArenaPlan& Plan;
+		const FArenaSizes& Size;
+		FDrawnGround& Drawn;
+		/** The rocks stood past every plot's rim so far, for what comes after to keep clear of. */
+		TArray<FTaken>& Rocks;
+		FRandomStream Rand;
+		FVector2D Middle;
+		int32 Style = 0;
+		/** What of Rocks stands past this plot. */
+		TArray<int32> Mine;
+
+		FOuterDresser(FArenaPlan& InPlan, const FArenaSizes& InSize, int32 Base, FDrawnGround& InDrawn, TArray<FTaken>& InRocks, int32 Salt)
+			: Plan(InPlan), Size(InSize), Drawn(InDrawn), Rocks(InRocks),
+			Rand(static_cast<int32>(HashCombine(GetTypeHash(InPlan.Seed ^ Salt), GetTypeHash(Base)))),
+			Middle(InPlan.Bases[Base]), Style(InPlan.Styles[Base])
+		{
+		}
+
+		double R(double Low, double High) { return Rand.FRandRange(Low, High); }
+
+		/** A place past the plot's rim, drawn one value at a time. */
+		FVector2D Somewhere()
+		{
+			const double Turn = R(0.0, 360.0);
+			const double Far = R(Size.BaseRadius + OuterNear, Size.BaseRadius + OuterFar);
+			return Middle + Toward(Turn) * Far;
+		}
+
+		/** A rock of Kind, Height tall in its own proportions, turned Yaw, sunk a part of its height under the lowest drawn ground under it; if there is room and the ground under it is not steeper than it is tall. Its index in Rocks, or none. */
+		int32 Rock(EArenaScenery Kind, const FVector2D& At, double Yaw, double Height, double TreeRoom)
+		{
+			const FVector Shape = ASenniteArena::ShapeOf(Kind);
+			const FVector Box = Shape * (Height / Shape.Z);
+			const double Reach = 0.5 * FVector2D(Box.X, Box.Y).Size();
+			if (!OffPlotsAndStrips(Plan, At, Reach) || Rocks.ContainsByPredicate([&At, Reach](const FTaken& Other) { return FVector2D::Distance(At, Other.At) < Other.Reach + Reach + 250.0; })) {
+				return INDEX_NONE;
+			}
+			const TPair<double, double> Under = FootingOf(Drawn, At, Yaw, Box.X, Box.Y);
+			if (Under.Value - Under.Key > Height * 0.6 || Under.Key < RockFrom) {
+				return INDEX_NONE;
+			}
+			FArenaProp Piece;
+			Piece.Scenery = Kind;
+			Piece.Transform = FTransform(FRotator(0.0, Yaw, 0.0), FVector(At.X, At.Y, Under.Key - Height * RockSink + Box.Z * 0.5), Box);
+			Piece.bFit = true;
+			Plan.Props.Add(Piece);
+			FTaken Stood;
+			Stood.At = At;
+			Stood.Reach = Reach;
+			Stood.TreeRoom = TreeRoom;
+			Mine.Add(Rocks.Add(Stood));
+			return Mine.Last();
+		}
+
+		/** Rocks of the plot's style: a third or so outcrops, the rest tall enough to hide a hero, some with a low rock beside. */
+		void StandRocks()
+		{
+			for (int32 Each = 0; Each < Size.OuterRocksPerBase; ++Each) {
+				for (int32 Try = 0; Try < 30; ++Try) {
+					const FVector2D At = Somewhere();
+					const bool bOutcrop = Rand.FRand() < 0.35f;
+					const EArenaScenery Kind = TallRocks[Style][Rand.RandRange(0, 1)];
+					const double Height = bOutcrop ? R(OutcropLow, OutcropHigh) : TallFor(R(TallClearLow, TallClearHigh));
+					const double Yaw = R(0.0, 360.0);
+					const int32 Stood = Rock(Kind, At, Yaw, Height, bOutcrop ? 600.0 : 400.0);
+					if (Stood == INDEX_NONE) {
+						continue;
+					}
+					if (Rand.FRand() < 0.6f) {
+						const EArenaScenery Low = LowRocks[Style][Rand.RandRange(0, 1)];
+						const double LowHeight = R(LowLow, LowHigh);
+						const FVector LowShape = ASenniteArena::ShapeOf(Low);
+						const double LowReach = 0.5 * FVector2D(LowShape.X, LowShape.Y).Size() * LowHeight / LowShape.Z;
+						// drawn one at a time, in this order
+						const double Turn = R(0.0, 360.0);
+						const double Gap = R(260.0, 400.0);
+						const double LowYaw = R(0.0, 360.0);
+						Rock(Low, Rocks[Stood].At + Toward(Turn) * (Rocks[Stood].Reach + Gap + LowReach), LowYaw, LowHeight, 400.0);
+					}
+					break;
+				}
+			}
+		}
+
+		/** Patches of stony ground by the rocks, on dry ground. */
+		void LayPatches()
+		{
+			const FVector Shape = ASenniteArena::ShapeOf(EArenaScenery::StonyGround);
+			for (int32 Each = 0; Each < Size.OuterPatchesPerBase && Mine.Num() > 0; ++Each) {
+				const FTaken& Near = Rocks[Mine[Rand.RandRange(0, Mine.Num() - 1)]];
+				// drawn one at a time, in this order
+				const double Turn = R(0.0, 360.0);
+				const double Part = R(0.5, 1.0);
+				const double Off = R(100.0, 300.0);
+				const double Scale = R(0.9, 1.4);
+				const double Spin = R(0.0, 360.0);
+				const FVector Box = Shape * Scale;
+				const FVector2D At = Near.At + Toward(Turn) * (Near.Reach * Part + Off);
+				if (OffPlotsAndStrips(Plan, At, 0.5 * FVector2D(Box.X, Box.Y).Size())) {
+					LayPatch(Plan, Drawn, At, Spin, Box, DryFrom);
+				}
+			}
+		}
+
+		/**
+		 * Groves: four to seven trees GroveApart and more from every other tree past the rims, each its
+		 * room from every rock there, and three to six bushes among them, 2 m and more from a rock; all
+		 * on dry ground, set on the ground as drawn.
+		 */
+		void StandGroves(TArray<FVector2D>& Trunks, TArray<FVector2D>& Groves)
+		{
+			const auto Dry = [this](const FVector2D& At) { return Drawn.Height(At.X, At.Y) >= DryFrom; };
+			for (int32 Each = 0; Each < Size.GrovesPerBase; ++Each) {
+				for (int32 Try = 0; Try < 20; ++Try) {
+					const FVector2D Centre = Somewhere();
+					if (!Dry(Centre) || !OffPlotsAndStrips(Plan, Centre, 600.0) || Groves.ContainsByPredicate([&Centre](const FVector2D& Other) { return FVector2D::Distance(Centre, Other) < 3500.0; })) {
+						continue;
+					}
+					Groves.Add(Centre);
+					TArray<FVector2D> Here;
+					const int32 Trees = Rand.RandRange(4, 7);
+					for (int32 Tree = 0; Tree < Trees; ++Tree) {
+						for (int32 Spot = 0; Spot < 10; ++Spot) {
+							const double Turn = R(0.0, 360.0);
+							const double Off = R(0.0, GroveTrees);
+							const FVector2D At = Centre + Toward(Turn) * Off;
+							if (!Dry(At) || !OffPlotsAndStrips(Plan, At, 100.0)
+								|| Rocks.ContainsByPredicate([&At](const FTaken& Rock) { return FVector2D::Distance(At, Rock.At) < Rock.Reach + Rock.TreeRoom; })
+								|| Trunks.ContainsByPredicate([&At](const FVector2D& Other) { return FVector2D::Distance(At, Other) < GroveApart; })) {
+								continue;
+							}
+							StandTree(Plan, Rand, FVector(At.X, At.Y, Drawn.Height(At.X, At.Y)));
+							Trunks.Add(At);
+							Here.Add(At);
+							break;
+						}
+					}
+					const int32 Bushes = Rand.RandRange(3, 6);
+					for (int32 Bush = 0; Bush < Bushes; ++Bush) {
+						for (int32 Spot = 0; Spot < 8; ++Spot) {
+							const double Turn = R(0.0, 360.0);
+							const double Off = R(0.0, GroveBushes);
+							const FVector2D At = Centre + Toward(Turn) * Off;
+							if (!Dry(At) || !OffPlotsAndStrips(Plan, At, 150.0)
+								|| Rocks.ContainsByPredicate([&At](const FTaken& Rock) { return FVector2D::Distance(At, Rock.At) < Rock.Reach + 200.0; })
+								|| Here.ContainsByPredicate([&At](const FVector2D& Trunk) { return FVector2D::Distance(At, Trunk) < BushFromTrunk; })) {
+								continue;
+							}
+							StandBush(Plan, Rand, FVector(At.X, At.Y, Drawn.Height(At.X, At.Y)));
+							break;
+						}
+					}
+					break;
+				}
+			}
+		}
+	};
+
+	/**
+	 * The land past the plots' rims: every plot's rocks and patches, then every plot's groves, each from
+	 * a stream of its own, so the rest of the arena is what its seed makes with none, and with no
+	 * groves the rocks and patches are what they are with them.
+	 */
+	void DressOuterLand(FArenaPlan& Plan, const FArenaSizes& Size, FDrawnGround& Drawn)
+	{
+		TArray<FTaken> Rocks;
+		for (int32 Base = 0; Base < Plan.Bases.Num(); ++Base) {
+			FOuterDresser Dresser(Plan, Size, Base, Drawn, Rocks, 0x4F555452);
+			Dresser.StandRocks();
+			Dresser.LayPatches();
+		}
+		TArray<FVector2D> Trunks;
+		TArray<FVector2D> Groves;
+		for (int32 Base = 0; Base < Plan.Bases.Num(); ++Base) {
+			FOuterDresser(Plan, Size, Base, Drawn, Rocks, 0x47524F56).StandGroves(Trunks, Groves);
+		}
 	}
 
 	/** What paints the ground, gathered once from a plan: the paths, and the things that stand in dirt or gravel. */
@@ -1334,6 +1601,9 @@ FArenaSizes ASenniteArena::Sizes()
 	Out.FramesPerBase = Settings->FramesPerBase;
 	Out.StonesPerBase = Settings->StonesPerBase;
 	Out.PatchesPerBase = Settings->PatchesPerBase;
+	Out.OuterRocksPerBase = Settings->OuterRocksPerBase;
+	Out.OuterPatchesPerBase = Settings->OuterPatchesPerBase;
+	Out.GrovesPerBase = Settings->GrovesPerBase;
 	return Out;
 }
 
@@ -1497,7 +1767,10 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 	}
 	// The plots' dressing: each plot's style, then its crag, steel frame, rocks of cover, stones and
 	// stony ground, from streams of their own, so the connectors are what the seed makes with none.
-	const TArray<FTaken> Taken = DressPlots(Plan, Size);
+	FDrawnGround Drawn(Plan);
+	const TArray<FTaken> Taken = DressPlots(Plan, Size, Drawn);
+	// the land past the plots' rims, out to the shore, clear of every plot and connector
+	DressOuterLand(Plan, Size, Drawn);
 	// a tree's trunk keeps TreeRoom from what the dressing stood up; a bush 2 m, so a line run 1.2 m
 	// either side of it meets no rock
 	const auto CrowdsTree = [&Taken](const FVector& At) {
@@ -1513,22 +1786,6 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 	// block, which is what a hero or a shot meets; the block is seen only if the tree is missing. A bush
 	// is scenery alone.
 	FRandomStream Green(Seed ^ 0x47524E);
-	const int32 TreeKinds = static_cast<int32>(EArenaScenery::BushA) - static_cast<int32>(EArenaScenery::TreeA);
-	const int32 BushKinds = static_cast<int32>(EArenaScenery::CoverRock02) - static_cast<int32>(EArenaScenery::BushA);
-	const auto StandTree = [&Plan, &Green, TreeKinds](const FVector& At) {
-		const FRotator Turned(0.0f, Green.FRandRange(0.0f, 360.0f), 0.0f);
-		const float Grown = Green.FRandRange(0.8f, 1.2f);
-		FArenaProp Piece;
-		Piece.Scenery = static_cast<EArenaScenery>(static_cast<int32>(EArenaScenery::TreeA) + Green.RandRange(0, TreeKinds - 1));
-		Piece.Transform = FTransform(Turned, At, FVector(Grown));
-		Plan.Props.Add(Piece);
-		FArenaBox Trunk;
-		Trunk.Size = FVector(60.0f, 60.0f, 300.0f) * Grown;
-		Trunk.Centre = At + FVector(0.0f, 0.0f, Trunk.Size.Z * 0.5f);
-		Trunk.Rotation = Turned.Quaternion();
-		Trunk.Tint = EArenaTint::Hidden;
-		Plan.Boxes.Add(Trunk);
-	};
 	for (int32 Base = 0; Base < Bases; ++Base) {
 		// the ways out: toward each base this one is joined to
 		TArray<FVector> Ways;
@@ -1563,7 +1820,7 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 				if (At.Z < -300.0) {
 					continue;
 				}
-				StandTree(At);
+				StandTree(Plan, Green, At);
 				Trunks.Add(At);
 				break;
 			}
@@ -1578,13 +1835,7 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 				if (At.Z < -300.0) {
 					continue;
 				}
-				FArenaProp Piece;
-				Piece.Scenery = static_cast<EArenaScenery>(static_cast<int32>(EArenaScenery::BushA) + Green.RandRange(0, BushKinds - 1));
-				// drawn one at a time, in this order: inside one call the order would be the compiler's to choose
-				const float Turned = Green.FRandRange(0.0f, 360.0f);
-				const float Grown = Green.FRandRange(0.8f, 1.4f);
-				Piece.Transform = FTransform(FRotator(0.0f, Turned, 0.0f), At, FVector(Grown));
-				Plan.Props.Add(Piece);
+				StandBush(Plan, Green, At);
 				break;
 			}
 		}
@@ -1606,7 +1857,7 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 					continue;
 				}
 				At.Z = GroundHeight(Plan, At.X, At.Y);
-				StandTree(At);
+				StandTree(Plan, Green, At);
 				Trunks.Add(At);
 				break;
 			}
