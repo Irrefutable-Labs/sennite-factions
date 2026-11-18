@@ -35,7 +35,7 @@
 namespace
 {
 	/** How much ERA the shop's first row trades for D-bucks. */
-	const TCHAR* EraForDBucks = TEXT("2");
+	const TCHAR* EraForDBucks = USennitePublisher::TradeEra();
 
 	/** How much the commit button commits: everything still needed, or a part of it. */
 	const int32 Amounts[] = { 0, 100, 50, 10 };
@@ -481,14 +481,9 @@ void ASenniteBaseEditor::Rebuild()
 void ASenniteBaseEditor::CopyCode()
 {
 	USennitePublisher* Server = Publisher();
-	if (Server == nullptr || Server->ConnectCode.IsEmpty()) {
+	if (Server == nullptr || !Server->OpenConnectCode()) {
 		return;
 	}
-	FPlatformApplicationMisc::ClipboardCopy(*Server->ConnectCode);
-#if PLATFORM_ANDROID || PLATFORM_IOS
-	// on a phone the code is a link the DSM wallet opens
-	FPlatformProcess::LaunchURL(*Server->ConnectCode, nullptr, nullptr);
-#endif
 	Server->Message = TEXT("the connect code is copied: read it in your DSM wallet");
 }
 

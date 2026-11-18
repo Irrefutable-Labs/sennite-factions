@@ -20,6 +20,8 @@
 #include "Animation/SkeletalMeshActor.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "EngineUtils.h"
+#include "Framework/Application/SlateApplication.h"
+#include "GenericPlatform/GenericApplication.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
@@ -102,6 +104,26 @@ namespace
 			Test->TestEqual(TEXT("The player's hero stands on the stage"), StageMesh(World), USenniteHeroes::FindOrDefault(Default).Mesh.ToString());
 			for (const TCHAR* Action : { TEXT("play"), TEXT("heroes"), TEXT("host"), TEXT("join"), TEXT("quit") }) {
 				Test->TestTrue(FString::Printf(TEXT("The menu has %s"), Action), MenuCheck::Has(Menu, Action));
+			}
+			{
+				// A phone keeps the menu clear of its screen's rounded corners and camera: the canvas starts in
+				// from the screen's edge. A finger lands on the screen, so each button must take taps where it is
+				// drawn, in there, and not that far to its left. -SafeZoneCheck says this run has such a screen.
+				FDisplayMetrics Metrics;
+				FSlateApplication::Get().GetCachedDisplayMetrics(Metrics);
+				const FVector2D Pad(Metrics.TitleSafePaddingSize.X, Metrics.TitleSafePaddingSize.Y);
+				const ASenniteMenuHUD* Drawn = MenuCheck::Hud(Menu);
+				double Leftmost = 1.0e9;
+				double Topmost = 1.0e9;
+				for (const FSenniteMenuButton& Each : Drawn != nullptr ? Drawn->Buttons : TArray<FSenniteMenuButton>()) {
+					Leftmost = FMath::Min(Leftmost, Each.Box.Min.X);
+					Topmost = FMath::Min(Topmost, Each.Box.Min.Y);
+				}
+				Test->TestTrue(TEXT("Every button takes taps inside the screen's safe zone, where it is drawn"), Leftmost >= Pad.X * 0.9 && Topmost >= Pad.Y * 0.9);
+				if (FParse::Param(FCommandLine::Get(), TEXT("SafeZoneCheck"))) {
+					Test->TestTrue(TEXT("This run's screen has a safe zone, as a phone's has"), Pad.X > 8.0);
+				}
+				UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK safe zone: %.0f by %.0f pixels in; the buttons take taps from %.0f, %.0f"), Pad.X, Pad.Y, Leftmost, Topmost);
 			}
 			GameCheck::Shot(TEXT("Menu"), TEXT("menu.png"));
 			UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK menu: hero=%s free=%s bought=%s"), *Default.ToString(), *Free.ToString(), *Locked.ToString());

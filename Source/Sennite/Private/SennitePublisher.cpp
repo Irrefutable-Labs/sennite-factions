@@ -3,6 +3,8 @@
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "HAL/PlatformApplicationMisc.h"
+#include "HAL/PlatformProcess.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
@@ -428,6 +430,19 @@ void USennitePublisher::AskShop()
 		}
 		bShop = true;
 	});
+}
+
+bool USennitePublisher::OpenConnectCode() const
+{
+	if (ConnectCode.IsEmpty()) {
+		return false;
+	}
+	FPlatformApplicationMisc::ClipboardCopy(*ConnectCode);
+#if PLATFORM_ANDROID || PLATFORM_IOS
+	// on a phone the code is a link the DSM wallet opens
+	FPlatformProcess::LaunchURL(*ConnectCode, nullptr, nullptr);
+#endif
+	return true;
 }
 
 FString USennitePublisher::DBucksLine(bool& bKnown) const

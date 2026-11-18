@@ -403,6 +403,27 @@ void ASenniteMenuController::Act(FName Action)
 			Server->BuyHero(Heroes[Browse].Id.ToString());
 		}
 	}
+	else if (Name == TEXT("wallet")) {
+		// the first thing toward a hero that is bought: the player's wallet, connected to this game
+		const UGameInstance* Game = GetGameInstance();
+		const USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+		if (Server != nullptr && Server->OpenConnectCode()) {
+#if PLATFORM_ANDROID || PLATFORM_IOS
+			Note = TEXT("APPROVE THIS GAME IN YOUR DSM WALLET, THEN COME BACK");
+#else
+			Note = TEXT("THE CONNECT CODE IS COPIED: READ IT IN YOUR DSM WALLET");
+#endif
+		}
+	}
+	else if (Name == TEXT("dbucks")) {
+		// D-bucks for a hero the wallet holds too few for: ERA traded through the publisher's vault, as in the shop
+		const UGameInstance* Game = GetGameInstance();
+		USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+		if (Server != nullptr && Server->IsOn() && Server->bConnected && !Server->bBusy) {
+			Server->BuyDBucks(USennitePublisher::TradeEra());
+			Note.Reset();
+		}
+	}
 	else if (Name == TEXT("back")) {
 		if (Page == ESenniteMenuPage::Heroes) {
 			Page = InLobby() ? ESenniteMenuPage::Lobby : ESenniteMenuPage::Main;
@@ -524,7 +545,8 @@ void ASenniteMenuHUD::Button(FName Action, const FString& Label, float X, float 
 	FSenniteMenuButton Each;
 	Each.Action = Action;
 	Each.Text = Label;
-	Each.Box = Box;
+	// where it is on the screen, which on a phone is not where it is on the canvas
+	Each.Box = Box.ShiftBy(Inset);
 	Each.bEnabled = bEnabled;
 	Buttons.Add(Each);
 }
@@ -545,6 +567,7 @@ void ASenniteMenuHUD::DrawHUD()
 	Drawing.Reset();
 	// every size is for a screen 720 lines high and scales with the screen, phone or desktop
 	S = Canvas->ClipY / 720.0f;
+	Inset = -Screen().Min;
 	if (Menu == nullptr) {
 		return;
 	}
@@ -665,11 +688,14 @@ void ASenniteMenuHUD::DrawHeroes(ASenniteMenuController* Menu)
 		Text(TEXT("status"), Status, Left * S + 18.0f * S, 254.0f * S, 13, bMay ? White : SenniteUi::Gold);
 	}
 
-	// what is done with the hero: chosen, or bought
+	// What is done with the hero: chosen, or, for one not had yet, the next thing to do toward having it,
+	// with what that is said under the button.
 	const float BW = 340.0f;
 	const float BX = Left;
 	const float BY = 304.0f;
-	const float Under = (BY + 78.0f) * S;
+	const float Under = (BY + 80.0f) * S;
+	FString Hint;
+	FString Hint2;
 	if (bChosen) {
 		Button(TEXT("chosen"), TEXT("CHOSEN"), BX, BY, BW, 66.0f, false);
 	}
@@ -678,22 +704,49 @@ void ASenniteMenuHUD::DrawHeroes(ASenniteMenuController* Menu)
 	}
 	else if (Server == nullptr || !Server->IsOn()) {
 		Button(TEXT("buy"), TEXT("NO SHOP ON THIS GAME"), BX, BY, BW, 66.0f, false, 14);
+		Hint = TEXT("THIS GAME IS NOT CONNECTED TO THE PUBLISHER'S");
+		Hint2 = TEXT("SERVER, WHERE HEROES ARE SOLD FOR D-BUCKS.");
 	}
 	else if (!Server->bConnected) {
-		Button(TEXT("buy"), TEXT("CONNECT A WALLET TO BUY"), BX, BY, BW, 66.0f, false, 14);
-		if (!Server->ConnectCode.IsEmpty()) {
-			Text(TEXT("connect"), FString::Printf(TEXT("WALLET CONNECT CODE  %s"), *Server->ConnectCode), (Left + 2.0f) * S, Under, 10, SenniteUi::Dim, 0.0f, false);
+		Button(TEXT("wallet"), TEXT("CONNECT YOUR WALLET"), BX, BY, BW, 66.0f, !Server->ConnectCode.IsEmpty(), 16, true);
+		Hint = TEXT("HEROES ARE BOUGHT WITH D-BUCKS FROM YOUR DSM WALLET.");
+#if PLATFORM_ANDROID || PLATFORM_IOS
+		Hint2 = TEXT("THIS OPENS YOUR WALLET: APPROVE THIS GAME THERE.");
+#else
+		Hint2 = TEXT("THIS COPIES THE CONNECT CODE FOR YOUR WALLET TO READ.");
+#endif
+	}
+	else if (Server->HeroOnItsWay == Hero.Id.ToString()) {
+		Button(TEXT("buy"), TEXT("ON ITS WAY TO YOUR WALLET"), BX, BY, BW, 66.0f, false, 14);
+	}
+	else if (Server->bBusy) {
+		Button(TEXT("buy"), TEXT("WAITING FOR YOUR WALLET ..."), BX, BY, BW, 66.0f, false, 14);
+	}
+	else if (!Server->bMaterialsKnown) {
+		Button(TEXT("buy"), TEXT("ASKING YOUR WALLET ..."), BX, BY, BW, 66.0f, false, 14);
+	}
+	else if (const FSenniteHeroForSale* ForSale = Server->HeroForSale(Hero.Id.ToString())) {
+		if (Server->DBucks >= ForSale->Price) {
+			Button(TEXT("buy"), FString::Printf(TEXT("BUY  %s D-BUCKS"), *SenniteUi::Grouped(ForSale->Price)), BX, BY, BW, 66.0f, true, 18, true);
+		}
+		else {
+			// too few D-bucks: they are had by trading ERA from the wallet, here as in the shop
+			const bool bEra = FCString::Atod(*Server->Era) >= FCString::Atod(USennitePublisher::TradeEra());
+			Button(TEXT("dbucks"), TEXT("GET D-BUCKS"), BX, BY, BW, 66.0f, bEra, 18, true);
+			Hint = FString::Printf(TEXT("YOUR WALLET HAS %s OF THE %s D-BUCKS IT COSTS."), *SenniteUi::Grouped(Server->DBucks), *SenniteUi::Grouped(ForSale->Price));
+			Hint2 = bEra ? FString::Printf(TEXT("THIS TRADES %s ERA FROM YOUR WALLET FOR D-BUCKS."), USennitePublisher::TradeEra())
+				: FString::Printf(TEXT("A TRADE FOR D-BUCKS TAKES %s ERA: YOUR WALLET HAS %s."), USennitePublisher::TradeEra(), Server->Era.IsEmpty() ? TEXT("NONE") : *Server->Era);
 		}
 	}
-	else if (Server->HeroOnItsWay == Hero.Id.ToString() || Server->bBusy) {
-		Button(TEXT("buy"), Server->bBusy ? TEXT("BUYING ...") : TEXT("ON ITS WAY TO YOUR WALLET"), BX, BY, BW, 66.0f, false, 14);
-	}
 	else {
-		const FSenniteHeroForSale* ForSale = Server->HeroForSale(Hero.Id.ToString());
-		Button(TEXT("buy"), ForSale != nullptr ? FString::Printf(TEXT("BUY  %d D-BUCKS"), ForSale->Price) : FString(TEXT("NOT IN THE SHOP")), BX, BY, BW, 66.0f, ForSale != nullptr, 18, true);
+		Button(TEXT("buy"), TEXT("NOT IN THE SHOP"), BX, BY, BW, 66.0f, false, 14);
+	}
+	if (!Hint.IsEmpty()) {
+		Text(TEXT("hint"), Hint, (Left + 2.0f) * S, Under, 10, SenniteUi::Dim, 0.0f, false);
+		Text(TEXT("hint2"), Hint2, (Left + 2.0f) * S, Under + 20.0f * S, 10, SenniteUi::Dim, 0.0f, false);
 	}
 	if (Server != nullptr && Server->IsOn() && !Server->Message.IsEmpty() && (Server->bBusy || !Server->HeroOnItsWay.IsEmpty())) {
-		Text(TEXT("shop"), Server->Message.ToUpper(), (Left + 2.0f) * S, Under + 22.0f * S, 10, White, 0.0f, false);
+		Text(TEXT("shop"), Server->Message.ToUpper(), (Left + 2.0f) * S, Under + (Hint.IsEmpty() ? 0.0f : 44.0f * S), 10, White, 0.0f, false);
 	}
 
 	// the arrows, either side of the hero
@@ -732,7 +785,7 @@ void ASenniteMenuHUD::DrawHeroes(ASenniteMenuController* Menu)
 		FSenniteMenuButton Tile;
 		Tile.Action = Action;
 		Tile.Text = Each.Name;
-		Tile.Box = Box;
+		Tile.Box = Box.ShiftBy(Inset);
 		Buttons.Add(Tile);
 	}
 }

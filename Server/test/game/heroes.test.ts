@@ -1,9 +1,9 @@
 /**
  * A hero bought in the game, end to end: the Unreal game runs its own check
  * (Source/Sennite/Private/Tests/HeroShopTest.cpp) on the menu, by taps on the screen; this file is
- * everything outside the game. The player's wallet trades ERA for D-bucks through the publisher's
- * vault, then connects to the game by the code it shows. In the game the player buys a hero with
- * D-bucks, chooses it, hosts a lobby, and comes in as it once the lobby's server has checked the
+ * everything outside the game. The player's wallet, new and holding only ERA, connects to the game
+ * by the code the game hands it. In the game the player trades ERA for D-bucks from the character
+ * select, buys a hero with them, chooses it, hosts a lobby, and comes in as it once the lobby's server has checked the
  * hero pass with the publisher's server; then plays it on the test range. Outside the game, the
  * wallet proves it owns the hero.
  *
@@ -27,28 +27,9 @@ const CODE_FILE = join(SAVED, "connect-code.txt");
 const PROFILE = join(REPO, "Saved", "SaveGames", "HeroShop.sav");
 const DBUCKS = "DBUCKS";
 
-type Json = Record<string, any>;
-
 let a: Accounts;
 let server: Server;
 let url = "";
-
-async function call(method: string, path: string, token = "", body?: Json): Promise<{ status: number; body: Json }> {
-  const headers: Record<string, string> = {};
-  if (token !== "") headers.authorization = `Bearer ${token}`;
-  if (body !== undefined) headers["content-type"] = "application/json";
-  const response = await fetch(url + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-  return { status: response.status, body: (await response.json()) as Json };
-}
-
-async function settled(token: string, path: string, body: Json): Promise<Json> {
-  const started = await call("POST", path, token, body);
-  expect(started.status, JSON.stringify(started.body)).toBe(202);
-  return until(`${path} settles`, 300_000, async () => {
-    const r = await call("GET", `/requests/${started.body.request}`, token);
-    return r.body.state === "done" ? r.body : null;
-  });
-}
 
 beforeAll(async () => {
   a = await accounts("gameheroes", ["alice"]);
@@ -66,17 +47,9 @@ describe("a hero bought in the game", () => {
     const alice = a.wallets.alice!;
     const hero = a.world.shop.heroes[0]!;
 
-    // The player's wallet gets D-bucks first, as any wallet can: through a connection of its own to the
-    // publisher's server, trading ERA through the publisher's vault. A wallet is connected to an
-    // application once, so it disconnects that connection before it connects to the game.
-    const own = await call("POST", "/players");
-    const token = own.body.player as string;
-    const ownConnection = await alice.wallet.approve(await alice.wallet.preview(own.body.code as string));
-    await until("alice's own connection is up", 240_000, async () => ((await call("GET", "/players/me", token)).body.connected === true ? true : null));
-    expect(await settled(token, "/shop/dbucks", { era: "3" })).toMatchObject({ ok: true });
-    await until(`alice's wallet holds ${hero.price} D-bucks`, 240_000, async () => ((await spendable(alice.wallet, DBUCKS)) >= BigInt(hero.price) ? true : null));
-    await alice.wallet.disconnect(ownConnection);
-    await until("the publisher's server sees alice's own connection closed", 240_000, async () => ((await call("GET", "/players/me", token)).body.connected === false ? true : null));
+    // The player's wallet comes to the game as a new wallet does: with the ERA the faucet gave it and no
+    // D-bucks. Everything from there to playing the hero is done in the game, by taps.
+    expect(await spendable(alice.wallet, DBUCKS)).toBe(0n);
 
     rmSync(CODE_FILE, { force: true });
     rmSync(PROFILE, { force: true });
@@ -107,6 +80,7 @@ describe("a hero bought in the game", () => {
       expect(output).toContain("CHECK PASSED: Sennite.HeroShop.BuyChooseAndPlay");
       // what the game said it did, from its own log
       const said = readFileSync(join(SAVED, "check.log"), "latin1");
+      expect(said).toContain("GAMECHECK the character select traded ERA for D-bucks");
       expect(said).toContain(`GAMECHECK bought ${hero.id} for ${hero.price} D-bucks`);
       expect(said).toContain(`GAMECHECK the lobby's server checked the pass: the player is ${hero.id}`);
       expect(said).toContain(`GAMECHECK on the range as ${hero.id}`);
