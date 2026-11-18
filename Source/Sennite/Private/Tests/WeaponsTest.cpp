@@ -196,7 +196,11 @@ namespace
 					return false;
 				}
 				Step = 2;
-				// a second pull before her attack is over sends nothing, and R loads nothing
+				// A second pull before her attack is over sends nothing, and R loads nothing. Not even when
+				// the player's game tells the server the attack is over, which a game that has been tampered
+				// with can do: the server keeps its own time.
+				Hero->ProcessEvent(Hero->FindFunctionChecked(TEXT("ServerPickaxeTimeOut")), nullptr);
+				Test->TestFalse(TEXT("The call that says the attack is over clears the mark the HUD reads"), State->JustSwungPickaxe);
 				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Pressed);
 				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
 				GameCheck::Key(Controller, EKeys::R, IE_Pressed);
@@ -208,12 +212,19 @@ namespace
 			}
 			Test->TestNotNull(TEXT("The hero has an attack of her own"), Hero->OwnAttack.Get());
 			Test->TestTrue(TEXT("With no gun in hand, the fire button plays the hero's own attack"), bSawFireAnimation);
-			Test->TestEqual(TEXT("and one bolt leaves her own weapon, not two: the second pull came too soon"), BulletsSpawned, 1);
+			Test->TestEqual(TEXT("and one bolt leaves her own weapon, not two: the second pull came too soon, whatever her game told the server"), BulletsSpawned, 1);
 			Test->TestTrue(TEXT("The bolt is her own weapon's"), BulletClass == ASenniteOwnBolt::StaticClass());
 			Test->TestTrue(TEXT("The bolt starts at the top of her staff"), FVector::Dist(BulletFrom, OwnTip) < 40.0);
 			Test->TestTrue(TEXT("The bolt is seen and sent to every machine"), bBoltSeen && bBulletSent);
 			Test->TestTrue(TEXT("The bolt travels: seen more than 10 m out, straight"), BulletFar > 1000.0 && BulletOffLine < 5.0);
 			Test->TestTrue(TEXT("She still holds no game weapon"), Hero->CurrentWeapon == nullptr);
+			{
+				// a projectile asked for when the server has let no shot out is not made
+				struct FAsk { FTransform Where; } Ask{ FTransform(Controller->GetControlRotation(), OwnTip) };
+				const int32 Before = BulletsSpawned;
+				Hero->ProcessEvent(Hero->FindFunctionChecked(TEXT("ServerSpawnProjectile")), &Ask);
+				Test->TestEqual(TEXT("A projectile asked for with no shot let out is not made"), BulletsSpawned, Before);
+			}
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK own weapon: attack=%d bolts=%d of %s, started %.0f from the staff's top, seen %.0f out"),
 				bSawFireAnimation ? 1 : 0, BulletsSpawned, *GetNameSafe(BulletClass), FVector::Dist(BulletFrom, OwnTip), BulletFar);
 			GameCheck::Shot(TEXT("Weapons"), TEXT("own_weapon.png"));

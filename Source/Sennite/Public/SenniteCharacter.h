@@ -712,8 +712,31 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Building")
 	float BuildGridCell = 480.0f;
 
-	/** Set by the server when it accepts a trigger pull; the one projectile of that shot clears it. Server only. */
-	bool bShotAuthorized = false;
+	/**
+	 * The shot the server last let out and that has not left yet: its bullet, the gun it was let out
+	 * of (none for the hero's own weapon) and when. The one projectile of that shot is this bullet, from
+	 * this gun, and takes it away; a shot not taken within ShotKeptSeconds is gone. Server only: a
+	 * player's game can ask for the projectile, but not choose what it is.
+	 */
+	UPROPERTY()
+	TSubclassOf<AProjectileActor> ShotBullet;
+
+	TWeakObjectPtr<AWeaponActor> ShotGun;
+	double ShotAt = -1000.0;
+
+	/** How long a shot the server let out waits for its projectile. */
+	static constexpr double ShotKeptSeconds = 0.5;
+
+	/**
+	 * When the server will next let a shot out, and when the reload under way is over, by the server's
+	 * own clock. The marks on the player state (JustShotRifle and the rest) say the same for the HUD
+	 * and are cleared by calls a player's game can make; these are not.
+	 */
+	double NextShotAt = 0.0;
+	double ReloadOverAt = 0.0;
+
+	/** How much sooner than NextShotAt a shot asked for is still let out: a held trigger asks on its own clock. */
+	static constexpr double ShotEarly = 0.02;
 
 	/** What one piece costs of its material. */
 	UPROPERTY(EditDefaultsOnly, Category = "Building")

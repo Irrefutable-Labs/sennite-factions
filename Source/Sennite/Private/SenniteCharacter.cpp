@@ -1608,6 +1608,11 @@ void ASenniteCharacter::ServerFireWeapon_Implementation() {
 	if (State == nullptr || !State->HoldingWeapon) {
 		return;
 	}
+	// by the server's own clock: too soon after the last shot, or while reloading, nothing is let out
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (Now < NextShotAt - ShotEarly || Now < ReloadOverAt) {
+		return;
+	}
 	if (State->CurrentWeapon == 0) {
 		// No gun in hand: the hero attacks with its own weapon (a staff, a fist, a hammer). It plays its
 		// own attack and a bolt leaves the weapon, good up close and at a distance; there is nothing to
@@ -1617,9 +1622,12 @@ void ASenniteCharacter::ServerFireWeapon_Implementation() {
 		}
 		NetMulticastOwnAttack();
 		State->JustSwungPickaxe = true;
+		NextShotAt = Now + FMath::Max(0.05f, OwnAttackSeconds);
 		FTimerHandle Again;
 		GetWorldTimerManager().SetTimer(Again, this, &ASenniteCharacter::ServerPickaxeTimeOut, FMath::Max(0.05f, OwnAttackSeconds), false);
-		bShotAuthorized = true;
+		ShotBullet = OwnBoltClass;
+		ShotGun = nullptr;
+		ShotAt = Now;
 		ClientGetBulletTransform();
 		return;
 	}
@@ -1639,7 +1647,10 @@ void ASenniteCharacter::ServerFireWeapon_Implementation() {
 	// a shot a pull keep the marks the rifle and the shotgun always had.
 	NetMulticastGunFired();
 	CurrentWeapon->CurrentBulletCount--;
-	bShotAuthorized = true;
+	ShotBullet = CurrentWeapon->BulletClass;
+	ShotGun = CurrentWeapon;
+	ShotAt = Now;
+	NextShotAt = Now + FMath::Max(0.02f, CurrentWeapon->FireSeconds);
 	State->EquippedWeaponsClips[CurrentWeaponType]--;
 	FTimerHandle Again;
 	if (CurrentWeapon->bHeldFires) {
@@ -1705,6 +1716,10 @@ void ASenniteCharacter::ServerReloadWeapons_Implementation() {
 	if (State->JustShotRifle || State->JustShotShotgun || State->JustReloadedRifle || State->JustReloadedShotgun) {
 		return; // reloading already, or the last shot is not over
 	}
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (Now < NextShotAt - ShotEarly || Now < ReloadOverAt) {
+		return; // the same, by the server's own clock
+	}
 	// as many rounds as the magazine lacks, or as many as the hero carries for this gun
 	int& Carried = State->EquippedWeaponsAmmunition[State->CurrentWeapon];
 	const int Loaded = FMath::Min(CurrentWeapon->MagazineSize - CurrentWeapon->CurrentBulletCount, Carried);
@@ -1715,6 +1730,7 @@ void ASenniteCharacter::ServerReloadWeapons_Implementation() {
 	CurrentWeapon->CurrentBulletCount += Loaded;
 	State->EquippedWeaponsClips[State->CurrentWeapon] += Loaded;
 	// the reload takes the gun's own time (ReloadSeconds); the marks are the rifle's and the shotgun's, as for a shot
+	ReloadOverAt = Now + FMath::Max(0.05f, CurrentWeapon->ReloadSeconds);
 	FTimerHandle Loading;
 	if (CurrentWeapon->bHeldFires) {
 		State->AimedIn ? NetMulticastPlayReloadRifleIronsightsAnimation() : NetMulticastPlayReloadRifleAnimation();
@@ -2104,16 +2120,20 @@ bool ASenniteCharacter::ServerShotgunReloadTimeOut_Validate() {
 void ASenniteCharacter::ServerSpawnProjectile_Implementation(FTransform SpawnTransform) { // to do add current weapon null check
 	// A projectile spawns only for a shot ServerFireWeapon accepted (weapon held,
 	// ammunition, cooldowns), once, and only from close to the shooter.
-	const bool bAuthorized = bShotAuthorized;
-	bShotAuthorized = false;
-	// a gun's own bullet, or with no gun in hand the bolt of the hero's own weapon
-	const TSubclassOf<AProjectileActor> BulletClass = CurrentWeapon != nullptr ? CurrentWeapon->BulletClass : OwnBoltClass;
-	if (bAuthorized && BulletClass != nullptr && FVector::Dist(SpawnTransform.GetLocation(), GetActorLocation()) <= MaxMuzzleDistance) {
+	// The bullet is the one the server let out, from the gun it let it out of, whatever is in hand by
+	// now: a shot let out of the hero's own weapon cannot leave as a sniper's round. It is taken once,
+	// and is gone if it was not taken soon.
+	const TSubclassOf<AProjectileActor> BulletClass = ShotBullet;
+	AWeaponActor* const FiredFrom = ShotGun.Get();
+	const bool bAuthorized = BulletClass != nullptr && GetWorld()->GetTimeSeconds() - ShotAt <= ShotKeptSeconds;
+	ShotBullet = nullptr;
+	ShotGun = nullptr;
+	if (bAuthorized && FVector::Dist(SpawnTransform.GetLocation(), GetActorLocation()) <= MaxMuzzleDistance) {
 		auto Bullet = Cast<AProjectileActor>(UGameplayStatics::BeginDeferredActorSpawnFromClass(this, BulletClass, SpawnTransform, ESpawnActorCollisionHandlingMethod::AlwaysSpawn));
 		if (Bullet != nullptr)
 		{
 			//spawnactor has no way of passing parameters so need to use begindeferredactorspawn and finishspawningactor
-			Bullet->Weapon = CurrentWeapon;
+			Bullet->Weapon = FiredFrom;
 			Bullet->WeaponHolder = this;
 			Bullet->SetOwner(this);
 
