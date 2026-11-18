@@ -22,6 +22,8 @@ import { accounts, GAME, type Accounts } from "../real-dsm/stage.js";
 import { holds } from "../real-dsm/wallets.js";
 
 const REPO = fileURLToPath(new URL("../../..", import.meta.url));
+/** SENNITE_TOUCH=1: the game is played by touch, as on a phone: every key the check presses is a tap on the button for it. */
+const TOUCH = process.env.SENNITE_TOUCH ? ["-ini:Input:[/Script/Engine.InputSettings]:bAlwaysShowTouchInterface=True"] : [];
 const CODE_FILE = join(REPO, "Saved", "BaseEditor", "connect-code.txt");
 
 let a: Accounts;
@@ -45,7 +47,7 @@ describe("the base editor in the game", () => {
     rmSync(CODE_FILE, { force: true });
 
     // The game, running its own check against this publisher's server.
-    const game = spawn(join(REPO, "Tools", "run_game_check.sh"), ["Sennite.BaseEditor", "PlanFundAndBuild", "BaseEditor", `-PublisherUrl=${url}`], { cwd: REPO });
+    const game = spawn(join(REPO, "Tools", "run_game_check.sh"), ["Sennite.BaseEditor", "PlanFundAndBuild", "BaseEditor", `-PublisherUrl=${url}`, ...TOUCH], { cwd: REPO });
     let output = "";
     game.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
     game.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));

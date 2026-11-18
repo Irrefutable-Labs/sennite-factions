@@ -58,9 +58,9 @@ USenniteTouchControls* ASennitePlayerController::GetTouchControls() {
 }
 
 bool ASennitePlayerController::InputTouch(const FTouchId TouchId, const ETouchType::Type Type, const FVector2D& TouchLocation, const float Force, const uint64 Timestamp) {
-	// the planning view of a base has its own controls, and draws no touch controls over it
+	// in play the stick and buttons; in the planning view of a base, the editor's buttons and the map
 	USenniteTouchControls* Controls = GetTouchControls();
-	if (Controls != nullptr && !ASenniteBaseEditor::IsPlanning(GetWorld())) {
+	if (Controls != nullptr) {
 		return Controls->Touch(TouchId, Type, TouchLocation);
 	}
 	return Super::InputTouch(TouchId, Type, TouchLocation, Force, Timestamp);
