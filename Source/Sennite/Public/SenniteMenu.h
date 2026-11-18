@@ -4,7 +4,8 @@
 // lobby others on the network can join; JOIN takes an address, typed on the screen's own keypad or
 // the keyboard; QUIT.
 //
-// HEROES: the hero turns on the stage. The arrows go through the list; CHOOSE makes the hero the
+// HEROES: the hero turns on the stage, its name and what is done with it to the left, every hero on a
+// tile along the bottom. A tile shows that hero and the arrows go through the list; CHOOSE makes the hero the
 // player's, kept on this machine between runs (USenniteProfile) and sent to every server they join.
 // A hero that is not free is bought with D-bucks in the publisher's shop (BUY) and can be chosen once
 // the player's wallet proves it owns it.

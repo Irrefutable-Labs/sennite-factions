@@ -192,20 +192,17 @@ namespace
 			}
 			Test->TestEqual(TEXT("Tapping a bought hero's button does not make it the player's"), USenniteProfile::Get().Hero == Locked, false);
 			Test->TestTrue(TEXT("The character select stays open"), Menu->Page == ESenniteMenuPage::Heroes);
+			// every hero has a tile along the bottom: a tap on the free hero's brings it up at once
+			Test->TestTrue(TEXT("The free hero has a tile"), MenuCheck::Tap(Menu, FName(*FString::Printf(TEXT("hero:%s"), *Free.ToString()))));
 			Enter(EPhase::BackToWraith);
 			return false;
 
 		case EPhase::BackToWraith:
-			if (Heroes[Menu->Browse].Id != Free) {
-				if (Elapsed() > 0.3) {
-					MenuCheck::Tap(Menu, TEXT("prev"));
-					Enter(EPhase::BackToWraith);
-				}
+			if (Elapsed() < 0.5 || (Heroes[Menu->Browse].Id != Free && Elapsed() < 3.0)) {
 				return false;
 			}
-			if (Elapsed() < 0.5) {
-				return false;
-			}
+			Test->TestEqual(TEXT("A tap on a hero's tile shows that hero"), Heroes[Menu->Browse].Id, Free);
+			Test->TestEqual(TEXT("It stands on the stage as itself"), StageMesh(World), USenniteHeroes::FindOrDefault(Free).Mesh.ToString());
 			Test->TestTrue(TEXT("The free hero can be chosen"), MenuCheck::Tap(Menu, TEXT("choose")));
 			Enter(EPhase::Chosen);
 			return false;
