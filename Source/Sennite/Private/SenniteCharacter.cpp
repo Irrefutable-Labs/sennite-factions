@@ -12,6 +12,7 @@
 #include "SenniteBuildings.h"
 #include "SenniteHealing.h"
 #include "SenniteCrate.h"
+#include "SenniteHeroMesh.h"
 #include "SenniteGameInstance.h"
 #include "SenniteHeroes.h"
 #include "SenniteMatch.h"
@@ -38,7 +39,9 @@ DEFINE_LOG_CATEGORY(LogSenniteCharacter);
 //////////////////////////////////////////////////////////////////////////
 // ASenniteCharacter
 
-ASenniteCharacter::ASenniteCharacter()
+ASenniteCharacter::ASenniteCharacter(const FObjectInitializer& ObjectInitializer)
+	// the hero's body holds a gun in both hands (USenniteHeroMesh)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<USenniteHeroMesh>(ACharacter::MeshComponentName))
 {
 	bReplicates = true;
 	// Set size for collision capsule
@@ -192,14 +195,35 @@ void ASenniteCharacter::BuildPlacement(const FString& PieceKind, FVector& OutLoc
 	OutRotation.Normalize();
 }
 
+float ASenniteCharacter::GunSize() const
+{
+	// the arm of the hero's own skeleton as it was made, shoulder to wrist, against the arm the guns are sized for
+	const USkeletalMesh* Body = GetMesh() != nullptr ? GetMesh()->GetSkeletalMeshAsset() : nullptr;
+	if (Body == nullptr || GunArm <= 0.0f) {
+		return 1.0f;
+	}
+	const FReferenceSkeleton& Bones = Body->GetRefSkeleton();
+	const int32 Lower = Bones.FindBoneIndex(TEXT("lowerarm_r"));
+	const int32 Hand = Bones.FindBoneIndex(TEXT("hand_r"));
+	if (Lower == INDEX_NONE || Hand == INDEX_NONE) {
+		return 1.0f;
+	}
+	const TArray<FTransform>& Made = Bones.GetRefBonePose();
+	const float Arm = Made[Lower].GetLocation().Size() + Made[Hand].GetLocation().Size();
+	return FMath::Clamp(Arm / GunArm, GunSizeLeast, GunSizeMost);
+}
+
 void ASenniteCharacter::AttachWeaponToHand(AWeaponActor* Weapon)
 {
 	if (Weapon == nullptr || Weapon->WeaponMesh == nullptr) {
 		return;
 	}
 	Weapon->WeaponMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, HeroWeaponBone);
+	// a big hero holds a big gun: the gun is as large as the hero's arm is long, within limits
+	const float Size = GunSize();
+	Weapon->WeaponMesh->SetRelativeScale3D(FVector(Size));
 	// the hero's hand decides how the weapon is turned; the weapon says which point of it the palm closes on
-	Weapon->WeaponMesh->SetRelativeLocationAndRotation(HeroPalmOffset - HeroGripRotation.RotateVector(Weapon->GripPoint), HeroGripRotation);
+	Weapon->WeaponMesh->SetRelativeLocationAndRotation(HeroPalmOffset - HeroGripRotation.RotateVector(Weapon->GripPoint * Size), HeroGripRotation);
 }
 
 void ASenniteCharacter::PreInitializeComponents()
@@ -241,7 +265,6 @@ void ASenniteCharacter::ApplyHero()
 	DressedHero = Hero.Id;
 	HeroMesh = Hero.Mesh;
 	HeroAnimClass = Hero.AnimClass;
-	HeroFireMontage = Hero.FireMontage;
 	HeroWeaponBone = Hero.WeaponBone;
 	HeroGripRotation = Hero.GripRotation;
 	HeroPalmOffset = Hero.PalmOffset;
@@ -265,18 +288,6 @@ void ASenniteCharacter::ApplyHero()
 	bBuiltInWeaponHidden = false;
 	// the feet on the floor of the capsule, the face to the capsule's forward
 	Body->SetRelativeLocation(FVector(0.0f, 0.0f, -Hero.MeshDrop));
-
-	// every shot plays the hero's own firing animation, where no other was given
-	UAnimMontage* Fire = HeroFireMontage.IsNull() ? nullptr : Cast<UAnimMontage>(HeroFireMontage.TryLoad());
-	if (!HeroFireMontage.IsNull() && Fire == nullptr) {
-		UE_LOG(LogSenniteCharacter, Error, TEXT("Hero firing animation '%s' did not load"), *HeroFireMontage.ToString());
-	}
-	for (UAnimMontage** Slot : { &RifleHipShootingAnimation, &RifleIronsightsShootingAnimation, &ShotgunHipShootingAnimation, &ShotgunIronsightsShootingAnimation }) {
-		if (*Slot == nullptr || *Slot == DressedFire) {
-			*Slot = Fire;
-		}
-	}
-	DressedFire = Fire;
 
 	// what is in hand is held anew, in this hero's hand
 	if (CurrentWeapon != nullptr) {
@@ -501,6 +512,22 @@ void ASenniteCharacter::Tick(float DeltaTime) {
 	// The server decides; InStorm is replicated.
 	if (HasAuthority() && CurrentStorm != nullptr) {
 		InStorm = FVector::Dist2D(GetActorLocation(), CurrentStorm->GetActorLocation()) > CurrentStorm->GetRadius();
+	}
+	// With a gun in hand the hero faces where the player aims, and steps sideways and back to move
+	// that way; with none it turns to face the way it walks. On the server and the player's own machine,
+	// which move the hero; everyone else is sent which way it faces.
+	{
+		const bool bFaceAim = CurrentWeapon != nullptr && CurrentWeapon->WeaponType >= 1;
+		UCharacterMovementComponent* Moves = GetCharacterMovement();
+		if (Moves != nullptr && Moves->bUseControllerDesiredRotation != bFaceAim) {
+			Moves->bUseControllerDesiredRotation = bFaceAim;
+			Moves->bOrientRotationToMovement = !bFaceAim;
+		}
+		// and the player's camera looks over the hero's shoulder, so the gun and its bolts are seen past
+		// the hero, not hidden behind it
+		if (IsLocallyControlled() && CameraBoom != nullptr) {
+			CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, bFaceAim ? ShoulderView : FVector::ZeroVector, DeltaTime, 8.0f);
+		}
 	}
 	const bool bHideBuiltIn = CurrentWeapon != nullptr;
 	if (bHideBuiltIn != bBuiltInWeaponHidden && GetMesh() != nullptr) {
@@ -2350,24 +2377,32 @@ void ASenniteCharacter::ClientGetBulletTransform_Implementation() {
 	}
 }
 
+void ASenniteCharacter::KickGun() {
+	// A shot shows as the gun's kick, on every machine that draws this hero: the heroes' own firing
+	// animations are for their own weapons (a cast, a punch, a swing), not for a gun held in both hands.
+	if (USenniteHeroMesh* Body = Cast<USenniteHeroMesh>(GetMesh())) {
+		Body->Kick();
+	}
+}
+
 void ASenniteCharacter::NetMulticastPlayPickaxeSwingAnimation_Implementation() {
 	PlayAnimMontage(PickaxeSwingingAnimation, 1.f, NAME_None);
 }
 
 void ASenniteCharacter::NetMulticastPlayShootRifleAnimation_Implementation() {
-	PlayAnimMontage(RifleHipShootingAnimation);
+	KickGun();
 }
 
 void ASenniteCharacter::NetMulticastPlayShootShotgunAnimation_Implementation() {
-	PlayAnimMontage(ShotgunHipShootingAnimation);
+	KickGun();
 }
 
 void ASenniteCharacter::NetMulticastPlayShootRifleIronsightsAnimation_Implementation() {
-	PlayAnimMontage(RifleIronsightsShootingAnimation);
+	KickGun();
 }
 
 void ASenniteCharacter::NetMulticastPlayShootShotgunIronsightsAnimation_Implementation() {
-	PlayAnimMontage(ShotgunIronsightsShootingAnimation);
+	KickGun();
 }
 
 void ASenniteCharacter::NetMulticastPlayUseHealingItemAnimation_Implementation() {
