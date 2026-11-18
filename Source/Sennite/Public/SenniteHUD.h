@@ -61,6 +61,9 @@ public:
 	/** A shot of this player's took Damage off a built piece: the number shows by the aim for a moment. */
 	void DrawPieceHit(float Damage);
 
+	/** A crate this player opened gave this: it is said under the aim for a few seconds. */
+	void DrawCrateGave(const FString& Gave);
+
 	void DrawGameUI();
 
 	void DrawBloodSplash();
@@ -94,6 +97,10 @@ private:
 	double HurtUntil = 0.0;
 	double PieceHitUntil = 0.0;
 	float PieceHitDamage = 0.0f;
+
+	/** What the crate this player just opened gave, and until when it is said. */
+	double CrateGaveUntil = 0.0;
+	FString CrateGave;
 
 	UPROPERTY(EditAnywhere, Category = "Health")
 	TSubclassOf<UUserWidget> HealthWidgetClass;

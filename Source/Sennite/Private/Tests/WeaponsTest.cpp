@@ -1,7 +1,8 @@
-// Weapons check. Run in the game on the test range, which has a rifle and a shotgun lying to the
-// right of the start: the hero walks over both and picks them up, holds each one fixed to her weapon
-// bone with her own built-in weapon hidden, switches between them with the number keys, and a pull
-// of the trigger plays her firing animation, spends a round and sends a bullet out.
+// Weapons check. Run in the game on the test range, which has a weapon crate to the right of the
+// start: the hero walks to it and opens it, has the rifle and the shotgun it held with the rifle in
+// her hand at once and nothing lying about, holds each one fixed to her weapon bone with her own
+// built-in weapon hidden, switches between them with the number keys, and a pull of the trigger
+// plays her firing animation, spends a round and sends a bullet out.
 //
 // Tools/check_weapons.sh runs this and reads the result.
 
@@ -39,7 +40,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, WalkOverPickups, HoldShotgun, HoldRifle, Fire, HoldFire, Done };
+		enum class EPhase { WaitForPawn, OpenCrate, FromCrate, HoldShotgun, HoldRifle, Fire, HoldFire, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -70,7 +71,7 @@ namespace
 		double PhaseStart = 0.0;
 		TWeakObjectPtr<UWorld> SpawnWorld;
 		FDelegateHandle SpawnHandle;
-		int32 PickupsAtStart = 0;
+		GameCheck::FCrateRun Crate;
 		int32 BulletsSpawned = 0;
 		int32 RoundsBefore = 0;
 		int32 RoundsWhenLetGo = 0;
@@ -101,11 +102,8 @@ namespace
 				Test->TestTrue(TEXT("With no game weapon, the hero's own weapon shows"), !Hero->GetMesh()->IsBoneHiddenByName(Bone));
 			}
 			Test->TestTrue(TEXT("The hero has a built-in weapon to hide"), Hero->HeroBuiltInWeaponBones.Num() > 0);
-			for (TActorIterator<AWeaponActor> It(World); It; ++It) {
-				PickupsAtStart += It->Holder == nullptr ? 1 : 0;
-			}
-			GameCheck::Key(Controller, EKeys::D, IE_Pressed);
-			Enter(EPhase::WalkOverPickups, World);
+			Test->TestEqual(TEXT("No weapon or healing item lies about on the range: they are in the crate"), GameCheck::LyingAbout(World), 0);
+			Enter(EPhase::OpenCrate, World);
 			return false;
 		}
 		if (Hero == nullptr || State == nullptr) {
@@ -114,14 +112,28 @@ namespace
 		USkeletalMeshComponent* Mesh = Hero->GetMesh();
 
 		switch (Phase) {
-		case EPhase::WalkOverPickups:
-			// D walks her to the right, over the rifle and then the shotgun
-			if (!(State->EquippedWeapons.Contains(1) && State->EquippedWeapons.Contains(2)) && Elapsed(World) < 6.0) {
+		case EPhase::OpenCrate:
+			// D walks her to the right, to the crate; E opens it
+			if (!Crate.Step(World, Controller, Hero, EKeys::D)) {
 				return false;
 			}
-			GameCheck::Key(Controller, EKeys::D, IE_Released);
-			Test->TestTrue(TEXT("Walking over the rifle picks it up"), State->EquippedWeapons.Contains(1));
-			Test->TestTrue(TEXT("Walking over the shotgun picks it up"), State->EquippedWeapons.Contains(2));
+			if (!Crate.Failure.IsEmpty()) {
+				return Fail(Crate.Failure);
+			}
+			Test->TestTrue(TEXT("Opening the crate gives her the rifle"), State->EquippedWeapons.Contains(1));
+			Test->TestTrue(TEXT("Opening the crate gives her the shotgun"), State->EquippedWeapons.Contains(2));
+			Enter(EPhase::FromCrate, World);
+			return false;
+
+		case EPhase::FromCrate:
+			if (Elapsed(World) < 1.0) {
+				return false;
+			}
+			// the first weapon the crate gave is the one in hand, and nothing was laid on the ground
+			CheckHeld(Hero, ASenniteRifle::StaticClass(), TEXT("rifle from the crate"));
+			Test->TestEqual(TEXT("The opened crate laid nothing on the ground"), GameCheck::LyingAbout(World), 0);
+			GameCheck::Key(Controller, EKeys::Three, IE_Pressed);
+			GameCheck::Key(Controller, EKeys::Three, IE_Released);
 			Enter(EPhase::HoldShotgun, World);
 			return false;
 
@@ -131,16 +143,11 @@ namespace
 			}
 			if (!bShotTaken) {
 				bShotTaken = true;
-				// the shotgun was picked up last, so it is the one in hand
+				// key 3 brought the shotgun to hand
 				CheckHeld(Hero, ASenniteShotgun::StaticClass(), TEXT("shotgun"));
 				for (const FName& Bone : Hero->HeroBuiltInWeaponBones) {
 					Test->TestTrue(TEXT("Holding a game weapon, the hero's own weapon is hidden"), Mesh->IsBoneHiddenByName(Bone));
 				}
-				int32 PickupsLeft = 0;
-				for (TActorIterator<AWeaponActor> It(World); It; ++It) {
-					PickupsLeft += It->Holder == nullptr ? 1 : 0;
-				}
-				Test->TestEqual(TEXT("The two pickups she walked over are gone from the ground"), PickupsLeft, PickupsAtStart - 2);
 				GameCheck::Shot(TEXT("Weapons"), TEXT("shotgun.png"));
 				return false;
 			}
@@ -236,7 +243,7 @@ namespace
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSenniteWeaponsTest, "Sennite.Weapons.PickUpHoldAndFire",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSenniteWeaponsTest, "Sennite.Weapons.OpenHoldAndFire",
 	EAutomationTestFlags::ClientContext | EAutomationTestFlags::ProductFilter)
 
 bool FSenniteWeaponsTest::RunTest(const FString& Parameters)

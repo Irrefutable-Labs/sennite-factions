@@ -169,17 +169,15 @@ for key, value in (("override_auto_exposure_method", True), ("auto_exposure_meth
     s.set_editor_property(key, value)
 ppv.set_editor_property("settings", s)
 
-# weapons to pick up, to the right of the start, lying at knee height
-spawn(unreal.SenniteRifle, "rifle_pickup", unreal.Vector(0, 250, 60), unreal.Rotator(0, 0, 0), "pickups")
-spawn(unreal.SenniteShotgun, "shotgun_pickup", unreal.Vector(0, 450, 60), unreal.Rotator(0, 0, 0), "pickups")
-spawn(unreal.SenniteRifle, "rifle_pickup_2", unreal.Vector(0, -2 * CELL - 250, 60), unreal.Rotator(0, 0, 0), "pickups")   # to the left of the second start
+# Weapons, bandages and potions are in crates, as on an arena: nothing lies about. A crate stands to
+# the right of the first start and one to the left of the second, each just out of reach of its start
+# (a crate opens from 400 away) and beside the line a hero walks along, not on it.
+spawn(unreal.SenniteCrate, "crate", unreal.Vector(200, 400, 0), unreal.Rotator(0, 0, -90), "crates")   # roll, pitch, yaw: its front to the start
+spawn(unreal.SenniteCrate, "crate_2", unreal.Vector(200, -2 * CELL - 400, 0), unreal.Rotator(0, 0, 90), "crates")
 
-# healing items to pick up, behind the start
-spawn(unreal.SenniteBandage, "bandage_pickup", unreal.Vector(-300, 0, 40), folder="pickups")
-spawn(unreal.SennitePotion, "potion_pickup", unreal.Vector(-500, 0, 40), folder="pickups")
-
-# the storm: its safe circle is centred ahead of the start, so the start is well inside it and its
-# wall crosses the range 2,500 behind the start
+# The storm: its safe circle is centred ahead of the start, so the start is well inside it and its
+# wall crosses the range 2,500 behind the start. The game has no storm for now (bEnabled is off in
+# DefaultGame.ini), so this one is not seen or felt; the storm and healing checks turn it on.
 storm = spawn(unreal.StormActor, "storm", unreal.Vector(2500, 0, 0), folder="range")
 storm.set_editor_property("start_radius", 5000.0)
 

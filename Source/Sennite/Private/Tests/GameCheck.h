@@ -13,9 +13,13 @@
 #include "InputKeyEventArgs.h"
 #include "Misc/App.h"
 #include "Misc/Paths.h"
+#include "HealingActor.h"
+#include "SenniteCharacter.h"
+#include "SenniteCrate.h"
 #include "SennitePlayerController.h"
 #include "SenniteTouch.h"
 #include "UnrealClient.h"
+#include "WeaponActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
@@ -150,6 +154,75 @@ namespace GameCheck
 		Mouse(Controller, EKeys::MouseX, FMath::Clamp(Yaw / 0.25, -40.0, 40.0));
 		Mouse(Controller, EKeys::MouseY, FMath::Clamp(Pitch / 0.25, -40.0, 40.0));
 		return false;
+	}
+
+	/**
+	 * The hero goes to the crate beside its start on the test range and opens it, with the player's
+	 * real keys: the walk key held (D for the crate to the right of the first start, A for the one to
+	 * the left of the second) until the hero is beside a closed crate, then E.
+	 */
+	struct FCrateRun
+	{
+		int32 Stage = 0;
+		double Since = 0.0;
+		/** Why it could not be done; empty while it can. */
+		FString Failure;
+
+		/** One step. True once the crate is open, or once it failed. */
+		bool Step(UWorld* World, APlayerController* Controller, const ASenniteCharacter* Hero, const FKey& WalkKey)
+		{
+			const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
+			const double Now = World->GetTimeSeconds();
+			const auto Next = [this, Now]() { ++Stage; Since = Now; return false; };
+			switch (Stage) {
+			case 0:
+				Key(Controller, WalkKey, IE_Pressed);
+				return Next();
+			case 1:
+				// well inside the crate's reach, so it is in reach on the server too
+				if (ASenniteCrate::Nearest(World, Hero->GetActorLocation(), Rules->Reach + Rules->Across - 80.0f, true) == nullptr) {
+					if (Now - Since > 8.0) {
+						Key(Controller, WalkKey, IE_Released);
+						Failure = TEXT("The hero did not get beside a closed crate in 8 s");
+						return true;
+					}
+					return false;
+				}
+				Key(Controller, WalkKey, IE_Released);
+				return Next();
+			case 2:
+				if (Now - Since < 0.4) {
+					return false;
+				}
+				Key(Controller, EKeys::E, IE_Pressed);
+				Key(Controller, EKeys::E, IE_Released);
+				return Next();
+			default: {
+				const ASenniteCrate* Beside = ASenniteCrate::Nearest(World, Hero->GetActorLocation(), Rules->Reach + Rules->Across, false);
+				if (Beside != nullptr && Beside->bOpen) {
+					return true;
+				}
+				if (Now - Since > 5.0) {
+					Failure = TEXT("The crate did not open at the key");
+					return true;
+				}
+				return false;
+			}
+			}
+		}
+	};
+
+	/** How many weapons and healing items are in the world in nobody's hand. Crates hold them, so none should be. */
+	inline int32 LyingAbout(UWorld* World)
+	{
+		int32 Lying = 0;
+		for (TActorIterator<AWeaponActor> It(World); It; ++It) {
+			Lying += It->Holder == nullptr ? 1 : 0;
+		}
+		for (TActorIterator<AHealingActor> It(World); It; ++It) {
+			Lying += It->Holder == nullptr ? 1 : 0;
+		}
+		return Lying;
 	}
 
 	/** Whether the map has a mesh drawn with a material marked as sky: a phone draws the sky's atmosphere only on one. */

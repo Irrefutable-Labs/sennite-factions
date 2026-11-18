@@ -28,13 +28,7 @@ ASennitePlayerController::ASennitePlayerController() {
 void ASennitePlayerController::BeginPlay() {
 	Super::BeginPlay();
 	if (HasAuthority()) {
-		TArray<AActor*> StormActors;
-		UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStormActor::StaticClass(), StormActors);
-		if (StormActors.Num() > 0) {
-			if (StormActors[0] != nullptr) {
-				CurrentStorm = Cast<AStormActor>(StormActors[0]);
-			}
-		}
+		CurrentStorm = AStormActor::Find(GetWorld());
 	}
 }
 

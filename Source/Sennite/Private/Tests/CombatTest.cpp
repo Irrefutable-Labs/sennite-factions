@@ -1,14 +1,15 @@
 // Combat check: two copies of the game on one machine, one hosting the test range and one joining.
-// Each picks up the rifle by its start with the real keys and aims with the mouse.
+// Each opens the crate by its start with the real keys, has its rifle, and aims with the mouse.
 //
 // The joining player (Sennite.Combat.Joiner) shoots the host twice: each shot spends a round, takes
 // 25 from the host's health and shows a hit marker. Then the host shoots back: the joining player's
 // health falls 25 a shot with a red flash each time, and at nothing their hero is gone and they are
 // a spectator, with the HUD saying so and one player left.
 //
-// The host (Sennite.Combat.Host) is hurt twice, for 25 each and no more, then picks up its rifle and
-// shoots the joining player until they fall: four shots, one kill on the host's count, the joining
-// player a spectator on the server, and one hero left.
+// The host (Sennite.Combat.Host) is hurt twice, for 25 each and no more, then takes the rifle from
+// its crate and shoots the joining player until they fall: four shots, one kill on the host's count,
+// the joining player a spectator on the server, one hero left, and the fallen player's weapons in a
+// crate left where they fell, with nothing lying about.
 //
 // Tools/check_combat.sh starts both and reads both results.
 
@@ -97,6 +98,7 @@ namespace
 		double PhaseStart = 0.0;
 		int32 Step = 0;
 		int32 Shots = 0;
+		GameCheck::FCrateRun Crate;
 		bool bSawHitMarker = false;
 		bool bSawHurt = false;
 		TArray<float> HealthSeen;
@@ -136,8 +138,7 @@ namespace
 			if (Other == nullptr || Elapsed(World) < 1.5) {
 				return Elapsed(World) > 30.0 ? Fail(TEXT("The joining player never saw the host's hero")) : false;
 			}
-			// A walks to the left, over the rifle by the second start
-			GameCheck::Key(Controller, EKeys::A, IE_Pressed);
+			// A walks to the left, to the crate by the second start
 			Enter(EPhase::GetRifle, World);
 			return false;
 
@@ -145,11 +146,17 @@ namespace
 			if (Hero == nullptr) {
 				return Fail(TEXT("The joining player's hero went away before they had a rifle"));
 			}
-			if (!State->EquippedWeapons.Contains(1) && Elapsed(World) < 8.0) {
+			if (!Crate.Step(World, Controller, Hero, EKeys::A)) {
 				return false;
 			}
-			GameCheck::Key(Controller, EKeys::A, IE_Released);
-			Test->TestTrue(TEXT("The joining player picks up the rifle by walking over it"), State->EquippedWeapons.Contains(1));
+			if (!Crate.Failure.IsEmpty()) {
+				return Fail(Crate.Failure);
+			}
+			// what the crate gave arrives from the server
+			if (!State->EquippedWeapons.Contains(1) && Elapsed(World) < 12.0) {
+				return false;
+			}
+			Test->TestTrue(TEXT("The crate the joining player opened gave them the rifle"), State->EquippedWeapons.Contains(1));
 			Enter(EPhase::Aim, World);
 			return false;
 
@@ -286,17 +293,18 @@ namespace
 			Test->TestTrue(TEXT("The host's HUD flashed red when hurt"), bSawHurt);
 			Test->TestTrue(TEXT("The host's HUD shows the health left"), Hud->LastDrawn.Contains(TEXT("health=50")));
 			UE_LOG(LogCombatCheck, Display, TEXT("GAMECHECK host: own health seen %s, hurt flash %d"), *HealthTrail(), bSawHurt ? 1 : 0);
-			// D walks to the right, over the rifle by the first start
-			GameCheck::Key(Controller, EKeys::D, IE_Pressed);
+			// D walks to the right, to the crate by the first start
 			Enter(EPhase::GetRifle, World);
 			return false;
 
 		case EPhase::GetRifle:
-			if (!State->EquippedWeapons.Contains(1) && Elapsed(World) < 8.0) {
+			if (!Crate.Step(World, Controller, Hero, EKeys::D)) {
 				return false;
 			}
-			GameCheck::Key(Controller, EKeys::D, IE_Released);
-			Test->TestTrue(TEXT("The host picks up the rifle by walking over it"), State->EquippedWeapons.Contains(1));
+			if (!Crate.Failure.IsEmpty()) {
+				return Fail(Crate.Failure);
+			}
+			Test->TestTrue(TEXT("The crate the host opened gave it the rifle"), State->EquippedWeapons.Contains(1));
 			bSawHitMarker = false;
 			Enter(EPhase::KillAim, World);
 			return false;
@@ -351,12 +359,21 @@ namespace
 					bOutOfTheWay &= Body->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Ignore && Body->GetCollisionResponseToChannel(ECC_WorldDynamic) == ECR_Ignore
 						&& Body->GetCollisionResponseToChannel(ECC_Visibility) == ECR_Ignore && !Body->GetGenerateOverlapEvents();
 				}
-				// each player took one of the range's two rifles; the fallen one's lies where they fell
-				int32 RiflesLying = 0;
-				for (TActorIterator<AWeaponActor> It(World); It; ++It) {
-					RiflesLying += It->Holder == nullptr && It->WeaponType == 1 ? 1 : 0;
+				// the fallen player's weapons are in a crate left where they fell; nothing lies about
+				int32 Left = 0;
+				bool bHoldsTheirs = false, bWalkedThrough = false;
+				for (TActorIterator<ASenniteCrate> It(World); It; ++It) {
+					if (It->bLeft) {
+						++Left;
+						bHoldsTheirs = It->bRifle && It->bShotgun && !It->bOpen;
+						const UPrimitiveComponent* Body = Cast<UPrimitiveComponent>(It->GetComponentByClass(UStaticMeshComponent::StaticClass()));
+						bWalkedThrough = Body != nullptr && Body->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Overlap;
+					}
 				}
-				Test->TestEqual(TEXT("The fallen player's rifle lies where they fell"), RiflesLying, 1);
+				Test->TestEqual(TEXT("The fallen player left one crate where they fell"), Left, 1);
+				Test->TestTrue(TEXT("It holds the rifle and the shotgun they had, closed"), bHoldsTheirs);
+				Test->TestTrue(TEXT("Heroes walk through it"), bWalkedThrough);
+				Test->TestEqual(TEXT("No weapon lies about where they fell"), GameCheck::LyingAbout(World), 0);
 				Test->TestEqual(TEXT("The fallen player has one spectator on the server"), Watchers, 1);
 				Test->TestTrue(TEXT("The spectator is in nobody's way: players, bullets and aim pass through it"), bOutOfTheWay);
 				Test->TestTrue(TEXT("The host's HUD showed a hit marker"), bSawHitMarker);

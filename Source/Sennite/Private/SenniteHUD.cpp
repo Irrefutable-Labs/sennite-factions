@@ -277,6 +277,12 @@ void ASenniteHUD::DrawMatch()
 			Label(TEXT("crate"), TEXT("E   OPEN THE CRATE"), W * 0.5f - 92.0f * S, H * 0.62f + 8.0f * S, 14, White);
 		}
 	}
+	// just opened a crate: what it gave
+	if (GetWorld()->GetTimeSeconds() < CrateGaveUntil && !CrateGave.IsEmpty()) {
+		const float GaveW = SenniteUi::Measure(CrateGave, 12, S).X + 36.0f * S;
+		HudPlate(Canvas, W * 0.5f - GaveW * 0.5f, H * 0.62f + 42.0f * S, GaveW, 30.0f * S);
+		Label(TEXT("crategave"), CrateGave, W * 0.5f - GaveW * 0.5f + 18.0f * S, H * 0.62f + 49.0f * S, 12, White);
+	}
 	const ASenniteMatch* Match = ASenniteMatch::Find(GetWorld());
 	if (Match == nullptr) {
 		LastDrawn = Drawing;
@@ -380,6 +386,12 @@ void ASenniteHUD::DrawPieceHit(float Damage) {
 	// drawn on the canvas for a little under half a second (DrawStatus)
 	PieceHitUntil = GetWorld()->GetTimeSeconds() + 0.45;
 	PieceHitDamage = Damage;
+}
+
+void ASenniteHUD::DrawCrateGave(const FString& Gave) {
+	// said where the crate's prompt was, for three seconds (DrawMatch)
+	CrateGaveUntil = GetWorld()->GetTimeSeconds() + 3.0;
+	CrateGave = Gave;
 }
 
 void ASenniteHUD::DrawBloodSplash() {

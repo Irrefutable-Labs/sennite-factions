@@ -2,6 +2,7 @@
 #include "SenniteCharacter.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
@@ -56,9 +57,24 @@ void AStormActor::PreInitializeComponents()
 	SetActorScale3D(SizeScale);
 }
 
+AStormActor* AStormActor::Find(const UWorld* World)
+{
+	if (World == nullptr || !GetDefault<AStormActor>()->bEnabled) {
+		return nullptr;
+	}
+	TActorIterator<AStormActor> First(World);
+	return First ? *First : nullptr;
+}
+
 void AStormActor::BeginPlay()
 {
 	Super::BeginPlay();
+	if (!GetDefault<AStormActor>()->bEnabled) {
+		// the game has no storm: one placed in a map is not seen, on any machine
+		SetActorHiddenInGame(true);
+		SetActorTickEnabled(false);
+		return;
+	}
 	if (HasAuthority() && bRandomCentre) {
 		SetActorLocation(FVector(FMath::FRandRange(RandomCentre.Min.X, RandomCentre.Max.X), FMath::FRandRange(RandomCentre.Min.Y, RandomCentre.Max.Y), GetActorLocation().Z));
 	}

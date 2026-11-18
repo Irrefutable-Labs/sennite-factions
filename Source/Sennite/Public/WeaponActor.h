@@ -27,7 +27,7 @@ public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
-	/** The weapon's body: what a player walks over to pick it up, and what sits in the holder's hand. */
+	/** The weapon's body: what sits in the holder's hand. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh")
 	UStaticMeshComponent* WeaponMesh;
 

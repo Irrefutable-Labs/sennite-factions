@@ -234,6 +234,13 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientEditRefused(ABuildingActor* Piece);
 
+	/**
+	 * What a crate held goes to the hero, on the server: each weapon it does not have yet, with a full
+	 * magazine, the rounds, the bandages and the potions. The first new weapon comes to hand. False,
+	 * and nothing is given, while the hero is busy (building, firing, reloading, healing).
+	 */
+	bool TakeFromCrate(bool bRifle, bool bShotgun, int32 Rounds, int32 Shells, int32 Bandages, int32 Potions);
+
 	/** A shot of this player's took damage off a built piece. */
 	UFUNCTION(Client, Reliable)
 	void ClientDrawPieceHit(float Damage);
@@ -436,6 +443,10 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void ServerOpenCrate();
 
+	/** What a crate this player opened gave, for the HUD to say. */
+	UFUNCTION(Client, Reliable)
+	void ClientCrateGave(bool bRifle, bool bShotgun, int32 Rounds, int32 Shells, int32 Bandages, int32 Potions);
+
 
 	/*UFUNCTION(Server, WithValidation)
 	void ServerSetAnimInstance(UThirdPersonAnimInstance* AnimInstance);*/
@@ -479,8 +490,6 @@ public:
 	// Tick function is called every frame
 	virtual void Tick(float DeltaTime) override;
 
-	/** How long since the hero was last offered what it stands on. On the server. */
-	float SincePickupOffer = 0.0f;
 	// Override playanimmontage to use pawn mesh
 	virtual float PlayAnimMontage(class UAnimMontage* AnimMontage, float InPlayRate = 1.f, FName StartSectionName = NAME_None) override;
 

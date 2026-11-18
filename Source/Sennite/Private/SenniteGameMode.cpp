@@ -122,13 +122,7 @@ void ASenniteGameMode::GenericPlayerInitialization(AController* NewPlayer) {
 	Super::GenericPlayerInitialization(NewPlayer);
 	if (!GameStarted && GetNumPlayers() >= PlayersToStartStorm) {
 		GameStarted = true;
-		TArray<AActor*> StormActors;
-		UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStormActor::StaticClass(), StormActors);
-		if (StormActors.Num() > 0) {
-			if (StormActors[0] != nullptr) {
-				CurrentStorm = Cast<AStormActor>(StormActors[0]);
-			}
-		}
+		CurrentStorm = AStormActor::Find(GetWorld());
 		FTimerHandle StormSetupTimerHandle;
 		GetWorldTimerManager().SetTimer(StormSetupTimerHandle, this, &ASenniteGameMode::GameModeStartStorm, FMath::Max(0.1f, StormStartDelay), false);
 		FTimerHandle InactivityCheckTimerHandle;

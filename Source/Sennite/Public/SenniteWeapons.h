@@ -1,4 +1,4 @@
-// The weapons a player can pick up, and the bullets they fire.
+// The weapons a player takes from a crate, and the bullets they fire.
 
 #pragma once
 

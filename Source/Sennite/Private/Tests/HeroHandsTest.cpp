@@ -1,5 +1,5 @@
-// Hero hands check. Run in the game on the test range: the hero walks over the rifle and the shotgun,
-// takes the rifle in hand, and then becomes each hero of the list in turn, as the server makes a
+// Hero hands check. Run in the game on the test range: the hero opens the crate by the start, has
+// its rifle in hand, and then becomes each hero of the list in turn, as the server makes a
 // player the hero they chose (ASennitePlayerState::SetHero; this game is its own server). As each hero:
 // - the rifle is fixed to the hero's weapon bone, in the right hand, pointing ahead of them;
 // - the hero's own built-in weapon, if it has one, is hidden;
@@ -42,7 +42,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, WalkOverPickups, TakeRifle, Become, Measure, Shot, Fire, Done };
+		enum class EPhase { WaitForPawn, OpenCrate, TakeRifle, Become, Measure, Shot, Fire, Done };
 
 		/** Where the palm is, part way to the root of the middle finger, or of the index finger on a hand that has no middle finger; zero on a hand with neither. */
 		static FVector PalmOf(USkeletalMeshComponent* Mesh, FName HandBone, const TCHAR* Side)
@@ -67,6 +67,7 @@ namespace
 		double PhaseStart = 0.0;
 		int32 HeroIndex = 0;
 		int32 RoundsBefore = 0;
+		GameCheck::FCrateRun Crate;
 		bool bSawFire = false;
 	};
 
@@ -84,8 +85,7 @@ namespace
 			}
 			Test->TestTrue(TEXT("The list has heroes"), Heroes.Num() > 0);
 			Controller->SetControlRotation(FRotator(-12.0, Hero->GetActorRotation().Yaw, 0.0));
-			GameCheck::Key(Controller, EKeys::D, IE_Pressed);
-			Enter(EPhase::WalkOverPickups, World);
+			Enter(EPhase::OpenCrate, World);
 			return false;
 		}
 		if (Hero == nullptr || State == nullptr) {
@@ -94,13 +94,16 @@ namespace
 		USkeletalMeshComponent* Mesh = Hero->GetMesh();
 
 		switch (Phase) {
-		case EPhase::WalkOverPickups:
-			if (!(State->EquippedWeapons.Contains(1) && State->EquippedWeapons.Contains(2)) && Elapsed(World) < 6.0) {
+		case EPhase::OpenCrate:
+			// D walks to the crate to the right of the start; E opens it
+			if (!Crate.Step(World, Controller, Hero, EKeys::D)) {
 				return false;
 			}
-			GameCheck::Key(Controller, EKeys::D, IE_Released);
+			if (!Crate.Failure.IsEmpty()) {
+				return Fail(Crate.Failure);
+			}
 			if (!State->EquippedWeapons.Contains(1)) {
-				return Fail(TEXT("Walking over the rifle did not pick it up"));
+				return Fail(TEXT("The crate did not give the hero the rifle"));
 			}
 			GameCheck::Key(Controller, EKeys::Two, IE_Pressed);
 			GameCheck::Key(Controller, EKeys::Two, IE_Released);

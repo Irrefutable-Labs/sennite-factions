@@ -370,14 +370,8 @@ void ASenniteCharacter::BeginPlay() {
 			}
 
 		}
-		// find the storm and keep a reference to it for damage purposes
-		TArray<AActor*> StormActors;
-		UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStormActor::StaticClass(), StormActors);
-		if (StormActors.Num() > 0) {
-			if (StormActors[0] != nullptr) {
-				CurrentStorm = Cast<AStormActor>(StormActors[0]);
-			}
-		}
+		// the storm, if the game has one, for the damage it does
+		CurrentStorm = AStormActor::Find(GetWorld());
 		// set skin
 		if (GetMesh()) {
 			MaterialOrMaterialInstance = FMath::RandRange(0, 1);
@@ -508,22 +502,6 @@ void ASenniteCharacter::Tick(float DeltaTime) {
 	if (HasAuthority() && CurrentStorm != nullptr) {
 		InStorm = FVector::Dist2D(GetActorLocation(), CurrentStorm->GetActorLocation()) > CurrentStorm->GetRadius();
 	}
-	// Something to pick up is offered when the hero first walks onto it, and refused if the hero is
-	// busy then (firing, reloading, building). A hero still standing on it is offered it again, a few
-	// times a second, so it is taken as soon as they are free.
-	if (HasAuthority()) {
-		SincePickupOffer += DeltaTime;
-		if (SincePickupOffer >= 0.3f) {
-			SincePickupOffer = 0.0f;
-			TArray<AActor*> Under;
-			GetOverlappingActors(Under);
-			for (AActor* Each : Under) {
-				if (IsValid(Each) && (Each->IsA<AWeaponActor>() || Each->IsA<AHealingActor>() || Each->IsA<AAmmunitionActor>())) {
-					OnOverlapBegin(nullptr, Each, nullptr, 0, false, FHitResult());
-				}
-			}
-		}
-	}
 	const bool bHideBuiltIn = CurrentWeapon != nullptr;
 	if (bHideBuiltIn != bBuiltInWeaponHidden && GetMesh() != nullptr) {
 		bBuiltInWeaponHidden = bHideBuiltIn;
@@ -583,71 +561,9 @@ void ASenniteCharacter::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AAct
 	if (HasAuthority()) {
 		//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString("NetMode: ") + FString::FromInt(GetNetMode()) + FString(" Player overlapped with: ") + OtherActor->GetName());
 		if (OtherActor != nullptr && OtherActor != this) {
-			if (CurrentWeapon != nullptr && OtherActor == (AActor*)CurrentWeapon) {
-				// if the character is overlapping with its weapon, dont do anything about it
-				return;
-			}
-			if (CurrentHealingItem != nullptr && OtherActor == (AActor*)CurrentHealingItem) {
-				// if the character is overlapping with its healing item, dont do anything about it
-				return;
-			}
-			if (OtherActor->IsA(AWeaponActor::StaticClass())) {
-				AWeaponActor* WeaponActor = Cast<AWeaponActor>(OtherActor);
-				if (WeaponActor->WeaponType == 0) {
-					return; // do nothing if it's a pickaxe
-				}
-				if (WeaponActor->Holder != nullptr) {
-					return; // do nothing if someone is holding the weapon
-				}
-				if (GetController()) {
-					// pick up the item if the two conditions above are false
-					ASennitePlayerState* State = Cast<ASennitePlayerState>(GetController()->PlayerState);
-					if (State) {
-						if (State->InBuildMode || State->JustShotRifle || State->JustShotShotgun || State->JustSwungPickaxe || State->JustUsedHealingItem || State->JustReloadedRifle || State->JustReloadedShotgun) {
-							return; // can't pick up items while in build mode or if just shot rifle, shot shotgun, swung pickaxe, used healing item, or reloaded
-						}
-						// if the player already has a weapon of this type, do not equip it
-						if (State->EquippedWeapons.Contains(WeaponActor->WeaponType)) {
-							return;
-						}
-						// Destroy old weapon/healing item
-						if (CurrentWeapon && CurrentWeaponType > 0 && CurrentWeaponType < 3) {
-							State->EquippedWeaponsClips[CurrentWeaponType] = CurrentWeapon->CurrentBulletCount;
-						}
-						if (CurrentWeapon) {
-							CurrentWeapon->Destroy();
-							CurrentWeapon = nullptr;
-						}
-						if (CurrentHealingItem) {
-							CurrentHealingItem->Destroy();
-							CurrentHealingItem = nullptr;
-						}
-						// PICK UP WEAPON
-						State->EquippedWeapons.Add(WeaponActor->WeaponType);
-						State->EquippedWeaponsClips[WeaponActor->WeaponType] = WeaponActor->MagazineSize; // this has to be done before calling client method below
-						//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString("MagSize: ") + FString::FromInt(WeaponActor->MagazineSize));
-						ClientGetWeaponTransform(WeaponActor->WeaponType);
-
-						WeaponActor->Destroy();
-					}
-
-				}
-
-			}
-			else if (OtherActor->IsA(AHealingActor::StaticClass())) {
-				// A pack of bandages or potions goes with what the hero carries. What is in hand stays in
-				// hand: walking over a pack does not take a weapon out of it.
-				AHealingActor* HealingActor = Cast<AHealingActor>(OtherActor);
-				ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
-				if (State != nullptr && HealingActor->Holder == nullptr && State->HealingItemCounts.IsValidIndex(HealingActor->HealingType)) {
-					if (State->InBuildMode || State->JustShotRifle || State->JustShotShotgun || State->JustSwungPickaxe || State->JustUsedHealingItem || State->JustReloadedRifle || State->JustReloadedShotgun) {
-						return; // can't pick up items while in build mode or if just shot rifle, shot shotgun, swung pickaxe, used healing item, or reloaded
-					}
-					State->HealingItemCounts[HealingActor->HealingType] += HealingActor->Count;
-					HealingActor->Destroy();
-				}
-			}
-			else if (OtherActor->IsA(AAmmunitionActor::StaticClass())) {
+			// Weapons and healing items are in crates (ASenniteCrate), never lying about: only a box
+			// of rounds is taken by walking over it.
+			if (OtherActor->IsA(AAmmunitionActor::StaticClass())) {
 				if (GetController()) {
 					ASennitePlayerState* State = Cast<ASennitePlayerState>(GetController()->PlayerState);
 					AAmmunitionActor* Ammo = Cast<AAmmunitionActor>(OtherActor);
@@ -1154,6 +1070,73 @@ void ASenniteCharacter::ServerOpenCrate_Implementation() {
 	}
 }
 
+bool ASenniteCharacter::TakeFromCrate(bool bRifle, bool bShotgun, int32 Rounds, int32 Shells, int32 Bandages, int32 Potions) {
+	ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
+	if (!HasAuthority() || State == nullptr || !State->EquippedWeaponsAmmunition.IsValidIndex(2) || !State->EquippedWeaponsClips.IsValidIndex(2) || !State->HealingItemCounts.IsValidIndex(1)) {
+		return false;
+	}
+	if (State->InBuildMode || State->JustShotRifle || State->JustShotShotgun || State->JustSwungPickaxe || State->JustUsedHealingItem || State->JustReloadedRifle || State->JustReloadedShotgun) {
+		return false; // hands full: the crate stays closed and full
+	}
+	// each weapon the hero does not have yet, with a full magazine
+	int32 ToHand = 0;
+	const bool bNewRifle = bRifle && !State->EquippedWeapons.Contains(1);
+	const bool bNewShotgun = bShotgun && !State->EquippedWeapons.Contains(2);
+	if (bNewRifle) {
+		State->EquippedWeapons.Add(1);
+		State->EquippedWeaponsClips[1] = GetDefault<ASenniteRifle>()->MagazineSize;
+		ToHand = 1;
+	}
+	if (bNewShotgun) {
+		State->EquippedWeapons.Add(2);
+		State->EquippedWeaponsClips[2] = GetDefault<ASenniteShotgun>()->MagazineSize;
+		ToHand = ToHand == 0 ? 2 : ToHand;
+	}
+	State->EquippedWeaponsAmmunition[1] += Rounds;
+	State->EquippedWeaponsAmmunition[2] += Shells;
+	State->HealingItemCounts[0] += Bandages;
+	State->HealingItemCounts[1] += Potions;
+	if (ToHand != 0) {
+		// the first new weapon comes to hand; what was in it is put away as it is
+		if (CurrentWeapon && CurrentWeaponType > 0 && CurrentWeaponType < 3) {
+			State->EquippedWeaponsClips[CurrentWeaponType] = CurrentWeapon->CurrentBulletCount;
+		}
+		if (CurrentWeapon) {
+			CurrentWeapon->Destroy();
+			CurrentWeapon = nullptr;
+		}
+		if (CurrentHealingItem) {
+			CurrentHealingItem->Destroy();
+			CurrentHealingItem = nullptr;
+		}
+		ClientGetWeaponTransform(ToHand);
+	}
+	ClientCrateGave(bNewRifle, bNewShotgun, Rounds, Shells, Bandages, Potions);
+	return true;
+}
+
+void ASenniteCharacter::ClientCrateGave_Implementation(bool bRifle, bool bShotgun, int32 Rounds, int32 Shells, int32 Bandages, int32 Potions) {
+	const APlayerController* Own = Cast<APlayerController>(GetController());
+	ASenniteHUD* Hud = Own != nullptr ? Cast<ASenniteHUD>(Own->GetHUD()) : nullptr;
+	if (Hud == nullptr) {
+		return;
+	}
+	TArray<FString> Gave;
+	if (bRifle) {
+		Gave.Add(TEXT("RIFLE"));
+	}
+	if (bShotgun) {
+		Gave.Add(TEXT("SHOTGUN"));
+	}
+	const TPair<int32, const TCHAR*> Counted[] = { { Rounds, TEXT("ROUNDS") }, { Shells, TEXT("SHELLS") }, { Bandages, TEXT("BANDAGES") }, { Potions, TEXT("POTIONS") } };
+	for (const TPair<int32, const TCHAR*>& Each : Counted) {
+		if (Each.Key > 0) {
+			Gave.Add(FString::Printf(TEXT("+%d %s"), Each.Key, Each.Value));
+		}
+	}
+	Hud->DrawCrateGave(FString::Join(Gave, TEXT("   ")));
+}
+
 void ASenniteCharacter::OpenSettingsMenu() {
 	if (GetController()) {
 		APlayerController* PlayerController = Cast<APlayerController>(GetController());
@@ -1292,8 +1275,9 @@ bool ASenniteCharacter::ServerResetMovingRight_Validate() {
 void ASenniteCharacter::ServerBuildStructure_Implementation(TSubclassOf<ABuildingActor> StructureClass, FVector SpawnLocation, FRotator SpawnRotation, int StructureId) {
 	// The server builds only a piece of its own lists, of the kind this player
 	// is in build mode for, on the build grid, within reach, clear of players
-	// and of a piece already there, and paid for from the count the server
-	// holds. The client's own copy of the piece is removed either way.
+	// and of a piece already there, with something to hold it up, and paid for
+	// from the count the server holds. The client's own copy of the piece is
+	// removed either way.
 	FString PieceKind;
 	const int32 MaterialType = BuildingMaterialOf(StructureClass, PieceKind);
 	ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
@@ -1305,7 +1289,7 @@ void ASenniteCharacter::ServerBuildStructure_Implementation(TSubclassOf<ABuildin
 		&& FVector::Dist(SpawnLocation, GetActorLocation()) <= MaxBuildReach) {
 		ABuildingActor* Piece = GetWorld()->SpawnActor<ABuildingActor>(StructureClass, SpawnLocation, SpawnRotation);
 		if (Piece != nullptr) {
-			if (IsBuildingPieceBlocked(Piece)) {
+			if (IsBuildingPieceBlocked(Piece) || !ABuildingActor::HeldUp(GetWorld()).Contains(Piece)) {
 				Piece->Destroy();
 			}
 			else {
@@ -2176,21 +2160,6 @@ void ASenniteCharacter::Die(ASenniteCharacter* Killer) {
 		BuildingPreview->Destroy();
 		BuildingPreview = nullptr;
 	}
-	// The weapons the hero had lie where it fell, for whoever comes by: one of each kind, as new.
-	// What it carried besides (rounds, bandages, potions, materials) goes with it.
-	if (const ASennitePlayerState* Mine = GetPlayerState<ASennitePlayerState>()) {
-		const FVector Feet = GetActorLocation() - FVector(0.0, 0.0, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
-		FActorSpawnParameters Spawn;
-		Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		int32 Laid = 0;
-		for (const int32 Kind : Mine->EquippedWeapons) {
-			UClass* Class = Kind == 1 ? ASenniteRifle::StaticClass() : (Kind == 2 ? ASenniteShotgun::StaticClass() : nullptr);
-			if (Class != nullptr) {
-				GetWorld()->SpawnActor<AWeaponActor>(Class, Feet + GetActorRightVector() * (Laid * 90.0 - 45.0) + FVector(0.0, 0.0, 60.0), FRotator(0.0, GetActorRotation().Yaw, 0.0), Spawn);
-				++Laid;
-			}
-		}
-	}
 	if (CurrentWeapon != nullptr) {
 		CurrentWeapon->Destroy();
 		CurrentWeapon = nullptr;
@@ -2199,6 +2168,12 @@ void ASenniteCharacter::Die(ASenniteCharacter* Killer) {
 		CurrentHealingItem->Destroy();
 		CurrentHealingItem = nullptr;
 	}
+	// The weapons the hero had are in a crate left where it fell, for whoever comes by: one of each
+	// kind, as new. What it carried besides (rounds, bandages, potions, materials) goes with it.
+	if (const ASennitePlayerState* Mine = GetPlayerState<ASennitePlayerState>()) {
+		ASenniteCrate::Leave(GetWorld(), this, Mine->EquippedWeapons.Contains(1), Mine->EquippedWeapons.Contains(2));
+	}
+
 	if (Killer != nullptr && Killer != this && Killer->GetController() != nullptr) {
 		if (ASennitePlayerState* KillerState = Cast<ASennitePlayerState>(Killer->GetController()->PlayerState)) {
 			KillerState->KillCount++;

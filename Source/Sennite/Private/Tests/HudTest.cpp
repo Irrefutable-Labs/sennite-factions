@@ -1,7 +1,8 @@
 // HUD check. Run in the game on the test range: the HUD draws the player's health and shield, the
 // three building materials, the players left and the kills from the start; in build mode it names
-// the piece and the material count drops when a piece is built; with a weapon in hand it names the
-// weapon and shows the rounds in it, which drop when it is fired.
+// the piece and the material count drops when a piece is built; beside the range's crate it says how
+// to open it, and once opened what the crate gave; with a weapon in hand it names the weapon and
+// shows the rounds in it and the rounds carried, and the rounds in it drop when it is fired.
 //
 // What is checked is each line of text the HUD sent to the canvas on its last frame
 // (ASenniteHUD::LastDrawn), after the real keys and mouse changed the game. That proves the HUD reads
@@ -14,6 +15,7 @@
 
 #include "GameCheck.h"
 #include "SenniteCharacter.h"
+#include "SenniteHealing.h"
 #include "SenniteHUD.h"
 #include "SennitePlayerState.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -30,7 +32,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, Start, BuildMode, Built, WalkOverPickups, Shotgun, Rifle, Fired, Done };
+		enum class EPhase { WaitForPawn, Start, BuildMode, Built, OpenCrate, Opened, Shotgun, Rifle, Fired, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -60,6 +62,8 @@ namespace
 		EPhase Phase = EPhase::WaitForPawn;
 		double PhaseStart = 0.0;
 		int32 Step = 0;
+		GameCheck::FCrateRun Crate;
+		bool bCratePrompt = false;
 	};
 
 	bool FHudRun::Update()
@@ -138,17 +142,39 @@ namespace
 				return false;
 			}
 			Hides(Hud, TEXT("mode"), TEXT("a piece name after leaving build mode"));
-			GameCheck::Key(Controller, EKeys::D, IE_Pressed);
-			Enter(EPhase::WalkOverPickups, World);
+			Hides(Hud, TEXT("crate"), TEXT("how to open a crate away from one"));
+			Enter(EPhase::OpenCrate, World);
 			return false;
 
-		case EPhase::WalkOverPickups:
-			if (!(State->EquippedWeapons.Contains(1) && State->EquippedWeapons.Contains(2)) && Elapsed(World) < 6.0) {
+		case EPhase::OpenCrate:
+			// D walks her to the crate to the right of the start; beside it the HUD says how to open it
+			bCratePrompt |= Crate.Stage == 2 && Hud->LastDrawn.Contains(TEXT("crate=E   OPEN THE CRATE"));
+			if (!Crate.Step(World, Controller, Hero, EKeys::D)) {
 				return false;
 			}
-			GameCheck::Key(Controller, EKeys::D, IE_Released);
+			if (!Crate.Failure.IsEmpty()) {
+				return Fail(Crate.Failure);
+			}
+			Test->TestTrue(TEXT("Beside the closed crate the HUD says how to open it"), bCratePrompt);
+			Enter(EPhase::Opened, World);
+			return false;
+
+		case EPhase::Opened: {
+			if (Elapsed(World) < 0.8) {
+				return false;
+			}
+			const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
+			Hides(Hud, TEXT("crate"), TEXT("how to open a crate that is open"));
+			Shows(Hud, *FString::Printf(TEXT("crategave=RIFLE   SHOTGUN   +%d ROUNDS   +%d SHELLS   +%d BANDAGES   +%d POTIONS"), Rules->RifleRounds, Rules->ShotgunShells,
+				GetDefault<ASenniteBandage>()->Count, GetDefault<ASennitePotion>()->Count), TEXT("what the crate gave"));
+			Shows(Hud, TEXT("weapon=RIFLE"), TEXT("the rifle the crate gave, in hand"));
+			Shows(Hud, *FString::Printf(TEXT("reserve=%d"), Rules->RifleRounds), TEXT("the rounds the crate gave"));
+			Log(Hud, TEXT("after opening the crate"));
+			GameCheck::Shot(TEXT("Hud"), TEXT("crate.png"));
+			Tap(Controller, EKeys::Three);
 			Enter(EPhase::Shotgun, World);
 			return false;
+		}
 
 		case EPhase::Shotgun:
 			if (Elapsed(World) < 0.8) {
@@ -156,7 +182,7 @@ namespace
 			}
 			Shows(Hud, TEXT("weapon=SHOTGUN"), TEXT("the shotgun in hand"));
 			Shows(Hud, TEXT("ammo=5"), TEXT("the shotgun's five rounds"));
-			Shows(Hud, TEXT("reserve=0"), TEXT("no rounds carried"));
+			Shows(Hud, *FString::Printf(TEXT("reserve=%d"), GetDefault<ASenniteCrate>()->ShotgunShells), TEXT("the shells the crate gave"));
 			Tap(Controller, EKeys::Two);
 			Enter(EPhase::Rifle, World);
 			return false;
