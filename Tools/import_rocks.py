@@ -27,6 +27,13 @@ import unreal
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LIBRARY = os.environ.get("SCENERY_SOURCE", "/Users/Shared/UnrealEngine/Launcher/VaultCache/FabLibrary")
 FRAME_SOURCE = os.environ.get("FRAME_SOURCE", "")
+# The rocks heavier than a phone wants, cut to this many triangles with the engine's own geometry
+# scripting: the blocky ones the plots' cover is made of, and the crags, one to a plot.
+CUT = {"SM_Rock_02": 2000, "SM_Rock_04": 2000, "SM_Rock_03": 4500, "SM_Rock_11": 4500}
+# The rocks the plots are dressed with, solid by their own shapes: a hero and a shot meet each as it is
+# drawn (its triangles are its collision). The arena turns collision on only for the plots' sets of
+# them; the same meshes under the floating pieces stay seen only.
+SOLID = {"SM_Rock_02", "SM_Rock_03", "SM_Rock_04", "SM_Rock_05", "SM_Rock_06", "SM_Rock_07", "SM_Rock_08", "SM_Rock_11"}
 SMALL = os.path.join(ROOT, "Saved", "SceneryImport")
 SIZE = 1024
 LEFT_OUT = ("09",)
@@ -191,9 +198,23 @@ def mesh(source, folder, name, mat):
     if nanite.enabled:                      # plain meshes: phones have no Nanite
         nanite.enabled = False
         made.set_editor_property("nanite_settings", nanite)
+    if name in CUT and made.get_num_triangles(0) > CUT[name]:
+        before = made.get_num_triangles(0)
+        work = unreal.DynamicMesh()
+        unreal.GeometryScript_AssetUtils.copy_mesh_from_static_mesh(made, work, unreal.GeometryScriptCopyMeshFromAssetOptions(), unreal.GeometryScriptMeshReadLOD())
+        unreal.GeometryScript_MeshSimplification.apply_simplify_to_triangle_count(work, CUT[name], unreal.GeometryScriptSimplifyMeshOptions())
+        unreal.GeometryScript_AssetUtils.copy_mesh_to_static_mesh(work, made, unreal.GeometryScriptCopyMeshToAssetOptions(), unreal.GeometryScriptMeshWriteLOD())
+        note("%s: cut from %d to %d triangles" % (name, before, made.get_num_triangles(0)))
     for slot in range(max(1, len(made.get_editor_property("static_materials")))):
         made.set_material(slot, mat)
     unreal.EditorStaticMeshLibrary.remove_collisions(made)
+    if name in SOLID:
+        body = made.get_editor_property("body_setup")
+        if body is None:
+            raise RuntimeError(name + " has no body setup to collide with")
+        body.set_editor_property("collision_trace_flag", unreal.CollisionTraceFlag.CTF_USE_COMPLEX_AS_SIMPLE)
+        made.set_editor_property("body_setup", body)
+        note("%s: collides as drawn (its %d triangles)" % (name, made.get_num_triangles(0)))
     eal.save_loaded_asset(made)
     box = made.get_bounding_box()
     note("%s (%s): x %.0f to %.0f, y %.0f to %.0f, z %.0f to %.0f cm; %d triangles; %d material slots" % (

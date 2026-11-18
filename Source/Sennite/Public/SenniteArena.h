@@ -55,6 +55,15 @@ enum class EArenaScenery : uint8
 	// four trees, then seven bushes: what stands round the rim of a base
 	TreeA, TreeB, TreeC, TreeD,
 	BushA, BushB, BushC, BushD, BushE, BushF, BushG,
+	// The dressing of the plots: six rocks of cover and two crags (each plot's landmark), solid by their
+	// own shapes, and the steel frame, over blocks; all of them stop heroes and shots. Then three
+	// knee-high stones and a patch of stony ground, seen and nothing else. Each has a set of its own, so
+	// it is drawn, and met, as it needs.
+	CoverRock02, CoverRock04, CoverRock05, CoverRock06, CoverRock07, CoverRock08,
+	CragRock03, CragRock11,
+	SteelFrame,
+	Stone01, Stone10, Stone12,
+	StonyGround,
 	Count
 };
 
@@ -85,6 +94,18 @@ struct FArenaSizes
 	float WaterDepth = 2000.0f;
 	/** How high the land's hills rise above a plot's level ground, about. */
 	float HillHeight = 900.0f;
+	/**
+	 * The dressing of each plot, off its pad: groups of cover rocks on its land; cover rocks along
+	 * each way out, beside the straight way to it; outcrops, big rocks on its high ground; crags, its
+	 * landmark; steel frames; small stones; and patches of stony ground.
+	 */
+	int32 CoverPerBase = 10;
+	int32 CoverPerWay = 4;
+	int32 OutcropsPerBase = 3;
+	int32 CragsPerBase = 1;
+	int32 FramesPerBase = 1;
+	int32 StonesPerBase = 24;
+	int32 PatchesPerBase = 6;
 };
 
 /** One block of the arena: a box, in the world. */
@@ -146,6 +167,13 @@ struct FArenaPlan
 	FVector2D HillsAt = FVector2D::ZeroVector;
 	FVector2D RipplesAt = FVector2D::ZeroVector;
 	FVector2D CoastAt = FVector2D::ZeroVector;
+	/**
+	 * Each plot's look, in the order of the bases: which rocks its cover is made of (0 blocky, 1 slabs,
+	 * 2 rubble), and how dry its grass is, from 0 (lush) to 1. Two plots a connector joins never share
+	 * a style.
+	 */
+	TArray<int32> Styles;
+	TArray<float> Dryness;
 	/** A number that differs when anything in the plan differs. */
 	uint32 Hash = 0;
 
@@ -186,6 +214,36 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	int32 BushesPerBase = 24;
 
+	/**
+	 * The dressing of each plot, off its pad, from a random stream of its own: groups of cover rocks on
+	 * its land; cover rocks along each way out of it, either side of the straight way to the connector;
+	 * a crag on the high ground at its back, its landmark; a steel frame; small stones at the feet of
+	 * the rocks; and patches of stony ground. Rocks and crags are solid by their own shapes and the frame
+	 * stands over blocks, so all of them stop heroes and shots; the stones and patches are only seen. Set
+	 * in DefaultGame.ini.
+	 */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	int32 CoverPerBase = 10;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	int32 CoverPerWay = 4;
+
+	/** Big rocks, two heroes tall and more, on the high ground of each plot off its ways. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	int32 OutcropsPerBase = 3;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	int32 CragsPerBase = 1;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	int32 FramesPerBase = 1;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	int32 StonesPerBase = 24;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	int32 PatchesPerBase = 6;
+
 	/** The level ground in the middle of a plot, where a faction's buildings stand. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	float PadRadius = 5000.0f;
@@ -210,6 +268,21 @@ public:
 
 	/** How far a place is outside the land's outline, the plots and the connectors: nothing inside it. */
 	static double OutsideLand(const FArenaPlan& Plan, double X, double Y);
+
+	/**
+	 * What the ground is painted with at a place, from the plan alone: red is gravel (the paths from
+	 * each pad out to its ways and the yard round each steel frame), green is dirt (under trees and
+	 * round the plots' rocks), alpha is how dry the grass of the nearest plot is. The ground's material
+	 * draws grass, dirt and gravel by it.
+	 */
+	static FLinearColor GroundPaint(const FArenaPlan& Plan, double X, double Y);
+
+	/**
+	 * The size of a dressing mesh as imported, in cm (Saved/import_rocks.txt, Saved/import_scenery.txt):
+	 * the plan sizes each piece in its mesh's own proportions, and the blocks under it from that. Zero
+	 * for a piece of scenery that is not dressing.
+	 */
+	static FVector ShapeOf(EArenaScenery Kind);
 
 	/** How wide the shore is: past the land's outline the ground goes down under the water over this far. */
 	static constexpr double ShoreWidth = 4500.0;
@@ -274,7 +347,11 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	FSoftObjectPath RoadSurface;
 
-	/** The scenery meshes, in the order of EArenaScenery: the cliff, the rocky ground, six rocks, four trees, seven bushes. Set in DefaultGame.ini. */
+	/**
+	 * The scenery meshes, in the order of EArenaScenery: the cliff, the rocky ground, six rocks, four
+	 * trees, seven bushes, then the plots' dressing (six cover rocks, two crags, the steel frame, three
+	 * stones, stony ground). Set in DefaultGame.ini.
+	 */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	TArray<FSoftObjectPath> SceneryMeshes;
 
