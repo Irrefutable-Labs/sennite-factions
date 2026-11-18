@@ -69,10 +69,12 @@ const TArray<USenniteTouchControls::FButton>& USenniteTouchControls::Buttons()
 		// the base editor (B), left of the building row: only where there is a publisher's server and so an editor
 		{ TEXT("BASE"), EKeys::B, FVector2D(-430.0, 92.0), 26.0f, false },
 		// what to hold, along the bottom: X is from the middle of the screen
-		{ TEXT("RIFLE"), EKeys::Two, FVector2D(-141.0, -62.0), 44.0f, true },
-		{ TEXT("SHOTGUN"), EKeys::Three, FVector2D(-47.0, -62.0), 44.0f, true },
-		{ TEXT("BANDAGE"), EKeys::Four, FVector2D(47.0, -62.0), 44.0f, true },
-		{ TEXT("POTION"), EKeys::Five, FVector2D(141.0, -62.0), 44.0f, true },
+		{ TEXT("RIFLE"), EKeys::Two, FVector2D(-235.0, -62.0), 44.0f, true },
+		{ TEXT("SHOTGUN"), EKeys::Three, FVector2D(-141.0, -62.0), 44.0f, true },
+		{ TEXT("ENERGY"), EKeys::Six, FVector2D(-47.0, -62.0), 44.0f, true },
+		{ TEXT("SNIPER"), EKeys::Seven, FVector2D(47.0, -62.0), 44.0f, true },
+		{ TEXT("BANDAGE"), EKeys::Four, FVector2D(141.0, -62.0), 44.0f, true },
+		{ TEXT("POTION"), EKeys::Five, FVector2D(235.0, -62.0), 44.0f, true },
 	};
 	return All;
 }

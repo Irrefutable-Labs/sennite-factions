@@ -4,7 +4,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Camera/CameraActor.h"
 #include "Engine/Engine.h"
+#include "GameFramework/Character.h"
 #include "Engine/GameViewportClient.h"
 #include "HAL/PlatformTime.h"
 #include "Engine/World.h"
@@ -210,6 +212,30 @@ namespace GameCheck
 			}
 			}
 		}
+	};
+
+	/**
+	 * A camera of the check's own, in front of the hero and to its right, for a picture of what the hero
+	 * holds: the player's own camera is behind the hero, where its body hides it.
+	 */
+	struct FOnlooker
+	{
+		TWeakObjectPtr<ACameraActor> Camera;
+
+		void Look(UWorld* World, APlayerController* Controller, const ACharacter* Hero)
+		{
+			if (!Camera.IsValid()) {
+				Camera = World->SpawnActor<ACameraActor>();
+			}
+			if (Camera.IsValid()) {
+				const FVector Chest = Hero->GetActorLocation() + FVector(0.0, 0.0, 30.0);
+				const FVector From = Chest + Hero->GetActorForwardVector() * 200.0 + Hero->GetActorRightVector() * 150.0 + FVector(0.0, 0.0, 25.0);
+				Camera->SetActorLocationAndRotation(From, (Chest - From).Rotation());
+				Controller->SetViewTarget(Camera.Get());
+			}
+		}
+
+		void Back(APlayerController* Controller, AActor* Hero) { Controller->SetViewTarget(Hero); }
 	};
 
 	/** How many weapons and healing items are in the world in nobody's hand. Crates hold them, so none should be. */

@@ -83,7 +83,7 @@ public:
 	float ProjectileSpeed; //used to distinguish range or projectile 
 
 	UPROPERTY(EditDefaultsOnly, Category = "Damage")
-	int ProjectileType; // 0 for pickaxe, 1 for assault rifle, 2 for shotgun, will be used for determining the lifespan of the projectile
+	int ProjectileType; // the kind of weapon that fired it: 0 for pickaxe, 1 rifle, 2 shotgun, 3 energy rifle, 4 sniper
 
 	/** Set once the bullet has landed on something; it lands only once. */
 	bool bSpent = false;

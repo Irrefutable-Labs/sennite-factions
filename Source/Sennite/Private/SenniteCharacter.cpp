@@ -31,6 +31,8 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Sound/SoundAttenuation.h"
+#include "Sound/SoundBase.h"
 #include "Materials/Material.h"
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimInstance.h"
@@ -135,10 +137,13 @@ ASenniteCharacter::ASenniteCharacter(const FObjectInitializer& ObjectInitializer
 	Health = 100.0f;
 	Shield = 0.0f;
 
-	// slot 0 is the pickaxe, which has no model yet; 1 the assault rifle, 2 the shotgun
-	WeaponClasses.SetNum(3);
+	// slot 0 is the pickaxe, which is not held yet; then the guns: 1 the rifle, 2 the shotgun, 3 the
+	// energy rifle, 4 the sniper
+	WeaponClasses.SetNum(5);
 	WeaponClasses[1] = ASenniteRifle::StaticClass();
 	WeaponClasses[2] = ASenniteShotgun::StaticClass();
+	WeaponClasses[3] = ASenniteEnergyRifle::StaticClass();
+	WeaponClasses[4] = ASenniteSniper::StaticClass();
 
 	// healing items: 0 the bandage, 1 the potion
 	HealingItemClasses = { ASenniteBandage::StaticClass(), ASennitePotion::StaticClass() };
@@ -328,6 +333,8 @@ void ASenniteCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerI
 	PlayerInputComponent->BindAction("UseHealingItem", IE_Pressed, this, &ASenniteCharacter::UseHealingItem);
 	PlayerInputComponent->BindAction("Reload", IE_Pressed, this, &ASenniteCharacter::Reload);
 	PlayerInputComponent->BindAction("HoldPickaxe", IE_Pressed, this, &ASenniteCharacter::HoldPickaxe);
+	PlayerInputComponent->BindAction("HoldEnergyRifle", IE_Pressed, this, &ASenniteCharacter::HoldEnergyRifle);
+	PlayerInputComponent->BindAction("HoldSniper", IE_Pressed, this, &ASenniteCharacter::HoldSniper);
 	PlayerInputComponent->BindAction("HoldAssaultRifle", IE_Pressed, this, &ASenniteCharacter::HoldAssaultRifle);
 	PlayerInputComponent->BindAction("HoldShotgun", IE_Pressed, this, &ASenniteCharacter::HoldShotgun);
 	PlayerInputComponent->BindAction("HoldBandage", IE_Pressed, this, &ASenniteCharacter::HoldBandage);
@@ -897,16 +904,16 @@ void ASenniteCharacter::ShootGun() {
 		return;
 	}
 	ServerFireWeapon();
-	// The rifle goes on firing while the button is held: a shot is asked for again a little slower
-	// than the server lets one out (0.233 s), so every one asked for is fired.
-	if (CurrentWeaponType == 1) {
-		GetWorldTimerManager().SetTimer(HeldFireTimer, this, &ASenniteCharacter::FireWhileHeld, 0.24f, true);
+	// A gun that fires while held goes on firing: a shot is asked for again a little slower than the
+	// server lets one out, so every one asked for is fired.
+	if (CurrentWeapon != nullptr && CurrentWeapon->bHeldFires) {
+		GetWorldTimerManager().SetTimer(HeldFireTimer, this, &ASenniteCharacter::FireWhileHeld, CurrentWeapon->FireSeconds + 0.007f, true);
 	}
 }
 
 void ASenniteCharacter::FireWhileHeld() {
 	const ASennitePlayerState* State = GetPlayerState<ASennitePlayerState>();
-	if (CurrentWeaponType != 1 || CurrentWeapon == nullptr || State == nullptr || State->InBuildMode || EditingPiece.IsValid()) {
+	if (CurrentWeapon == nullptr || !CurrentWeapon->bHeldFires || State == nullptr || State->InBuildMode || EditingPiece.IsValid()) {
 		StopShooting();
 		return;
 	}
@@ -970,11 +977,23 @@ void ASenniteCharacter::HoldPickaxe() {
 }
 
 void ASenniteCharacter::HoldAssaultRifle() {
-	ServerSwitchToRifle();
+	ServerHoldGun(1);
 }
 
 void ASenniteCharacter::HoldShotgun() {
-	ServerSwitchToShotgun();
+	ServerHoldGun(2);
+}
+
+void ASenniteCharacter::HoldEnergyRifle() {
+	ServerHoldGun(3);
+}
+
+void ASenniteCharacter::HoldSniper() {
+	ServerHoldGun(4);
+}
+
+bool ASenniteCharacter::IsGun(int32 Type) const {
+	return Type > 0 && WeaponClasses.IsValidIndex(Type) && WeaponClasses[Type] != nullptr;
 }
 
 void ASenniteCharacter::HoldBandage() {
@@ -1097,35 +1116,47 @@ void ASenniteCharacter::ServerOpenCrate_Implementation() {
 	}
 }
 
-bool ASenniteCharacter::TakeFromCrate(bool bRifle, bool bShotgun, int32 Rounds, int32 Shells, int32 Bandages, int32 Potions) {
+int32 ASenniteCharacter::GunsHeld() const {
+	int32 Held = 0;
+	if (const ASennitePlayerState* State = GetPlayerState<ASennitePlayerState>()) {
+		for (const int32 Type : State->EquippedWeapons) {
+			Held |= IsGun(Type) ? (1 << Type) : 0;
+		}
+	}
+	return Held;
+}
+
+bool ASenniteCharacter::TakeFromCrate(int32 Guns, bool bRounds, int32 Bandages, int32 Potions) {
 	ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
-	if (!HasAuthority() || State == nullptr || !State->EquippedWeaponsAmmunition.IsValidIndex(2) || !State->EquippedWeaponsClips.IsValidIndex(2) || !State->HealingItemCounts.IsValidIndex(1)) {
+	if (!HasAuthority() || State == nullptr || !State->HealingItemCounts.IsValidIndex(1)) {
 		return false;
 	}
 	if (State->InBuildMode || State->JustShotRifle || State->JustShotShotgun || State->JustSwungPickaxe || State->JustUsedHealingItem || State->JustReloadedRifle || State->JustReloadedShotgun) {
 		return false; // hands full: the crate stays closed and full
 	}
-	// each weapon the hero does not have yet, with a full magazine
+	// each gun the hero does not have yet, with a full magazine; and the crate's rounds for each of its guns
 	int32 ToHand = 0;
-	const bool bNewRifle = bRifle && !State->EquippedWeapons.Contains(1);
-	const bool bNewShotgun = bShotgun && !State->EquippedWeapons.Contains(2);
-	if (bNewRifle) {
-		State->EquippedWeapons.Add(1);
-		State->EquippedWeaponsClips[1] = GetDefault<ASenniteRifle>()->MagazineSize;
-		ToHand = 1;
+	int32 NewGuns = 0;
+	for (int32 Type = 1; Type < WeaponClasses.Num(); ++Type) {
+		if ((Guns & (1 << Type)) == 0 || !IsGun(Type) || !State->EquippedWeaponsClips.IsValidIndex(Type) || !State->EquippedWeaponsAmmunition.IsValidIndex(Type)) {
+			continue;
+		}
+		const AWeaponActor* Gun = GetDefault<AWeaponActor>(WeaponClasses[Type]);
+		if (!State->EquippedWeapons.Contains(Type)) {
+			State->EquippedWeapons.Add(Type);
+			State->EquippedWeaponsClips[Type] = Gun->MagazineSize;
+			NewGuns |= 1 << Type;
+			ToHand = ToHand == 0 ? Type : ToHand;
+		}
+		if (bRounds) {
+			State->EquippedWeaponsAmmunition[Type] += Gun->CrateRounds;
+		}
 	}
-	if (bNewShotgun) {
-		State->EquippedWeapons.Add(2);
-		State->EquippedWeaponsClips[2] = GetDefault<ASenniteShotgun>()->MagazineSize;
-		ToHand = ToHand == 0 ? 2 : ToHand;
-	}
-	State->EquippedWeaponsAmmunition[1] += Rounds;
-	State->EquippedWeaponsAmmunition[2] += Shells;
 	State->HealingItemCounts[0] += Bandages;
 	State->HealingItemCounts[1] += Potions;
 	if (ToHand != 0) {
-		// the first new weapon comes to hand; what was in it is put away as it is
-		if (CurrentWeapon && CurrentWeaponType > 0 && CurrentWeaponType < 3) {
+		// the first new gun comes to hand; what was in it is put away as it is
+		if (CurrentWeapon && IsGun(CurrentWeaponType)) {
 			State->EquippedWeaponsClips[CurrentWeaponType] = CurrentWeapon->CurrentBulletCount;
 		}
 		if (CurrentWeapon) {
@@ -1138,30 +1169,37 @@ bool ASenniteCharacter::TakeFromCrate(bool bRifle, bool bShotgun, int32 Rounds, 
 		}
 		ClientGetWeaponTransform(ToHand);
 	}
-	ClientCrateGave(bNewRifle, bNewShotgun, Rounds, Shells, Bandages, Potions);
+	ClientCrateGave(NewGuns, bRounds, Bandages, Potions);
 	return true;
 }
 
-void ASenniteCharacter::ClientCrateGave_Implementation(bool bRifle, bool bShotgun, int32 Rounds, int32 Shells, int32 Bandages, int32 Potions) {
+void ASenniteCharacter::ClientCrateGave_Implementation(int32 NewGuns, bool bRounds, int32 Bandages, int32 Potions) {
 	const APlayerController* Own = Cast<APlayerController>(GetController());
 	ASenniteHUD* Hud = Own != nullptr ? Cast<ASenniteHUD>(Own->GetHUD()) : nullptr;
 	if (Hud == nullptr) {
 		return;
 	}
+	// each new gun by name, then what else it gave
 	TArray<FString> Gave;
-	if (bRifle) {
-		Gave.Add(TEXT("RIFLE"));
-	}
-	if (bShotgun) {
-		Gave.Add(TEXT("SHOTGUN"));
-	}
-	const TPair<int32, const TCHAR*> Counted[] = { { Rounds, TEXT("ROUNDS") }, { Shells, TEXT("SHELLS") }, { Bandages, TEXT("BANDAGES") }, { Potions, TEXT("POTIONS") } };
-	for (const TPair<int32, const TCHAR*>& Each : Counted) {
-		if (Each.Key > 0) {
-			Gave.Add(FString::Printf(TEXT("+%d %s"), Each.Key, Each.Value));
+	for (int32 Type = 1; Type < WeaponClasses.Num(); ++Type) {
+		if ((NewGuns & (1 << Type)) != 0 && IsGun(Type)) {
+			Gave.Add(GetDefault<AWeaponActor>(WeaponClasses[Type])->DisplayName);
 		}
 	}
+	if (bRounds) {
+		Gave.Add(TEXT("+ROUNDS"));
+	}
+	if (Bandages > 0) {
+		Gave.Add(FString::Printf(TEXT("+%d BANDAGES"), Bandages));
+	}
+	if (Potions > 0) {
+		Gave.Add(FString::Printf(TEXT("+%d POTIONS"), Potions));
+	}
 	Hud->DrawCrateGave(FString::Join(Gave, TEXT("   ")));
+	// and is heard by the player who opened it
+	if (USoundBase* Opened = Cast<USoundBase>(GetDefault<ASenniteCrate>()->OpenSound.TryLoad())) {
+		UGameplayStatics::PlaySound2D(this, Opened);
+	}
 }
 
 void ASenniteCharacter::OpenSettingsMenu() {
@@ -1397,7 +1435,7 @@ void ASenniteCharacter::ServerSetBuildModeWall_Implementation() {
 					BuildingPreview = nullptr;
 				}
 				// equip weapon being held before
-				if (CurrentWeaponType > -1 && CurrentWeaponType < 3) {
+				if (CurrentWeaponType > -1 && CurrentWeaponType < WeaponClasses.Num()) {
 					ClientGetWeaponTransform(CurrentWeaponType);
 				}
 				else if (CurrentHealingItemType > -1 && CurrentHealingItemType < 2) {
@@ -1422,7 +1460,7 @@ void ASenniteCharacter::ServerSetBuildModeWall_Implementation() {
 				HoldingWeaponType = 0;
 
 				// unequip weapon/healing item
-				if (CurrentWeapon && CurrentWeaponType > 0 && CurrentWeaponType < 3) {
+				if (CurrentWeapon && IsGun(CurrentWeaponType)) {
 					State->EquippedWeaponsClips[CurrentWeaponType] = CurrentWeapon->CurrentBulletCount;
 				}
 				if (CurrentWeapon) {
@@ -1461,7 +1499,7 @@ void ASenniteCharacter::ServerSetBuildModeRamp_Implementation() {
 					BuildingPreview = nullptr;
 				}
 				// equip weapon being held before
-				if (CurrentWeaponType > -1 && CurrentWeaponType < 3) {
+				if (CurrentWeaponType > -1 && CurrentWeaponType < WeaponClasses.Num()) {
 					ClientGetWeaponTransform(CurrentWeaponType);
 				}
 				else if(CurrentHealingItemType > -1 && CurrentHealingItemType < 2){
@@ -1485,7 +1523,7 @@ void ASenniteCharacter::ServerSetBuildModeRamp_Implementation() {
 				AimedIn = false;
 				HoldingWeaponType = 0;
 				// unequip weapon/healing item
-				if (CurrentWeapon && CurrentWeaponType > 0 && CurrentWeaponType < 3) {
+				if (CurrentWeapon && IsGun(CurrentWeaponType)) {
 					State->EquippedWeaponsClips[CurrentWeaponType] = CurrentWeapon->CurrentBulletCount;
 				}
 				if (CurrentWeapon) {
@@ -1524,7 +1562,7 @@ void ASenniteCharacter::ServerSetBuildModeFloor_Implementation() {
 					BuildingPreview = nullptr;
 				}
 				// equip weapon being held before
-				if (CurrentWeaponType > -1 && CurrentWeaponType < 3) {
+				if (CurrentWeaponType > -1 && CurrentWeaponType < WeaponClasses.Num()) {
 					ClientGetWeaponTransform(CurrentWeaponType);
 				}
 				else if (CurrentHealingItemType > -1 && CurrentHealingItemType < 2) {
@@ -1548,7 +1586,7 @@ void ASenniteCharacter::ServerSetBuildModeFloor_Implementation() {
 				AimedIn = false;
 				HoldingWeaponType = 0;
 				// unequip weapon/healing item
-				if (CurrentWeapon && CurrentWeaponType > 0 && CurrentWeaponType < 3) {
+				if (CurrentWeapon && IsGun(CurrentWeaponType)) {
 					State->EquippedWeaponsClips[CurrentWeaponType] = CurrentWeapon->CurrentBulletCount;
 				}
 				if (CurrentWeapon) {
@@ -1569,90 +1607,45 @@ bool ASenniteCharacter::ServerSetBuildModeFloor_Validate() {
 }
 
 void ASenniteCharacter::ServerFireWeapon_Implementation() {
-	if (CurrentWeapon != nullptr) {
-		if (GetController()) {
-			ASennitePlayerState* State = Cast<ASennitePlayerState>(GetController()->PlayerState);
-			if (State) {
-				//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString::FromInt(GetNetMode()) + FString(" Current weapon ") + FString::FromInt(State->CurrentWeapon));
-				if (State->HoldingWeapon) {
-					if (State->CurrentWeapon > 0 && State->CurrentWeapon < 3 && CurrentWeapon->CurrentBulletCount <= 0) {
-						// no bullets in magazine, need to reload
-						ServerReloadWeapons();
-						return;
-					}
-					if (State->JustReloadedRifle || State->JustReloadedShotgun) {
-						return; //currently reloading
-					}
-					if (State->AimedIn) {
-						if (State->CurrentWeapon == 1) {
-							if (State->JustShotRifle) {
-								return;
-							}
-							NetMulticastPlayShootRifleIronsightsAnimation();
-							CurrentWeapon->CurrentBulletCount--;
-							bShotAuthorized = true;
-							State->EquippedWeaponsClips[CurrentWeaponType]--;
-							State->JustShotRifle = true;
-							FTimerHandle RifleTimerHandle;
-							GetWorldTimerManager().SetTimer(RifleTimerHandle, this, &ASenniteCharacter::ServerRifleTimeOut, 0.233f, false);
-						}
-						else if (State->CurrentWeapon == 2) {
-							if (State->JustShotShotgun) {
-								return;
-							}
-							NetMulticastPlayShootShotgunIronsightsAnimation();
-							CurrentWeapon->CurrentBulletCount--;
-							bShotAuthorized = true;
-							State->EquippedWeaponsClips[CurrentWeaponType]--;
-							State->JustShotShotgun = true;
-							FTimerHandle ShotgunTimerHandle;
-							GetWorldTimerManager().SetTimer(ShotgunTimerHandle, this, &ASenniteCharacter::ServerShotgunTimeOut, 1.3f, false);
-						}
-					}
-					else {
-						if (State->CurrentWeapon == 0) {
-							//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, "pickaxe swung");
-							if (State->JustSwungPickaxe) {
-								return;
-							}
-							NetMulticastPlayPickaxeSwingAnimation();
-							State->JustSwungPickaxe = true;
-							FTimerHandle PickaxeTimerHandle;
-							GetWorldTimerManager().SetTimer(PickaxeTimerHandle, this, &ASenniteCharacter::ServerPickaxeTimeOut, 0.403f, false);
-						}
-						if (State->CurrentWeapon == 1) {
-							if (State->JustShotRifle) {
-								return;
-							}
-							NetMulticastPlayShootRifleAnimation();
-							CurrentWeapon->CurrentBulletCount--;
-							bShotAuthorized = true;
-							State->EquippedWeaponsClips[CurrentWeaponType]--;
-							State->JustShotRifle = true;
-							FTimerHandle RifleTimerHandle;
-							GetWorldTimerManager().SetTimer(RifleTimerHandle, this, &ASenniteCharacter::ServerRifleTimeOut, 0.233f, false);
-						}
-						else if (State->CurrentWeapon == 2) {
-							if (State->JustShotShotgun) {
-								return;
-							}
-							NetMulticastPlayShootShotgunAnimation();
-							CurrentWeapon->CurrentBulletCount--;
-							bShotAuthorized = true;
-							State->EquippedWeaponsClips[CurrentWeaponType]--;
-							State->JustShotShotgun = true;
-							FTimerHandle ShotgunTimerHandle;
-							GetWorldTimerManager().SetTimer(ShotgunTimerHandle, this, &ASenniteCharacter::ServerShotgunTimeOut, 1.3f, false);
-						}
-
-					}
-					ClientGetBulletTransform();
-
-
-				}
-			}
-		}
+	ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
+	if (CurrentWeapon == nullptr || State == nullptr || !State->HoldingWeapon) {
+		return;
 	}
+	if (!IsGun(State->CurrentWeapon)) {
+		// the pickaxe: swung, not fired
+		if (State->CurrentWeapon == 0 && !State->AimedIn && !State->JustSwungPickaxe) {
+			NetMulticastPlayPickaxeSwingAnimation();
+			State->JustSwungPickaxe = true;
+			FTimerHandle PickaxeTimerHandle;
+			GetWorldTimerManager().SetTimer(PickaxeTimerHandle, this, &ASenniteCharacter::ServerPickaxeTimeOut, 0.403f, false);
+		}
+		return;
+	}
+	if (CurrentWeapon->CurrentBulletCount <= 0) {
+		// nothing in the magazine: reload
+		ServerReloadWeapons();
+		return;
+	}
+	if (State->JustReloadedRifle || State->JustReloadedShotgun || State->JustShotRifle || State->JustShotShotgun) {
+		return; // reloading, or the last shot is not over
+	}
+	// One shot, the same for every gun; what differs is the gun's own: how long until the next
+	// (FireSeconds), and whether it goes on while held. A gun that fires while held and one that fires
+	// a shot a pull keep the marks the rifle and the shotgun always had.
+	NetMulticastGunFired();
+	CurrentWeapon->CurrentBulletCount--;
+	bShotAuthorized = true;
+	State->EquippedWeaponsClips[CurrentWeaponType]--;
+	FTimerHandle Again;
+	if (CurrentWeapon->bHeldFires) {
+		State->JustShotRifle = true;
+		GetWorldTimerManager().SetTimer(Again, this, &ASenniteCharacter::ServerRifleTimeOut, FMath::Max(0.02f, CurrentWeapon->FireSeconds), false);
+	}
+	else {
+		State->JustShotShotgun = true;
+		GetWorldTimerManager().SetTimer(Again, this, &ASenniteCharacter::ServerShotgunTimeOut, FMath::Max(0.02f, CurrentWeapon->FireSeconds), false);
+	}
+	ClientGetBulletTransform();
 }
 
 bool ASenniteCharacter::ServerFireWeapon_Validate() {
@@ -1699,131 +1692,34 @@ bool ASenniteCharacter::ServerUseHealingItem_Validate(int HealingItemType) {
 }
 
 
-void ASenniteCharacter::ServerReloadWeapons_Implementation() { // todo add current weapon null check
-	if (CurrentWeapon != nullptr) {
-		if (GetController()) {
-			ASennitePlayerState* State = Cast<ASennitePlayerState>(GetController()->PlayerState);
-			if (State) {
-				if (State->CurrentWeapon > 2 || State->CurrentWeapon < 1) {
-					return; // can only reload if holding a assault rifle or shotgun
-				}
-				if (State->JustShotRifle || State->JustShotShotgun || State->JustReloadedRifle || State->JustReloadedShotgun) {
-					return; // currently reloading or just shot
-				}
-				if (State->AimedIn) {
-					if (State->CurrentWeapon == 1) {
-						if (State->JustShotRifle) {
-							return;
-						}
-						if (State->EquippedWeaponsAmmunition[State->CurrentWeapon] <= 0) {
-							return; // no ammo left
-						}
-
-						int BulletsNeeded = CurrentWeapon->MagazineSize - CurrentWeapon->CurrentBulletCount;
-						if (BulletsNeeded == 0) {
-							return; // magazine is full
-						}
-
-						if (State->EquippedWeaponsAmmunition[State->CurrentWeapon] < BulletsNeeded) {
-							BulletsNeeded = State->EquippedWeaponsAmmunition[State->CurrentWeapon];
-							State->EquippedWeaponsAmmunition[State->CurrentWeapon] = 0;
-						}
-						else {
-							State->EquippedWeaponsAmmunition[State->CurrentWeapon] -= BulletsNeeded;
-						}
-						NetMulticastPlayReloadRifleIronsightsAnimation();
-						CurrentWeapon->CurrentBulletCount += BulletsNeeded;
-						State->EquippedWeaponsClips[State->CurrentWeapon] += BulletsNeeded;
-						State->JustReloadedRifle = true;
-						FTimerHandle RifleTimerHandle;
-						GetWorldTimerManager().SetTimer(RifleTimerHandle, this, &ASenniteCharacter::ServerRifleReloadTimeOut, 2.167f, false);
-					}
-					else if (State->CurrentWeapon == 2) {
-						if (State->JustShotShotgun) {
-							return;
-						}
-						if (State->EquippedWeaponsAmmunition[State->CurrentWeapon] <= 0) {
-							return; // no ammo left
-						}
-
-						int BulletsNeeded = CurrentWeapon->MagazineSize - CurrentWeapon->CurrentBulletCount;
-						if (BulletsNeeded == 0) {
-							return; // magazine is full
-						}
-
-						if (State->EquippedWeaponsAmmunition[State->CurrentWeapon] < BulletsNeeded) {
-							BulletsNeeded = State->EquippedWeaponsAmmunition[State->CurrentWeapon];
-							State->EquippedWeaponsAmmunition[State->CurrentWeapon] = 0;
-						}
-						else {
-							State->EquippedWeaponsAmmunition[State->CurrentWeapon] -= BulletsNeeded;
-						}
-						NetMulticastPlayReloadShotgunIronsightsAnimation();
-						CurrentWeapon->CurrentBulletCount += BulletsNeeded;
-						State->EquippedWeaponsClips[State->CurrentWeapon] += BulletsNeeded;
-						State->JustReloadedShotgun = true;
-						FTimerHandle ShotgunTimerHandle;
-						GetWorldTimerManager().SetTimer(ShotgunTimerHandle, this, &ASenniteCharacter::ServerShotgunReloadTimeOut, 4.3f, false);
-					}
-				}
-				else {
-					if (State->CurrentWeapon == 1) {
-						if (State->JustShotRifle) {
-							return;
-						}
-						if (State->EquippedWeaponsAmmunition[State->CurrentWeapon] <= 0) {
-							return; // no ammo left
-						}
-						int BulletsNeeded = CurrentWeapon->MagazineSize - CurrentWeapon->CurrentBulletCount;
-						if (BulletsNeeded == 0) {
-							return; // magazine is full
-						}
-						//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString::FromInt(State->EquippedWeaponsAmmunition[State->CurrentWeapon]));
-						if (State->EquippedWeaponsAmmunition[State->CurrentWeapon] < BulletsNeeded) {
-							BulletsNeeded = State->EquippedWeaponsAmmunition[State->CurrentWeapon];
-							State->EquippedWeaponsAmmunition[State->CurrentWeapon] = 0;
-						}
-						else {
-							State->EquippedWeaponsAmmunition[State->CurrentWeapon] -= BulletsNeeded;
-						}
-						NetMulticastPlayReloadRifleAnimation();
-						CurrentWeapon->CurrentBulletCount += BulletsNeeded;
-						State->EquippedWeaponsClips[State->CurrentWeapon] += BulletsNeeded;
-						//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString::FromInt(CurrentWeapon->CurrentBulletCount));
-						State->JustReloadedRifle = true;
-						FTimerHandle RifleTimerHandle;
-						GetWorldTimerManager().SetTimer(RifleTimerHandle, this, &ASenniteCharacter::ServerRifleReloadTimeOut, 2.167f, false);
-					}
-					else if (State->CurrentWeapon == 2) {
-						if (State->JustShotShotgun) {
-							return;
-						}
-						if (State->EquippedWeaponsAmmunition[State->CurrentWeapon] <= 0) {
-							return; // no ammo left
-						}
-						int BulletsNeeded = CurrentWeapon->MagazineSize - CurrentWeapon->CurrentBulletCount;
-						if (BulletsNeeded == 0) {
-							return; // magazine is full
-						}
-
-						if (State->EquippedWeaponsAmmunition[State->CurrentWeapon] < BulletsNeeded) {
-							BulletsNeeded = State->EquippedWeaponsAmmunition[State->CurrentWeapon];
-							State->EquippedWeaponsAmmunition[State->CurrentWeapon] = 0;
-						}
-						else {
-							State->EquippedWeaponsAmmunition[State->CurrentWeapon] -= BulletsNeeded;
-						}
-						NetMulticastPlayReloadShotgunAnimation();
-						CurrentWeapon->CurrentBulletCount += BulletsNeeded;
-						State->EquippedWeaponsClips[State->CurrentWeapon] += BulletsNeeded;
-						State->JustReloadedShotgun = true;
-						FTimerHandle ShotgunTimerHandle;
-						GetWorldTimerManager().SetTimer(ShotgunTimerHandle, this, &ASenniteCharacter::ServerShotgunReloadTimeOut, 4.3f, false);
-					}
-
-				}
-			}
-		}
+void ASenniteCharacter::ServerReloadWeapons_Implementation() {
+	ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
+	if (CurrentWeapon == nullptr || State == nullptr || !IsGun(State->CurrentWeapon) || !State->EquippedWeaponsAmmunition.IsValidIndex(State->CurrentWeapon)) {
+		return; // only a gun reloads
+	}
+	if (State->JustShotRifle || State->JustShotShotgun || State->JustReloadedRifle || State->JustReloadedShotgun) {
+		return; // reloading already, or the last shot is not over
+	}
+	// as many rounds as the magazine lacks, or as many as the hero carries for this gun
+	int& Carried = State->EquippedWeaponsAmmunition[State->CurrentWeapon];
+	const int Loaded = FMath::Min(CurrentWeapon->MagazineSize - CurrentWeapon->CurrentBulletCount, Carried);
+	if (Loaded <= 0) {
+		return; // full, or nothing to load it with
+	}
+	Carried -= Loaded;
+	CurrentWeapon->CurrentBulletCount += Loaded;
+	State->EquippedWeaponsClips[State->CurrentWeapon] += Loaded;
+	// the reload takes the gun's own time (ReloadSeconds); the marks are the rifle's and the shotgun's, as for a shot
+	FTimerHandle Loading;
+	if (CurrentWeapon->bHeldFires) {
+		State->AimedIn ? NetMulticastPlayReloadRifleIronsightsAnimation() : NetMulticastPlayReloadRifleAnimation();
+		State->JustReloadedRifle = true;
+		GetWorldTimerManager().SetTimer(Loading, this, &ASenniteCharacter::ServerRifleReloadTimeOut, FMath::Max(0.05f, CurrentWeapon->ReloadSeconds), false);
+	}
+	else {
+		State->AimedIn ? NetMulticastPlayReloadShotgunIronsightsAnimation() : NetMulticastPlayReloadShotgunAnimation();
+		State->JustReloadedShotgun = true;
+		GetWorldTimerManager().SetTimer(Loading, this, &ASenniteCharacter::ServerShotgunReloadTimeOut, FMath::Max(0.05f, CurrentWeapon->ReloadSeconds), false);
 	}
 }
 
@@ -1872,90 +1768,42 @@ bool ASenniteCharacter::ServerSwitchToPickaxe_Validate() {
 	return true;
 }
 
-void ASenniteCharacter::ServerSwitchToRifle_Implementation() {
-	if (GetController()) {
-		ASennitePlayerState* State = Cast<ASennitePlayerState>(GetController()->PlayerState);
-		if (State) {
-			if (State->CurrentWeapon == 1 && !State->InBuildMode) {
-				return; // currently holding a assault rifle while not in build mode
-			}
-			if (State->HoldingWeapon && State->AimedIn) {
-				return; // currently aimed down sight
-			}
-			if (!State->EquippedWeapons.Contains(1) || State->JustUsedHealingItem || State->JustReloadedRifle || State->JustReloadedShotgun || State->JustSwungPickaxe || State->JustShotShotgun) {
-				return; // already holding the assault rifle or doesn't have one or is currently healing or currently reloading or swinging pickaxe or shooting shotgun
-			}
-			else {
-				if (State->InBuildMode) {
-					State->InBuildMode = false;
-					State->BuildMode = FString("None");
-					if (BuildingPreview != nullptr) {
-						BuildingPreview->Destroy();
-						BuildingPreview = nullptr;
-					}
-				}
-				if (CurrentWeapon && CurrentWeaponType > 0 && CurrentWeaponType < 3) {
-					State->EquippedWeaponsClips[CurrentWeaponType] = CurrentWeapon->CurrentBulletCount;
-				}
-				if (CurrentWeapon) {
-					CurrentWeapon->Destroy();
-					CurrentWeapon = nullptr;
-				}
-				if (CurrentHealingItem) {
-					CurrentHealingItem->Destroy();
-					CurrentHealingItem = nullptr;
-				}
-				ClientGetWeaponTransform(1);
-			}
+void ASenniteCharacter::ServerHoldGun_Implementation(int32 Type) {
+	ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
+	if (State == nullptr || !IsGun(Type)) {
+		return;
+	}
+	if (State->CurrentWeapon == Type && !State->InBuildMode) {
+		return; // in hand already
+	}
+	if (State->HoldingWeapon && State->AimedIn) {
+		return; // aiming in
+	}
+	if (!State->EquippedWeapons.Contains(Type) || State->JustUsedHealingItem || State->JustReloadedRifle || State->JustReloadedShotgun
+		|| State->JustSwungPickaxe || State->JustShotRifle || State->JustShotShotgun) {
+		return; // has none, or is healing, reloading, swinging or between shots
+	}
+	if (State->InBuildMode) {
+		State->InBuildMode = false;
+		State->BuildMode = FString("None");
+		if (BuildingPreview != nullptr) {
+			BuildingPreview->Destroy();
+			BuildingPreview = nullptr;
 		}
 	}
-}
-
-bool ASenniteCharacter::ServerSwitchToRifle_Validate() {
-	return true;
-}
-
-void ASenniteCharacter::ServerSwitchToShotgun_Implementation() {
-	if (GetController()) {
-		ASennitePlayerState* State = Cast<ASennitePlayerState>(GetController()->PlayerState);
-		if (State) {
-			if (State->CurrentWeapon == 2 && !State->InBuildMode) {
-				return; // currently holding a shotgun while not in build mode
-			}
-			if (State->HoldingWeapon && State->AimedIn) {
-				return; // currently aimed down sight
-			}
-			if (!State->EquippedWeapons.Contains(2) || State->JustUsedHealingItem || State->JustReloadedRifle || State->JustReloadedShotgun || State->JustSwungPickaxe || State->JustShotRifle) {
-				return; // already holding the pickaxe or doesn't have one or is currently healing or currently reloading or swinging pickaxe or just shot rifle
-			}
-			else {
-				if (State->InBuildMode) {
-					State->InBuildMode = false;
-					State->BuildMode = FString("None");
-					if (BuildingPreview != nullptr) {
-						BuildingPreview->Destroy();
-						BuildingPreview = nullptr;
-					}
-				}
-				if (CurrentWeapon && CurrentWeaponType > 0 && CurrentWeaponType < 3) {
-					State->EquippedWeaponsClips[CurrentWeaponType] = CurrentWeapon->CurrentBulletCount;
-				}
-				if (CurrentWeapon) {
-					CurrentWeapon->Destroy();
-					CurrentWeapon = nullptr;
-				}
-				if (CurrentHealingItem) {
-					CurrentHealingItem->Destroy();
-					CurrentHealingItem = nullptr;
-				}
-				ClientGetWeaponTransform(2);
-			}
-		}
+	// the gun put away keeps what is in its magazine
+	if (CurrentWeapon && IsGun(CurrentWeaponType)) {
+		State->EquippedWeaponsClips[CurrentWeaponType] = CurrentWeapon->CurrentBulletCount;
 	}
-}
-
-bool ASenniteCharacter::ServerSwitchToShotgun_Validate() {
-	return true;
+	if (CurrentWeapon) {
+		CurrentWeapon->Destroy();
+		CurrentWeapon = nullptr;
+	}
+	if (CurrentHealingItem) {
+		CurrentHealingItem->Destroy();
+		CurrentHealingItem = nullptr;
+	}
+	ClientGetWeaponTransform(Type);
 }
 
 void ASenniteCharacter::ServerSwitchToHealingItem_Implementation(int HealingItemType) {
@@ -1986,7 +1834,7 @@ void ASenniteCharacter::ServerSwitchToHealingItem_Implementation(int HealingItem
 					}
 				}
 				//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString::FromInt(CurrentWeaponType));
-				if (CurrentWeapon && CurrentWeaponType > 0 && CurrentWeaponType < 3) {
+				if (CurrentWeapon && IsGun(CurrentWeaponType)) {
 					State->EquippedWeaponsClips[CurrentWeaponType] = CurrentWeapon->CurrentBulletCount;
 				}
 				if (CurrentWeapon) {
@@ -2197,9 +2045,7 @@ void ASenniteCharacter::Die(ASenniteCharacter* Killer) {
 	}
 	// The weapons the hero had are in a crate left where it fell, for whoever comes by: one of each
 	// kind, as new. What it carried besides (rounds, bandages, potions, materials) goes with it.
-	if (const ASennitePlayerState* Mine = GetPlayerState<ASennitePlayerState>()) {
-		ASenniteCrate::Leave(GetWorld(), this, Mine->EquippedWeapons.Contains(1), Mine->EquippedWeapons.Contains(2));
-	}
+	ASenniteCrate::Leave(GetWorld(), this, GunsHeld());
 
 	if (Killer != nullptr && Killer != this && Killer->GetController() != nullptr) {
 		if (ASennitePlayerState* KillerState = Cast<ASennitePlayerState>(Killer->GetController()->PlayerState)) {
@@ -2389,20 +2235,15 @@ void ASenniteCharacter::NetMulticastPlayPickaxeSwingAnimation_Implementation() {
 	PlayAnimMontage(PickaxeSwingingAnimation, 1.f, NAME_None);
 }
 
-void ASenniteCharacter::NetMulticastPlayShootRifleAnimation_Implementation() {
+void ASenniteCharacter::NetMulticastGunFired_Implementation() {
 	KickGun();
-}
-
-void ASenniteCharacter::NetMulticastPlayShootShotgunAnimation_Implementation() {
-	KickGun();
-}
-
-void ASenniteCharacter::NetMulticastPlayShootRifleIronsightsAnimation_Implementation() {
-	KickGun();
-}
-
-void ASenniteCharacter::NetMulticastPlayShootShotgunIronsightsAnimation_Implementation() {
-	KickGun();
+	// and is heard, where the gun is
+	if (CurrentWeapon != nullptr && GetNetMode() != NM_DedicatedServer) {
+		if (USoundBase* Shot = Cast<USoundBase>(GetDefault<AWeaponActor>(CurrentWeapon->GetClass())->FireSound.TryLoad())) {
+			USoundAttenuation* Fades = Cast<USoundAttenuation>(GetDefault<AWeaponActor>()->FireFalloff.TryLoad());
+			UGameplayStatics::PlaySoundAtLocation(this, Shot, CurrentWeapon->GetMuzzleLocation(), 1.0f, 1.0f, 0.0f, Fades);
+		}
+	}
 }
 
 void ASenniteCharacter::NetMulticastPlayUseHealingItemAnimation_Implementation() {

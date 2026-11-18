@@ -377,13 +377,14 @@ namespace
 				for (TActorIterator<ASenniteCrate> It(World); It; ++It) {
 					if (It->bLeft) {
 						++Left;
-						bHoldsTheirs = It->bRifle && It->bShotgun && !It->bOpen;
+						// the four guns the joining player's crate gave them, and no rounds
+						bHoldsTheirs = (It->Guns & 30) == 30 && !It->bRounds && !It->bOpen;
 						const UPrimitiveComponent* Body = Cast<UPrimitiveComponent>(It->GetComponentByClass(UStaticMeshComponent::StaticClass()));
 						bWalkedThrough = Body != nullptr && Body->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Overlap;
 					}
 				}
 				Test->TestEqual(TEXT("The fallen player left one crate where they fell"), Left, 1);
-				Test->TestTrue(TEXT("It holds the rifle and the shotgun they had, closed"), bHoldsTheirs);
+				Test->TestTrue(TEXT("It holds the guns they had, closed"), bHoldsTheirs);
 				Test->TestTrue(TEXT("Heroes walk through it"), bWalkedThrough);
 				Test->TestEqual(TEXT("No weapon lies about where they fell"), GameCheck::LyingAbout(World), 0);
 				Test->TestEqual(TEXT("The fallen player has one spectator on the server"), Watchers, 1);

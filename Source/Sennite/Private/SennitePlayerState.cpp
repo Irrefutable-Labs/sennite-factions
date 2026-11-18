@@ -19,9 +19,13 @@ ASennitePlayerState::ASennitePlayerState() {
 	EquippedWeaponsAmmunition.Add(0); // pickaxe
 	EquippedWeaponsAmmunition.Add(0); // assault rifle
 	EquippedWeaponsAmmunition.Add(0); // shotgun
+	EquippedWeaponsAmmunition.Add(0); // energy rifle
+	EquippedWeaponsAmmunition.Add(0); // sniper
 	EquippedWeaponsClips.Add(0); // pickaxe
 	EquippedWeaponsClips.Add(0); // assault rifle
 	EquippedWeaponsClips.Add(0); // shotgun
+	EquippedWeaponsClips.Add(0); // energy rifle
+	EquippedWeaponsClips.Add(0); // sniper
 	MaterialCounts.Add(0); // wood
 	MaterialCounts.Add(0); // stone
 	MaterialCounts.Add(0); // steel

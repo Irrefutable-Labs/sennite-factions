@@ -236,11 +236,15 @@ public:
 	void ClientEditRefused(ABuildingActor* Piece);
 
 	/**
-	 * What a crate held goes to the hero, on the server: each weapon it does not have yet, with a full
-	 * magazine, the rounds, the bandages and the potions. The first new weapon comes to hand. False,
-	 * and nothing is given, while the hero is busy (building, firing, reloading, healing).
+	 * What a crate held goes to the hero, on the server: each of its guns the hero does not have yet
+	 * (Guns has a bit for each weapon slot), with a full magazine; with bRounds, each of those guns'
+	 * rounds (AWeaponActor::CrateRounds); the bandages and the potions. The first new gun comes to
+	 * hand. False, and nothing is given, while the hero is busy (building, firing, reloading, healing).
 	 */
-	bool TakeFromCrate(bool bRifle, bool bShotgun, int32 Rounds, int32 Shells, int32 Bandages, int32 Potions);
+	bool TakeFromCrate(int32 Guns, bool bRounds, int32 Bandages, int32 Potions);
+
+	/** A bit for each gun the hero has (bit n for weapon slot n). */
+	int32 GunsHeld() const;
 
 	/** A shot left the gun in hand: it kicks. */
 	void KickGun();
@@ -432,6 +436,15 @@ protected:
 	void HoldShotgun();
 
 	UFUNCTION()
+	void HoldEnergyRifle();
+
+	UFUNCTION()
+	void HoldSniper();
+
+	/** Whether a weapon slot holds a gun: every slot but the pickaxe's that has a weapon class. */
+	bool IsGun(int32 Type) const;
+
+	UFUNCTION()
 	void HoldBandage();
 
 	UFUNCTION()
@@ -449,7 +462,7 @@ protected:
 
 	/** What a crate this player opened gave, for the HUD to say. */
 	UFUNCTION(Client, Reliable)
-	void ClientCrateGave(bool bRifle, bool bShotgun, int32 Rounds, int32 Shells, int32 Bandages, int32 Potions);
+	void ClientCrateGave(int32 NewGuns, bool bRounds, int32 Bandages, int32 Potions);
 
 
 	/*UFUNCTION(Server, WithValidation)
@@ -589,11 +602,9 @@ public:
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerSwitchToPickaxe();
 
-	UFUNCTION(Server, Reliable, WithValidation)
-	void ServerSwitchToRifle();
-
-	UFUNCTION(Server, Reliable, WithValidation)
-	void ServerSwitchToShotgun();
+	/** Take a gun the hero has into its hands: 1 the rifle, 2 the shotgun, 3 the energy rifle, 4 the sniper. */
+	UFUNCTION(Server, Reliable)
+	void ServerHoldGun(int32 Type);
 
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerSwitchToHealingItem(int HealingItemType);
@@ -705,17 +716,9 @@ public:
 	UFUNCTION(NetMulticast, Unreliable)
 	void NetMulticastPlayPickaxeSwingAnimation();
 
+	/** The gun in hand fired: on every machine it kicks and is heard. */
 	UFUNCTION(NetMulticast, Unreliable)
-	void NetMulticastPlayShootRifleAnimation();
-
-	UFUNCTION(NetMulticast, Unreliable)
-	void NetMulticastPlayShootShotgunAnimation();
-
-	UFUNCTION(NetMulticast, Unreliable)
-	void NetMulticastPlayShootRifleIronsightsAnimation();
-
-	UFUNCTION(NetMulticast, Unreliable)
-	void NetMulticastPlayShootShotgunIronsightsAnimation();
+	void NetMulticastGunFired();
 
 	UFUNCTION(NetMulticast, Unreliable)
 	void NetMulticastPlayUseHealingItemAnimation();

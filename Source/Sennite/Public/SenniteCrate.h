@@ -2,8 +2,8 @@
 //
 // A hero starts with a pickaxe. Crates stand by where heroes start on each base of an arena. What a
 // crate holds is inside it: nothing lies about to be walked over. A hero beside a closed crate opens
-// it (the OpenCrate key) and has what it held: the rifle and the shotgun, if the hero has none yet,
-// rounds for both, a pack of bandages and potions. The first new weapon is in the hero's hand at once
+// it (the OpenCrate key) and has what it held: every gun the hero does not have yet (the rifle, the
+// shotgun, the energy rifle, the sniper), rounds for each, a pack of bandages and potions. The first new weapon is in the hero's hand at once
 // and the HUD says what the crate gave. A while later the crate is closed and full again.
 //
 // A hero that falls leaves a crate where it fell, holding the weapons it had. Whoever opens it has
@@ -48,12 +48,9 @@ public:
 	UPROPERTY(Config)
 	float RestockSeconds = 45.0f;
 
-	/** The rounds a crate gives the hero who opens it. */
+	/** What opening a crate sounds like to the player who opened it. */
 	UPROPERTY(Config)
-	int32 RifleRounds = 90;
-
-	UPROPERTY(Config)
-	int32 ShotgunShells = 20;
+	FSoftObjectPath OpenSound;
 
 	/** How long the crate a fallen hero leaves stays if nobody opens it. */
 	UPROPERTY(Config)
@@ -74,11 +71,13 @@ public:
 	UPROPERTY(Replicated)
 	bool bLeft = false;
 
-	/** What it holds, on the server. A crate of an arena holds everything; one a hero left, the weapons that hero had. */
-	bool bRifle = true;
-	bool bShotgun = true;
-	int32 Rounds = 0;
-	int32 Shells = 0;
+	/**
+	 * What it holds, on the server. A crate of an arena holds every gun (a bit for each weapon slot),
+	 * each gun's rounds (AWeaponActor::CrateRounds), a pack of bandages and of potions; one a hero left
+	 * holds the guns that hero had and nothing else.
+	 */
+	int32 Guns = ~0;
+	bool bRounds = true;
 	int32 Bandages = 0;
 	int32 Potions = 0;
 
@@ -90,7 +89,7 @@ public:
 	bool Open(ASenniteCharacter* By);
 
 	/** The crate a fallen hero leaves on the ground under where it fell, holding these weapons. On the server; none where there is no ground under it. */
-	static ASenniteCrate* Leave(UWorld* World, const AActor* Fallen, bool bHadRifle, bool bHadShotgun);
+	static ASenniteCrate* Leave(UWorld* World, const AActor* Fallen, int32 GunsHad);
 
 	/** The crate nearest a place, no farther than Within; with bClosed, among the closed ones. */
 	static ASenniteCrate* Nearest(const UWorld* World, const FVector& From, float Within, bool bClosed);

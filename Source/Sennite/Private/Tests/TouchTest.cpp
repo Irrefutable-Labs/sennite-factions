@@ -21,6 +21,7 @@
 #include "SennitePlayerController.h"
 #include "SennitePlayerState.h"
 #include "SenniteTouch.h"
+#include "SenniteWeapons.h"
 #include "WeaponActor.h"
 #include "Engine/GameViewportClient.h"
 #include "EngineUtils.h"
@@ -273,7 +274,28 @@ namespace
 			}
 			if (Step == 3 && Elapsed(World) > 1.15) { Step = 4; Lift(TEXT("RIFLE")); return false; }
 			if (Step == 4 && Elapsed(World) > 2.0) {
+				Step = 5;
 				Test->TestTrue(TEXT("RIFLE puts the rifle in her hand"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 1);
+				Press(TEXT("ENERGY"));
+				return false;
+			}
+			if (Step == 5 && Elapsed(World) > 2.15) { Step = 6; Lift(TEXT("ENERGY")); return false; }
+			if (Step == 6 && Elapsed(World) > 3.0) {
+				Step = 7;
+				Test->TestTrue(TEXT("ENERGY puts the energy rifle in her hand"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 3);
+				Press(TEXT("SNIPER"));
+				return false;
+			}
+			if (Step == 7 && Elapsed(World) > 3.15) { Step = 8; Lift(TEXT("SNIPER")); return false; }
+			if (Step == 8 && Elapsed(World) > 4.0) {
+				Step = 9;
+				Test->TestTrue(TEXT("SNIPER puts the sniper in her hand"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 4);
+				Press(TEXT("RIFLE"));
+				return false;
+			}
+			if (Step == 9 && Elapsed(World) > 4.15) { Step = 10; Lift(TEXT("RIFLE")); return false; }
+			if (Step == 10 && Elapsed(World) > 5.0) {
+				Test->TestTrue(TEXT("RIFLE puts the rifle back in her hand"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 1);
 				ClipMark = Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->CurrentBulletCount : 0;
 				TopZ = Hero->GetActorLocation().Z;
 				Mark = Hero->GetActorLocation();
@@ -326,7 +348,7 @@ namespace
 				return Elapsed(World) > 8.0 ? Fail(TEXT("RELOAD did not fill the rifle from the rounds the crate gave")) : false;
 			}
 			Test->TestEqual(TEXT("RELOAD takes the rounds it loads from those the crate gave"), State->EquippedWeaponsAmmunition[1],
-				GetDefault<ASenniteCrate>()->RifleRounds - (Hero->CurrentWeapon->MagazineSize - CountMark));
+				GetDefault<ASenniteRifle>()->CrateRounds - (Hero->CurrentWeapon->MagazineSize - CountMark));
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK reload: clip %d -> %d, %d to spare"), CountMark, Hero->CurrentWeapon->CurrentBulletCount, State->EquippedWeaponsAmmunition[1]);
 			CountMark = Built(World);
 			Enter(EPhase::Build, World);

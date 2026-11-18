@@ -34,9 +34,7 @@ void ASenniteCrate::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 void ASenniteCrate::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
-	// a crate holds everything: both weapons, rounds for both, a pack of bandages and of potions
-	Rounds = RifleRounds;
-	Shells = ShotgunShells;
+	// a crate holds everything: every gun, rounds for each, a pack of bandages and of potions
 	Bandages = GetDefault<ASenniteBandage>()->Count;
 	Potions = GetDefault<ASennitePotion>()->Count;
 	UStaticMesh* Mesh = Cast<UStaticMesh>(Model.TryLoad());
@@ -75,7 +73,7 @@ bool ASenniteCrate::Open(ASenniteCharacter* By)
 		return false;
 	}
 	// what it holds goes straight to the hero who opened it
-	if (!By->TakeFromCrate(bRifle, bShotgun, Rounds, Shells, Bandages, Potions)) {
+	if (!By->TakeFromCrate(Guns, bRounds, Bandages, Potions)) {
 		return false;
 	}
 	if (bLeft) {
@@ -95,9 +93,9 @@ void ASenniteCrate::Restock()
 	bOpen = false;
 }
 
-ASenniteCrate* ASenniteCrate::Leave(UWorld* World, const AActor* Fallen, bool bHadRifle, bool bHadShotgun)
+ASenniteCrate* ASenniteCrate::Leave(UWorld* World, const AActor* Fallen, int32 GunsHad)
 {
-	if (World == nullptr || Fallen == nullptr || World->GetNetMode() == NM_Client || (!bHadRifle && !bHadShotgun)) {
+	if (World == nullptr || Fallen == nullptr || World->GetNetMode() == NM_Client || GunsHad == 0) {
 		return nullptr;
 	}
 	// on the ground under where the hero fell: the land, or what is built there
@@ -115,11 +113,9 @@ ASenniteCrate* ASenniteCrate::Leave(UWorld* World, const AActor* Fallen, bool bH
 	}
 	Crate->bLeft = true;
 	Crate->FinishSpawning(FTransform(FRotator(0.0, Yaw, 0.0), Ground.ImpactPoint));
-	// the weapons the hero had, as new, and nothing else
-	Crate->bRifle = bHadRifle;
-	Crate->bShotgun = bHadShotgun;
-	Crate->Rounds = 0;
-	Crate->Shells = 0;
+	// the guns the hero had, as new, and nothing else
+	Crate->Guns = GunsHad;
+	Crate->bRounds = false;
 	Crate->Bandages = 0;
 	Crate->Potions = 0;
 	Crate->SetLifeSpan(FMath::Max(1.0f, Crate->LeftSeconds));

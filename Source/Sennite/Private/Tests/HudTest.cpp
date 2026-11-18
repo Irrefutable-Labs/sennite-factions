@@ -17,6 +17,7 @@
 #include "SenniteCharacter.h"
 #include "SenniteHealing.h"
 #include "SenniteHUD.h"
+#include "SenniteWeapons.h"
 #include "SennitePlayerState.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "HAL/PlatformTime.h"
@@ -32,7 +33,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, Start, BuildMode, Built, OpenCrate, Opened, Shotgun, Rifle, Fired, Done };
+		enum class EPhase { WaitForPawn, Start, BuildMode, Built, OpenCrate, Opened, Shotgun, Energy, Sniper, Rifle, Fired, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -163,12 +164,11 @@ namespace
 			if (Elapsed(World) < 0.8) {
 				return false;
 			}
-			const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
 			Hides(Hud, TEXT("crate"), TEXT("how to open a crate that is open"));
-			Shows(Hud, *FString::Printf(TEXT("crategave=RIFLE   SHOTGUN   +%d ROUNDS   +%d SHELLS   +%d BANDAGES   +%d POTIONS"), Rules->RifleRounds, Rules->ShotgunShells,
+			Shows(Hud, *FString::Printf(TEXT("crategave=RIFLE   SHOTGUN   ENERGY RIFLE   SNIPER   +ROUNDS   +%d BANDAGES   +%d POTIONS"),
 				GetDefault<ASenniteBandage>()->Count, GetDefault<ASennitePotion>()->Count), TEXT("what the crate gave"));
 			Shows(Hud, TEXT("weapon=RIFLE"), TEXT("the rifle the crate gave, in hand"));
-			Shows(Hud, *FString::Printf(TEXT("reserve=%d"), Rules->RifleRounds), TEXT("the rounds the crate gave"));
+			Shows(Hud, *FString::Printf(TEXT("reserve=%d"), GetDefault<ASenniteRifle>()->CrateRounds), TEXT("the rounds the crate gave"));
 			Log(Hud, TEXT("after opening the crate"));
 			GameCheck::Shot(TEXT("Hud"), TEXT("crate.png"));
 			Tap(Controller, EKeys::Three);
@@ -182,7 +182,29 @@ namespace
 			}
 			Shows(Hud, TEXT("weapon=SHOTGUN"), TEXT("the shotgun in hand"));
 			Shows(Hud, TEXT("ammo=5"), TEXT("the shotgun's five rounds"));
-			Shows(Hud, *FString::Printf(TEXT("reserve=%d"), GetDefault<ASenniteCrate>()->ShotgunShells), TEXT("the shells the crate gave"));
+			Shows(Hud, *FString::Printf(TEXT("reserve=%d"), GetDefault<ASenniteShotgun>()->CrateRounds), TEXT("the shells the crate gave"));
+			Tap(Controller, EKeys::Six);
+			Enter(EPhase::Energy, World);
+			return false;
+
+		case EPhase::Energy:
+			if (Elapsed(World) < 0.8) {
+				return false;
+			}
+			Shows(Hud, TEXT("weapon=ENERGY RIFLE"), TEXT("the energy rifle in hand"));
+			Shows(Hud, *FString::Printf(TEXT("ammo=%d"), GetDefault<ASenniteEnergyRifle>()->MagazineSize), TEXT("the energy rifle's full cell"));
+			Shows(Hud, *FString::Printf(TEXT("reserve=%d"), GetDefault<ASenniteEnergyRifle>()->CrateRounds), TEXT("the energy rifle's rounds from the crate"));
+			Tap(Controller, EKeys::Seven);
+			Enter(EPhase::Sniper, World);
+			return false;
+
+		case EPhase::Sniper:
+			if (Elapsed(World) < 0.8) {
+				return false;
+			}
+			Shows(Hud, TEXT("weapon=SNIPER"), TEXT("the sniper in hand"));
+			Shows(Hud, *FString::Printf(TEXT("ammo=%d"), GetDefault<ASenniteSniper>()->MagazineSize), TEXT("the sniper's five rounds"));
+			Shows(Hud, *FString::Printf(TEXT("reserve=%d"), GetDefault<ASenniteSniper>()->CrateRounds), TEXT("the sniper's rounds from the crate"));
 			Tap(Controller, EKeys::Two);
 			Enter(EPhase::Rifle, World);
 			return false;

@@ -209,10 +209,13 @@ void ASenniteHUD::DrawStatus()
 
 	// bottom right: the weapon in hand, the rounds in it, and the rounds carried for it
 	if (Now.bHoldingWeapon) {
-		const TCHAR* Names[] = { TEXT("PICKAXE"), TEXT("RIFLE"), TEXT("SHOTGUN") };
+		// a gun by its own name (AWeaponActor::DisplayName)
+		const ASenniteCharacter* Armed = Cast<ASenniteCharacter>(GetOwningPawn());
+		const FString Named = Now.WeaponType == 0 ? FString(TEXT("PICKAXE"))
+			: Armed != nullptr && Armed->CurrentWeapon != nullptr ? GetDefault<AWeaponActor>(Armed->CurrentWeapon->GetClass())->DisplayName : FString(TEXT("WEAPON"));
 		const float AmmoX = W - 210.0f * S;
 		HudPlate(Canvas, AmmoX - 12.0f * S, H - 110.0f * S, 150.0f * S, 86.0f * S);
-		Label(TEXT("weapon"), Now.WeaponType >= 0 && Now.WeaponType < 3 ? Names[Now.WeaponType] : TEXT("WEAPON"), AmmoX, H - 104.0f * S, 12, Dim);
+		Label(TEXT("weapon"), Named, AmmoX, H - 104.0f * S, 12, Dim);
 		if (Now.WeaponType > 0) {
 			Label(TEXT("ammo"), FString::FromInt(Now.Clip), AmmoX, H - 86.0f * S, 34, White);
 			Label(TEXT("reserve"), FString::FromInt(Now.Reserve), AmmoX + 84.0f * S, H - 66.0f * S, 16, Dim);

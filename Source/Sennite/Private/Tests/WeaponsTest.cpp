@@ -18,6 +18,8 @@
 #include "SenniteHeroMesh.h"
 #include "SennitePlayerState.h"
 #include "SenniteWeapons.h"
+#include "Sound/SoundAttenuation.h"
+#include "Sound/SoundBase.h"
 #include "Animation/AnimInstance.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -43,7 +45,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, OpenCrate, FromCrate, HoldShotgun, HoldRifle, Fire, HoldFire, Done };
+		enum class EPhase { WaitForPawn, OpenCrate, FromCrate, HoldShotgun, HoldRifle, Fire, HoldFire, OtherGuns, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -75,6 +77,10 @@ namespace
 		TWeakObjectPtr<UWorld> SpawnWorld;
 		FDelegateHandle SpawnHandle;
 		GameCheck::FCrateRun Crate;
+		int32 Step = 0;
+		int32 OtherGun = 0;
+		UClass* BulletClass = nullptr;
+		GameCheck::FOnlooker Onlooker;
 		/** The last bullet fired: where it started, how far it has been seen from there, and what it looked like. */
 		TWeakObjectPtr<AProjectileActor> Bullet;
 		bool bBulletNoted = false;
@@ -109,6 +115,7 @@ namespace
 			SpawnHandle = World->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateLambda([this](AActor* Spawned) {
 				if (AProjectileActor* Fired = Cast<AProjectileActor>(Spawned)) {
 					++BulletsSpawned;
+					BulletClass = Fired->GetClass();
 					Bullet = Fired;
 					bBulletNoted = false;
 					// where it starts, before it has flown at all
@@ -126,6 +133,14 @@ namespace
 			}
 			Test->TestTrue(TEXT("The hero has a built-in weapon to hide"), Hero->HeroBuiltInWeaponBones.Num() > 0);
 			Test->TestEqual(TEXT("No weapon or healing item lies about on the range: they are in the crate"), GameCheck::LyingAbout(World), 0);
+			// every gun has a name and a shot to be heard, and opening a crate a sound (a run without sound cannot hear them)
+			for (UClass* Gun : { ASenniteRifle::StaticClass(), ASenniteShotgun::StaticClass(), ASenniteEnergyRifle::StaticClass(), ASenniteSniper::StaticClass() }) {
+				const AWeaponActor* Made = GetDefault<AWeaponActor>(Gun);
+				Test->TestTrue(FString::Printf(TEXT("%s has a name"), *Gun->GetName()), !Made->DisplayName.IsEmpty());
+				Test->TestTrue(FString::Printf(TEXT("%s has a shot sound that loads"), *Gun->GetName()), Cast<USoundBase>(Made->FireSound.TryLoad()) != nullptr);
+			}
+			Test->TestTrue(TEXT("A shot fades with distance"), Cast<USoundAttenuation>(GetDefault<AWeaponActor>()->FireFalloff.TryLoad()) != nullptr);
+			Test->TestTrue(TEXT("Opening a crate has a sound that loads"), Cast<USoundBase>(GetDefault<ASenniteCrate>()->OpenSound.TryLoad()) != nullptr);
 			Enter(EPhase::OpenCrate, World);
 			return false;
 		}
@@ -191,12 +206,14 @@ namespace
 				for (const FName& Bone : Hero->HeroBuiltInWeaponBones) {
 					Test->TestTrue(TEXT("Holding a game weapon, the hero's own weapon is hidden"), Mesh->IsBoneHiddenByName(Bone));
 				}
+				Onlooker.Look(World, Controller, Hero);
 				GameCheck::Shot(TEXT("Weapons"), TEXT("shotgun.png"));
 				return false;
 			}
 			if (Elapsed(World) < 1.5) {
 				return false;
 			}
+			Onlooker.Back(Controller, Hero);
 			bShotTaken = false;
 			GameCheck::Key(Controller, EKeys::Two, IE_Pressed);
 			GameCheck::Key(Controller, EKeys::Two, IE_Released);
@@ -292,9 +309,67 @@ namespace
 			Test->TestTrue(TEXT("Let go, the rifle stops: no more than the shot already asked for"), Hero->CurrentWeapon != nullptr && RoundsWhenLetGo - Hero->CurrentWeapon->CurrentBulletCount <= 1);
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK held fire: rounds %d -> %d in a second held, %d a second after letting go"), RoundsBefore, RoundsWhenLetGo,
 				Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1);
+			OtherGun = 0;
+			Enter(EPhase::OtherGuns, World);
+			Step = 0;
+			return false;
+
+		case EPhase::OtherGuns: {
+			// the energy rifle (6) and the sniper (7): each comes to both hands, and a pull of the trigger sends its own bolt
+			struct FOther { FKey Key; UClass* Gun; UClass* Shot; const TCHAR* Name; };
+			const FOther Others[] = { { EKeys::Six, ASenniteEnergyRifle::StaticClass(), ASenniteEnergyBolt::StaticClass(), TEXT("energy rifle") },
+				{ EKeys::Seven, ASenniteSniper::StaticClass(), ASenniteSniperBullet::StaticClass(), TEXT("sniper") } };
+			const FOther& One = Others[OtherGun];
+			if (Step == 0) {
+				Step = 1;
+				GameCheck::Key(Controller, One.Key, IE_Pressed);
+				GameCheck::Key(Controller, One.Key, IE_Released);
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (Step == 1) {
+				if (Elapsed(World) < 1.2) {
+					return false;
+				}
+				Step = 2;
+				CheckHeld(Hero, One.Gun, One.Name);
+				Test->TestTrue(FString::Printf(TEXT("The %s is held in both hands"), One.Name), Body != nullptr && Body->bHolding && Body->GripGap < 2.0 && Body->OffHandGap < 3.0);
+				Test->TestTrue(FString::Printf(TEXT("The %s starts with a full magazine"), One.Name), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->CurrentBulletCount == Hero->CurrentWeapon->MagazineSize);
+				Onlooker.Look(World, Controller, Hero);
+				GameCheck::Shot(TEXT("Weapons"), *FString::Printf(TEXT("%s.png"), *FString(One.Name).Replace(TEXT(" "), TEXT("_"))));
+				BulletsSpawned = 0;
+				BulletClass = nullptr;
+				RoundsBefore = Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->CurrentBulletCount : 0;
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (Step == 2) {
+				if (Elapsed(World) < 0.4) {
+					return false;
+				}
+				Step = 3;
+				Onlooker.Back(Controller, Hero);
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Pressed);
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (Elapsed(World) < 0.8) {
+				return false;
+			}
+			Test->TestEqual(FString::Printf(TEXT("One pull of the %s's trigger sends one bolt out"), One.Name), BulletsSpawned, 1);
+			Test->TestTrue(FString::Printf(TEXT("The %s fires its own bolt"), One.Name), BulletClass == One.Shot);
+			Test->TestTrue(FString::Printf(TEXT("The %s's shot spends one round"), One.Name), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->CurrentBulletCount == RoundsBefore - 1);
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK %s: bolts=%d of %s, rounds %d -> %d"), One.Name, BulletsSpawned, *GetNameSafe(BulletClass), RoundsBefore,
+				Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1);
+			if (++OtherGun < UE_ARRAY_COUNT(Others)) {
+				Step = 0;
+				return false;
+			}
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK finished"));
 			Phase = EPhase::Done;
 			return true;
+		}
 
 		default:
 			return true;

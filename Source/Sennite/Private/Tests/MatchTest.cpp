@@ -267,10 +267,10 @@ namespace
 			}
 			UE_LOG(LogMatchCheck, Display, TEXT("GAMECHECK crates: opened one; holds a rifle with %d rounds and %d more, %d shells"),
 				Hero->CurrentWeapon->CurrentBulletCount, State->EquippedWeaponsAmmunition[1], State->EquippedWeaponsAmmunition[2]);
-			Test->TestEqual(TEXT("The crate gave the hero who opened it its rifle rounds"), State->EquippedWeaponsAmmunition[1], Arm.RoundsBefore + GetDefault<ASenniteCrate>()->RifleRounds);
-			Test->TestEqual(TEXT("and its shells"), State->EquippedWeaponsAmmunition[2], GetDefault<ASenniteCrate>()->ShotgunShells);
+			Test->TestEqual(TEXT("The crate gave the hero who opened it its rifle rounds"), State->EquippedWeaponsAmmunition[1], Arm.RoundsBefore + GetDefault<ASenniteRifle>()->CrateRounds);
+			Test->TestEqual(TEXT("and its shells"), State->EquippedWeaponsAmmunition[2], GetDefault<ASenniteShotgun>()->CrateRounds);
 			Test->TestEqual(TEXT("The rifle has a full magazine"), Hero->CurrentWeapon->CurrentBulletCount, Hero->CurrentWeapon->MagazineSize);
-			Test->TestTrue(TEXT("The crate gave the shotgun too"), State->EquippedWeapons.Contains(2));
+			Test->TestTrue(TEXT("The crate gave the shotgun, the energy rifle and the sniper too"), State->EquippedWeapons.Contains(2) && State->EquippedWeapons.Contains(3) && State->EquippedWeapons.Contains(4));
 			Test->TestEqual(TEXT("and its pack of bandages"), State->HealingItemCounts[0], GetDefault<ASenniteBandage>()->Count);
 			Test->TestEqual(TEXT("and its potions"), State->HealingItemCounts[1], GetDefault<ASennitePotion>()->Count);
 			Test->TestEqual(TEXT("The opened crate laid nothing on the ground"), GameCheck::LyingAbout(World), 0);
@@ -307,7 +307,7 @@ namespace
 			if (Hero->CurrentWeapon == nullptr || Hero->CurrentWeapon->CurrentBulletCount != Hero->CurrentWeapon->MagazineSize) {
 				return Elapsed(World) > 8.0 ? Fail(TEXT("The rifle did not reload from the rounds the crate gave")) : false;
 			}
-			Test->TestEqual(TEXT("The reload took one round of those the crate gave"), State->EquippedWeaponsAmmunition[1], Arm.RoundsBefore + GetDefault<ASenniteCrate>()->RifleRounds - 1);
+			Test->TestEqual(TEXT("The reload took one round of those the crate gave"), State->EquippedWeaponsAmmunition[1], Arm.RoundsBefore + GetDefault<ASenniteRifle>()->CrateRounds - 1);
 			UE_LOG(LogMatchCheck, Display, TEXT("GAMECHECK crates: fired and reloaded; %d rounds more"), State->EquippedWeaponsAmmunition[1]);
 			Enter(EPhase::Restock, World);
 			return false;
@@ -333,9 +333,9 @@ namespace
 			if (!Arm.Crate->bOpen) {
 				return Elapsed(World) > 8.0 ? Fail(TEXT("The crate that was full again did not open at the key")) : false;
 			}
-			Test->TestEqual(TEXT("Opened again, the crate gives its rifle rounds again"), State->EquippedWeaponsAmmunition[1], RoundsMark + GetDefault<ASenniteCrate>()->RifleRounds);
+			Test->TestEqual(TEXT("Opened again, the crate gives its rifle rounds again"), State->EquippedWeaponsAmmunition[1], RoundsMark + GetDefault<ASenniteRifle>()->CrateRounds);
 			Test->TestEqual(TEXT("and its bandages again"), State->HealingItemCounts[0], 2 * GetDefault<ASenniteBandage>()->Count);
-			Test->TestEqual(TEXT("A hero with a rifle and a shotgun gets no second one of either"), State->EquippedWeapons.Num(), 3);
+			Test->TestEqual(TEXT("A hero with every gun gets no second one of any: the pickaxe and four guns"), State->EquippedWeapons.Num(), 5);
 			Test->TestTrue(TEXT("and the rifle is still in hand"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 1);
 			Test->TestEqual(TEXT("Nothing lies on the ground by the crate"), GameCheck::LyingAbout(World), 0);
 			UE_LOG(LogMatchCheck, Display, TEXT("GAMECHECK crates: opened again; %d rounds more, %d bandages, %d weapons"), State->EquippedWeaponsAmmunition[1], State->HealingItemCounts[0], State->EquippedWeapons.Num());
