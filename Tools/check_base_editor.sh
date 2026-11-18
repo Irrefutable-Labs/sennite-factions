@@ -22,6 +22,10 @@
 # Saved/BasePeople/, Saved/BaseShop/, Saved/BaseSession/, Saved/BasePrize/ and Saved/Match_Time/,
 # Saved/Match_Kills/, Saved/Match_Wipe/.
 #
+# SENNITE_TOUCH=1 plays the base editor and people checks by touch, as on a phone: each key the check
+# presses is a tap on the button that presses it, and the cursor is moved by a tap on the map. Only
+# those two read it: SENNITE_TOUCH=1 npx vitest run --config vitest.game.config.ts test/game/base-editor.test.ts test/game/people.test.ts
+#
 # Needs, as the suites on DSM do (Server/README.md):
 #   DSM_APP_HOST_BIN   the dsm-app-host binary
 #   DSM_ENV_CONFIG     the env config of the storage set it runs on

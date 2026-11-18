@@ -37,10 +37,12 @@ namespace
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
 		bool Fail(const FString& Why) { Test->AddError(Why); return true; }
+		/** Press a key as the player would: on the keyboard, or played by touch, by tapping the button for it. */
 		void Tap(APlayerController* Controller, const FKey& InKey) const
 		{
-			GameCheck::Key(Controller, InKey, IE_Pressed);
-			GameCheck::Key(Controller, InKey, IE_Released);
+			if (!GameCheck::Press(Controller, InKey)) {
+				Test->AddError(FString::Printf(TEXT("No control on the touch screen presses %s now"), *InKey.ToString()));
+			}
 		}
 
 		static FString Drawn(const ASenniteBaseEditor* Editor, const TCHAR* Name)
@@ -138,6 +140,12 @@ namespace
 			Test->TestEqual(TEXT("The panel shows the invitation and how to join"), Drawn(Editor, TEXT("faction")), FString(TEXT("YOU ARE INVITED   J: join")));
 			Test->TestFalse(TEXT("Invited is not a member"), Base->bMember);
 			Test->TestEqual(TEXT("The invited is told nothing of the faction's people"), Base->People.Num(), 0);
+			if (GameCheck::Touching(Controller)) {
+				// played by touch, the buttons say the same: PEOPLE is dimmed, JOIN is not
+				const TArray<FString>& Buttons = Cast<ASennitePlayerController>(Controller)->GetTouchControls()->LastDrawn;
+				Test->TestTrue(TEXT("PEOPLE is dimmed for someone who is only invited"), Buttons.Contains(TEXT("PEOPLE=PEOPLE (off)")));
+				Test->TestTrue(TEXT("JOIN is there to tap for someone invited"), Buttons.Contains(TEXT("JOIN=JOIN")));
+			}
 			Tap(Controller, EKeys::P);
 			Log(Editor, TEXT("when invited"));
 			GameCheck::Shot(TEXT("BasePeople"), TEXT("invited.png"));

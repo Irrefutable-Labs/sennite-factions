@@ -32,14 +32,14 @@ void ASenniteHUD::DrawHUD()
 		DrawCrosshair();
 		DrawStatus();
 		DrawMatch();
-		// on a device played by touch, the stick and buttons over the rest
-		if (ASennitePlayerController* Player = Cast<ASennitePlayerController>(PlayerOwner)) {
-			if (USenniteTouchControls* Touch = Player->GetTouchControls()) {
-				Touch->Draw(Canvas);
-			}
-		}
 	}
 	ASenniteBaseEditor::DrawOn(this, Canvas);
+	// on a device played by touch, the stick and buttons over the rest; in the planning view, the editor's buttons
+	if (ASennitePlayerController* Player = Cast<ASennitePlayerController>(PlayerOwner)) {
+		if (USenniteTouchControls* Touch = Player->GetTouchControls()) {
+			Touch->Draw(Canvas);
+		}
+	}
 }
 
 FSenniteHudReadout ASenniteHUD::ReadState() const

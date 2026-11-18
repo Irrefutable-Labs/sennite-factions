@@ -40,10 +40,12 @@ namespace
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
 		bool Fail(const FString& Why) { Test->AddError(Why); return true; }
+		/** Press a key as the player would: on the keyboard, or played by touch, by tapping the button for it. */
 		void Tap(APlayerController* Controller, const FKey& InKey) const
 		{
-			GameCheck::Key(Controller, InKey, IE_Pressed);
-			GameCheck::Key(Controller, InKey, IE_Released);
+			if (!GameCheck::Press(Controller, InKey)) {
+				Test->AddError(FString::Printf(TEXT("No control on the touch screen presses %s now"), *InKey.ToString()));
+			}
 		}
 
 		/** A line the editor's panel drew last frame, by its name; empty when it drew none. */
@@ -155,9 +157,23 @@ namespace
 			Test->TestEqual(TEXT("The wallet's faction is the parcel's"), Server->FactionId, Base->FactionId);
 			Shows(Editor, TEXT("faction"), TEXT("YOUR FACTION   1 member   0 changes"), TEXT("the player's own faction"));
 			CursorStart = Editor->Cursor;
-			Tap(Controller, EKeys::W);
-			Tap(Controller, EKeys::W);
-			Tap(Controller, EKeys::D);
+			if (GameCheck::Touching(Controller)) {
+				// played by touch, the cursor goes to the cell tapped on the map: two cells up the map and one across
+				const FIntPoint Target = CursorStart + FIntPoint(2 * Server->Grid, Server->Grid);
+				const FVector2D Middle(Target.X + Server->Grid / 2, Target.Y + Server->Grid / 2);
+				FHitResult Ground;
+				World->LineTraceSingleByObjectType(Ground, FVector(Middle, 20000.0), FVector(Middle, -20000.0), FCollisionObjectQueryParams(ECC_WorldStatic));
+				FVector2D OnScreen;
+				if (!Controller->ProjectWorldLocationToScreen(FVector(Middle, Ground.bBlockingHit ? Ground.ImpactPoint.Z : 0.0), OnScreen)) {
+					return Fail(TEXT("The cell to tap is not on the screen"));
+				}
+				GameCheck::Tap(OnScreen);
+			}
+			else {
+				Tap(Controller, EKeys::W);
+				Tap(Controller, EKeys::W);
+				Tap(Controller, EKeys::D);
+			}
 			Enter(EPhase::Cursor, World);
 			return false;
 
@@ -167,7 +183,7 @@ namespace
 			}
 			const FSennitePrefab* Tower = Editor->Chosen();
 			Test->TestTrue(TEXT("The first prefab of the catalogue is chosen"), Tower != nullptr && Tower->Id == Server->Prefabs[0].Id);
-			Test->TestTrue(TEXT("W W D moves the cursor two cells up the map and one across"), Editor->Cursor == CursorStart + FIntPoint(2 * Server->Grid, Server->Grid));
+			Test->TestTrue(GameCheck::Touching(Controller) ? TEXT("A tap on the map moves the cursor to the cell tapped, two up the map and one across") : TEXT("W W D moves the cursor two cells up the map and one across"), Editor->Cursor == CursorStart + FIntPoint(2 * Server->Grid, Server->Grid));
 			Test->TestTrue(TEXT("The hero stands where she was while the keys plan"), Hero->GetActorLocation().Equals(HeroStood, 5.0));
 			Test->TestEqual(TEXT("Nothing is drawn on the parcel before anything is placed"), Editor->Drawn().Num(), 0);
 			Log(Editor, TEXT("with the cursor placed"));

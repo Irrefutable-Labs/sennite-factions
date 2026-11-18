@@ -13,6 +13,8 @@
 #include "InputKeyEventArgs.h"
 #include "Misc/App.h"
 #include "Misc/Paths.h"
+#include "SennitePlayerController.h"
+#include "SenniteTouch.h"
 #include "UnrealClient.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMeshActor.h"
@@ -55,6 +57,34 @@ namespace GameCheck
 		const FTouchId Finger(IPlatformInputDeviceMapper::Get().GetDefaultInputDevice(), ETouchIndex::Touch1);
 		Client->InputTouch(Client->Viewport, Finger, ETouchType::Began, Where, 1.0f, FPlatformTime::Cycles64());
 		Client->InputTouch(Client->Viewport, Finger, ETouchType::Ended, Where, 0.0f, FPlatformTime::Cycles64());
+	}
+
+	/** Whether this game is played by touch: its controls are on the screen (a phone, or bAlwaysShowTouchInterface). */
+	inline bool Touching(APlayerController* Controller)
+	{
+		ASennitePlayerController* Player = Cast<ASennitePlayerController>(Controller);
+		return Player != nullptr && Player->GetTouchControls() != nullptr;
+	}
+
+	/**
+	 * Press a key and let it go as the player would: played by touch, by tapping the control on the screen
+	 * that presses it (false if none on the screen does); otherwise on the keyboard.
+	 */
+	inline bool Press(APlayerController* Controller, const FKey& InKey)
+	{
+		ASennitePlayerController* Player = Cast<ASennitePlayerController>(Controller);
+		USenniteTouchControls* Touch = Player != nullptr ? Player->GetTouchControls() : nullptr;
+		if (Touch == nullptr) {
+			Key(Controller, InKey, IE_Pressed);
+			Key(Controller, InKey, IE_Released);
+			return true;
+		}
+		FVector2D At;
+		if (!Touch->WhereKey(InKey, At)) {
+			return false;
+		}
+		Tap(At);
+		return true;
 	}
 
 	/** Move the mouse along one axis by a number of mouse counts. */

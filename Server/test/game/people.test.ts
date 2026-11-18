@@ -21,6 +21,8 @@ import { GaveUp, until } from "../real-dsm/hosts.js";
 import { accounts, GAME, type Accounts } from "../real-dsm/stage.js";
 
 const REPO = fileURLToPath(new URL("../../..", import.meta.url));
+/** SENNITE_TOUCH=1: the game is played by touch, as on a phone: every key the check presses is a tap on the button for it. */
+const TOUCH = process.env.SENNITE_TOUCH ? ["-ini:Input:[/Script/Engine.InputSettings]:bAlwaysShowTouchInterface=True"] : [];
 const CODE_FILE = join(REPO, "Saved", "BasePeople", "connect-code.txt");
 const PARCEL = "north-bluff";
 
@@ -73,7 +75,7 @@ describe("the people of a faction in the game", () => {
 
     // The game, running its own check as the second player.
     rmSync(CODE_FILE, { force: true });
-    const game = spawn(join(REPO, "Tools", "run_game_check.sh"), ["Sennite.BasePeople", "JoinVoteAndInvite", "BasePeople", `-PublisherUrl=${url}`], { cwd: REPO });
+    const game = spawn(join(REPO, "Tools", "run_game_check.sh"), ["Sennite.BasePeople", "JoinVoteAndInvite", "BasePeople", `-PublisherUrl=${url}`, ...TOUCH], { cwd: REPO });
     let output = "";
     game.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
     game.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));

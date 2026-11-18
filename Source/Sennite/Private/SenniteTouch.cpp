@@ -5,15 +5,19 @@
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
+#include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
+#include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GenericPlatform/GenericPlatformInputDeviceMapper.h"
 #include "HealingActor.h"
 #include "InputKeyEventArgs.h"
 #include "Misc/CoreDelegates.h"
+#include "SenniteBaseEditor.h"
 #include "SenniteCharacter.h"
 #include "SenniteCrate.h"
 #include "SennitePlayerState.h"
+#include "SennitePublisher.h"
 #include "WeaponActor.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
@@ -29,6 +33,15 @@ namespace
 	/** Pushed this far, and this straight ahead, the stick runs. */
 	constexpr float RunPush = 0.97f;
 	constexpr float RunAhead = 0.85f;
+	/** The planning view's grid of buttons: each cell's half-width and half-height, the gap between cells, and the grid's margins from the right and the top. */
+	constexpr float CellHalfWidth = 46.0f;
+	constexpr float CellHalfHeight = 24.0f;
+	constexpr float CellGap = 6.0f;
+	constexpr float CellsRight = 16.0f;
+	constexpr float CellsTop = 16.0f;
+	constexpr int32 CellColumns = 4;
+	/** At most this many key presses move the cursor to a tapped cell. */
+	constexpr int32 MostSteps = 64;
 }
 
 bool USenniteTouchControls::Wanted()
@@ -52,11 +65,49 @@ const TArray<USenniteTouchControls::FButton>& USenniteTouchControls::Buttons()
 		{ TEXT("WALL"), EKeys::X, FVector2D(-300.0, 92.0), 26.0f, false },
 		{ TEXT("RAMP"), EKeys::C, FVector2D(-235.0, 92.0), 26.0f, false },
 		{ TEXT("FLOOR"), EKeys::F, FVector2D(-170.0, 92.0), 26.0f, false },
+		// the base editor (B), left of the building row: only where there is a publisher's server and so an editor
+		{ TEXT("BASE"), EKeys::B, FVector2D(-430.0, 92.0), 26.0f, false },
 		// what to hold, along the bottom: X is from the middle of the screen
 		{ TEXT("RIFLE"), EKeys::Two, FVector2D(-141.0, -62.0), 44.0f, true },
 		{ TEXT("SHOTGUN"), EKeys::Three, FVector2D(-47.0, -62.0), 44.0f, true },
 		{ TEXT("BANDAGE"), EKeys::Four, FVector2D(47.0, -62.0), 44.0f, true },
 		{ TEXT("POTION"), EKeys::Five, FVector2D(141.0, -62.0), 44.0f, true },
+	};
+	return All;
+}
+
+const TArray<USenniteTouchControls::FButton>& USenniteTouchControls::EditorButtons()
+{
+	// The editor's keys (SenniteBaseEditor.h), in a grid down the right side, clear of the editor's panel
+	// on the left. Spot is the cell's column and row.
+	static const TArray<FButton> All = {
+		{ TEXT("CLOSE"), EKeys::B, FVector2D(0, 0), CellHalfWidth, false, true },
+		{ TEXT("WALLET"), EKeys::O, FVector2D(1, 0), CellHalfWidth, false, true },
+		{ TEXT("PROVE"), EKeys::M, FVector2D(2, 0), CellHalfWidth, false, true },
+		{ TEXT("PARCEL"), EKeys::Tab, FVector2D(3, 0), CellHalfWidth, false, true },
+		{ TEXT("PEOPLE"), EKeys::P, FVector2D(0, 1), CellHalfWidth, false, true },
+		{ TEXT("SHOP"), EKeys::H, FVector2D(1, 1), CellHalfWidth, false, true },
+		{ TEXT("INVENTORY"), EKeys::I, FVector2D(2, 1), CellHalfWidth, false, true },
+		{ TEXT("JOIN"), EKeys::J, FVector2D(3, 1), CellHalfWidth, false, true },
+		{ TEXT("UP"), EKeys::W, FVector2D(0, 2), CellHalfWidth, false, true },
+		{ TEXT("DOWN"), EKeys::S, FVector2D(1, 2), CellHalfWidth, false, true },
+		{ TEXT("LEFT"), EKeys::A, FVector2D(2, 2), CellHalfWidth, false, true },
+		{ TEXT("RIGHT"), EKeys::D, FVector2D(3, 2), CellHalfWidth, false, true },
+		{ TEXT("< PREFAB"), EKeys::Q, FVector2D(0, 3), CellHalfWidth, false, true },
+		{ TEXT("PREFAB >"), EKeys::E, FVector2D(1, 3), CellHalfWidth, false, true },
+		{ TEXT("TURN"), EKeys::R, FVector2D(2, 3), CellHalfWidth, false, true },
+		{ TEXT("PLACE"), EKeys::F, FVector2D(3, 3), CellHalfWidth, false, true },
+		{ TEXT("FOUND"), EKeys::N, FVector2D(0, 4), CellHalfWidth, false, true },
+		{ TEXT("COMMIT"), EKeys::C, FVector2D(1, 4), CellHalfWidth, false, true },
+		{ TEXT("RESOURCE"), EKeys::One, FVector2D(2, 4), CellHalfWidth, false, true },
+		{ TEXT("AMOUNT"), EKeys::Z, FVector2D(3, 4), CellHalfWidth, false, true },
+		{ TEXT("TAKE BACK"), EKeys::T, FVector2D(0, 5), CellHalfWidth, false, true },
+		{ TEXT("REPLACE"), EKeys::V, FVector2D(1, 5), CellHalfWidth, false, true },
+		{ TEXT("DISMANTLE"), EKeys::X, FVector2D(2, 5), CellHalfWidth, false, true },
+		{ TEXT("REBUILD"), EKeys::G, FVector2D(3, 5), CellHalfWidth, false, true },
+		{ TEXT("VOTE"), EKeys::K, FVector2D(0, 6), CellHalfWidth, false, true },
+		{ TEXT("UNVOTE"), EKeys::U, FVector2D(1, 6), CellHalfWidth, false, true },
+		{ TEXT("LEAVE"), EKeys::L, FVector2D(2, 6), CellHalfWidth, false, true },
 	};
 	return All;
 }
@@ -82,6 +133,11 @@ FVector2D USenniteTouchControls::ViewportSize() const
 FVector2D USenniteTouchControls::Centre(const FButton& Button, const FVector2D& Viewport) const
 {
 	const double S = Viewport.Y / 720.0;
+	if (Button.bCell) {
+		const double Step = 2.0 * CellHalfWidth + CellGap;
+		return FVector2D(Viewport.X - (CellsRight + CellHalfWidth + (CellColumns - 1 - Button.Spot.X) * Step) * S,
+			(CellsTop + CellHalfHeight + Button.Spot.Y * (2.0 * CellHalfHeight + CellGap)) * S);
+	}
 	const double X = Button.bSlot ? Viewport.X * 0.5 + Button.Spot.X * S : (Button.Spot.X < 0.0 ? Viewport.X + Button.Spot.X * S : Button.Spot.X * S);
 	const double Y = Button.Spot.Y < 0.0 ? Viewport.Y + Button.Spot.Y * S : Button.Spot.Y * S;
 	return FVector2D(X, Y);
@@ -91,6 +147,9 @@ bool USenniteTouchControls::Hits(const FButton& Button, const FVector2D& Viewpor
 {
 	const double S = Viewport.Y / 720.0;
 	const FVector2D Middle = Centre(Button, Viewport);
+	if (Button.bCell) {
+		return FMath::Abs(At.X - Middle.X) <= CellHalfWidth * S && FMath::Abs(At.Y - Middle.Y) <= CellHalfHeight * S;
+	}
 	if (Button.bSlot) {
 		return FMath::Abs(At.X - Middle.X) <= Button.Radius * S && FMath::Abs(At.Y - Middle.Y) <= SlotHalfHeight * S;
 	}
@@ -113,6 +172,10 @@ bool USenniteTouchControls::Shows(const FButton& Button) const
 		// the same test the HUD makes before it says how to open a crate
 		const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
 		return ASenniteCrate::Nearest(Hero->GetWorld(), Hero->GetActorLocation(), Rules->Reach + Rules->Across, true) != nullptr;
+	}
+	if (Button.Key == EKeys::B) {
+		// the base editor is in a world only when a publisher's server is set
+		return ASenniteBaseEditor::Find(Hero->GetWorld()) != nullptr;
 	}
 	if (Button.Key == EKeys::G) {
 		// what G would start editing, or the edit G would finish
@@ -154,6 +217,163 @@ FString USenniteTouchControls::LabelOf(const FButton& Button) const
 		return TEXT("MAT");
 	}
 	return Button.Name;
+}
+
+bool USenniteTouchControls::Planning() const
+{
+	return Controller != nullptr && ASenniteBaseEditor::IsPlanning(Controller->GetWorld());
+}
+
+bool USenniteTouchControls::EditorLive(const FButton& Button) const
+{
+	const ASenniteBaseEditor* Editor = Controller != nullptr ? ASenniteBaseEditor::Find(Controller->GetWorld()) : nullptr;
+	const UGameInstance* Game = Controller != nullptr ? Controller->GetGameInstance() : nullptr;
+	const USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+	if (Editor == nullptr || Server == nullptr) {
+		return false;
+	}
+	// the same conditions the editor's own keys go by (SenniteBaseEditor.cpp): what a key would do on the page shown
+	const FSenniteBaseView* View = Server->Bases.Find(Editor->Parcel);
+	const bool bMember = View != nullptr && View->bMember;
+	const bool bPage = Editor->bPeople || Editor->bShop || Editor->bInventory;
+	const FSenniteStructureView* Structure = bPage ? nullptr : Editor->Selected();
+	const bool bOwnStructure = Structure != nullptr && bMember;
+	ASenniteBaseEditor::FPersonRow Row;
+	const bool bRow = Editor->bPeople && Editor->ChosenPerson(Row);
+	const bool bMemberRow = bRow && Row.Kind == ASenniteBaseEditor::FPersonRow::EKind::Member;
+	const FKey& K = Button.Key;
+	if (K == EKeys::B || K == EKeys::W || K == EKeys::S) {
+		return true;
+	}
+	if (K == EKeys::O) {
+		return !Server->bConnected && !Server->ConnectCode.IsEmpty();
+	}
+	if (K == EKeys::M) {
+		return Server->bConnected;
+	}
+	if (K == EKeys::Tab) {
+		return !bPage && Server->Parcels.Num() > 1;
+	}
+	if (K == EKeys::P) {
+		return Editor->bPeople || bMember;
+	}
+	if (K == EKeys::H) {
+		return Editor->bShop || Server->bConnected;
+	}
+	if (K == EKeys::I) {
+		return Editor->bPeople ? bRow && Row.Kind == ASenniteBaseEditor::FPersonRow::EKind::Free : Editor->bInventory || Server->bConnected;
+	}
+	if (K == EKeys::J) {
+		return View != nullptr && View->bInvited;
+	}
+	if (K == EKeys::A || K == EKeys::D || K == EKeys::Q || K == EKeys::E || K == EKeys::R) {
+		return !bPage;
+	}
+	if (K == EKeys::F) {
+		return Editor->bShop || Editor->bInventory || (!bPage && bMember && Structure == nullptr && Editor->Chosen() != nullptr);
+	}
+	if (K == EKeys::N) {
+		return !bPage && View != nullptr && View->bKnown && !View->bAssigned && Server->bConnected;
+	}
+	if (K == EKeys::C || K == EKeys::One || K == EKeys::Z) {
+		return bOwnStructure && Structure->Needs.ContainsByPredicate([](const FSenniteNeed& Need) { return Need.Shortfall > 0; });
+	}
+	if (K == EKeys::T) {
+		return bOwnStructure && Structure->Committed.ContainsByPredicate([](const FSenniteCommitted& One) { return One.bMine; });
+	}
+	if (K == EKeys::V) {
+		return bOwnStructure && Editor->Chosen() != nullptr && Editor->Chosen()->Id != Structure->PrefabId;
+	}
+	if (K == EKeys::X) {
+		return Editor->bPeople ? bRow && Row.Kind == ASenniteBaseEditor::FPersonRow::EKind::Invited : bOwnStructure;
+	}
+	if (K == EKeys::G) {
+		return bOwnStructure && Structure->bDestroyed;
+	}
+	if (K == EKeys::K) {
+		return bMemberRow && !Row.Person->bYou && !Row.Person->bVoted;
+	}
+	if (K == EKeys::U) {
+		return bMemberRow && Row.Person->bVoted;
+	}
+	if (K == EKeys::L) {
+		return bMemberRow && Row.Person->bYou;
+	}
+	return true;
+}
+
+FString USenniteTouchControls::EditorLabel(const FButton& Button) const
+{
+	const ASenniteBaseEditor* Editor = Controller != nullptr ? ASenniteBaseEditor::Find(Controller->GetWorld()) : nullptr;
+	if (Editor == nullptr) {
+		return Button.Name;
+	}
+	// one key does what the page shown makes of it
+	if (Button.Key == EKeys::F && Editor->bShop) {
+		return TEXT("BUY");
+	}
+	if (Button.Key == EKeys::F && Editor->bInventory) {
+		const UGameInstance* Game = Controller->GetGameInstance();
+		const USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+		const bool bWorn = Server != nullptr && Server->Inventory.IsValidIndex(Editor->InventoryIndex) && Server->Wearing == Server->Inventory[Editor->InventoryIndex].SkinId;
+		return bWorn ? TEXT("TAKE OFF") : TEXT("WEAR");
+	}
+	if (Button.Key == EKeys::I && Editor->bPeople) {
+		return TEXT("INVITE");
+	}
+	if (Button.Key == EKeys::X && Editor->bPeople) {
+		return TEXT("WITHDRAW");
+	}
+	if ((Button.Key == EKeys::P && Editor->bPeople) || (Button.Key == EKeys::H && Editor->bShop) || (Button.Key == EKeys::I && Editor->bInventory)) {
+		return TEXT("BACK");
+	}
+	return Button.Name;
+}
+
+void USenniteTouchControls::TapMap(const FVector2D& At) const
+{
+	const ASenniteBaseEditor* Editor = ASenniteBaseEditor::Find(Controller->GetWorld());
+	const UGameInstance* Game = Controller->GetGameInstance();
+	const USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+	if (Editor == nullptr || Server == nullptr || Server->Grid <= 0 || Editor->bPeople || Editor->bShop || Editor->bInventory) {
+		return;
+	}
+	FVector Origin, Direction;
+	if (!Controller->DeprojectScreenPositionToWorld(At.X, At.Y, Origin, Direction) || Direction.Z > -0.01) {
+		return;
+	}
+	// where the line through the tap meets the ground under the cursor: the view is from straight above
+	double Ground = 0.0;
+	FHitResult Hit;
+	if (Controller->GetWorld()->LineTraceSingleByObjectType(Hit, FVector(Editor->Cursor.X, Editor->Cursor.Y, 20000.0), FVector(Editor->Cursor.X, Editor->Cursor.Y, -20000.0),
+			FCollisionObjectQueryParams(ECC_WorldStatic))) {
+		Ground = Hit.ImpactPoint.Z;
+	}
+	const FVector Point = Origin + Direction * ((Ground - Origin.Z) / Direction.Z);
+	// the editor's own keys move the cursor a cell at a time: W up the map (+X), S down, D across (+Y), A back
+	const int32 Up = FMath::FloorToInt32((Point.X - Editor->Cursor.X) / Server->Grid);
+	const int32 Across = FMath::FloorToInt32((Point.Y - Editor->Cursor.Y) / Server->Grid);
+	for (int32 Step = 0; Step < FMath::Min(FMath::Abs(Up), MostSteps); ++Step) {
+		Key(Up > 0 ? EKeys::W : EKeys::S, IE_Pressed);
+		Key(Up > 0 ? EKeys::W : EKeys::S, IE_Released);
+	}
+	for (int32 Step = 0; Step < FMath::Min(FMath::Abs(Across), MostSteps); ++Step) {
+		Key(Across > 0 ? EKeys::D : EKeys::A, IE_Pressed);
+		Key(Across > 0 ? EKeys::D : EKeys::A, IE_Released);
+	}
+}
+
+void USenniteTouchControls::EndStick()
+{
+	bStickHeld = false;
+	Stick = FVector2D::ZeroVector;
+	Run(false);
+	bWalkAgain = false;
+	Axis(EKeys::Gamepad_LeftX, 0.0f);
+	Axis(EKeys::Gamepad_LeftY, 0.0f);
+	if (ASenniteCharacter* Hero = Cast<ASenniteCharacter>(Controller->GetPawn())) {
+		Hero->StopWalking();
+	}
 }
 
 void USenniteTouchControls::Key(const FKey& InKey, EInputEvent Event) const
@@ -212,6 +432,26 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 		FFinger New;
 		New.Id = Id;
 		New.Last = At;
+		if (Planning()) {
+			// the planning view: a button presses the editor's key; anywhere else on the map moves the cursor there
+			const TArray<FButton>& Cells = EditorButtons();
+			for (int32 Index = 0; Index < Cells.Num(); ++Index) {
+				if (Hits(Cells[Index], Viewport, At)) {
+					New.Use = EUse::EditorButton;
+					New.Button = Index;
+					break;
+				}
+			}
+			if (New.Use == EUse::EditorButton) {
+				Key(Cells[New.Button].Key, IE_Pressed);
+			}
+			else {
+				New.Use = EUse::Map;
+				TapMap(At);
+			}
+			Fingers.Add(New);
+			return true;
+		}
 		const TArray<FButton>& All = Buttons();
 		for (int32 Index = 0; Index < All.Num(); ++Index) {
 			if (Shows(All[Index]) && Hits(All[Index], Viewport, At)) {
@@ -249,15 +489,12 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 		const FFinger Gone = *Finger;
 		Fingers.RemoveAll([&Id](const FFinger& Each) { return Each.Id == Id; });
 		if (Gone.Use == EUse::Stick) {
-			bStickHeld = false;
-			Stick = FVector2D::ZeroVector;
-			Run(false);
-			bWalkAgain = false;
-			Axis(EKeys::Gamepad_LeftX, 0.0f);
-			Axis(EKeys::Gamepad_LeftY, 0.0f);
-			if (ASenniteCharacter* Hero = Cast<ASenniteCharacter>(Controller->GetPawn())) {
-				Hero->StopWalking();
+			if (bStickHeld) {
+				EndStick();
 			}
+		}
+		else if (Gone.Use == EUse::EditorButton) {
+			Key(EditorButtons()[Gone.Button].Key, IE_Released);
 		}
 		else if (Gone.Use == EUse::Button) {
 			const bool bStillDown = Fingers.ContainsByPredicate([&Gone](const FFinger& Each) { return Each.Use == EUse::Button && Each.Button == Gone.Button; });
@@ -292,6 +529,10 @@ void USenniteTouchControls::Tick()
 			Hero->StartWalking();
 		}
 	}
+	if (bStickHeld && Planning()) {
+		// the planning view opened under the thumb: the hero stands while the base is planned
+		EndStick();
+	}
 	if (!bStickHeld) {
 		return;
 	}
@@ -323,6 +564,29 @@ bool USenniteTouchControls::Where(const FString& Name, const FVector2D& Viewport
 			return true;
 		}
 	}
+	for (const FButton& Button : EditorButtons()) {
+		if (Name == Button.Name) {
+			OutCentre = Centre(Button, Viewport);
+			return true;
+		}
+	}
+	return false;
+}
+
+bool USenniteTouchControls::WhereKey(const FKey& InKey, FVector2D& OutCentre) const
+{
+	if (Controller == nullptr) {
+		return false;
+	}
+	const FVector2D Viewport = ViewportSize();
+	const bool bPlanning = Planning();
+	for (const FButton& Button : bPlanning ? EditorButtons() : Buttons()) {
+		// every button of the planning view is on the screen, a dimmed one too
+		if (Button.Key == InKey && (bPlanning || Shows(Button))) {
+			OutCentre = Centre(Button, Viewport);
+			return true;
+		}
+	}
 	return false;
 }
 
@@ -330,6 +594,10 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 {
 	LastDrawn.Reset();
 	if (Canvas == nullptr || Controller == nullptr) {
+		return;
+	}
+	if (Planning()) {
+		DrawEditor(Canvas);
 		return;
 	}
 	const FVector2D Viewport(Canvas->ClipX, Canvas->ClipY);
@@ -425,5 +693,44 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 			Text(At, Label, Button.Radius >= 40.0f ? 13 : 9, FLinearColor::White);
 		}
 		LastDrawn.Add(FString::Printf(TEXT("%s=%s"), Button.Name, *Label));
+	}
+}
+
+void USenniteTouchControls::DrawEditor(UCanvas* Canvas)
+{
+	const FVector2D Viewport(Canvas->ClipX, Canvas->ClipY);
+	const float S = Canvas->ClipY / 720.0f;
+	UFont* Font = GEngine->GetLargeFont();
+	if (Font == nullptr) {
+		return;
+	}
+	const FLinearColor Rest(0.0f, 0.0f, 0.0f, 0.55f);
+	const FLinearColor Off(0.0f, 0.0f, 0.0f, 0.25f);
+	const FLinearColor Held(1.0f, 1.0f, 1.0f, 0.35f);
+	const FLinearColor Edge(1.0f, 1.0f, 1.0f, 0.55f);
+	const FLinearColor EdgeOff(1.0f, 1.0f, 1.0f, 0.2f);
+	const FLinearColor Dim(1.0f, 1.0f, 1.0f, 0.35f);
+	const TArray<FButton>& Cells = EditorButtons();
+	for (int32 Index = 0; Index < Cells.Num(); ++Index) {
+		const FButton& Button = Cells[Index];
+		const bool bLive = EditorLive(Button);
+		const bool bDown = Fingers.ContainsByPredicate([Index](const FFinger& Each) { return Each.Use == EUse::EditorButton && Each.Button == Index; });
+		const FVector2D At = Centre(Button, Viewport);
+		const FVector2D Half(CellHalfWidth * S, CellHalfHeight * S);
+		FCanvasTileItem Box(At - Half, Half * 2.0, bDown ? Held : bLive ? Rest : Off);
+		Box.BlendMode = SE_BLEND_Translucent;
+		Canvas->DrawItem(Box);
+		FCanvasBoxItem Outline(At - Half, Half * 2.0);
+		Outline.SetColor(bLive ? Edge : EdgeOff);
+		Outline.LineThickness = 2.0f * S;
+		Canvas->DrawItem(Outline);
+		const FString Label = EditorLabel(Button);
+		FCanvasTextItem Item(At, FText::FromString(Label), Font, bLive ? FLinearColor::White : Dim);
+		Item.Scale = FVector2D(9 * 1.4f * S / FMath::Max(1.0f, Font->GetMaxCharHeight()));
+		Item.bCentreX = true;
+		Item.bCentreY = true;
+		Item.EnableShadow(FLinearColor(0.0f, 0.0f, 0.0f, 0.8f));
+		Canvas->DrawItem(Item);
+		LastDrawn.Add(FString::Printf(TEXT("%s=%s%s"), Button.Name, *Label, bLive ? TEXT("") : TEXT(" (off)")));
 	}
 }
