@@ -569,7 +569,8 @@ void ASenniteMenuHUD::DrawMain(ASenniteMenuController* Menu)
 	const float W = Canvas->ClipX;
 	const float H = Canvas->ClipY;
 	// the buttons stand on a shade that fades out toward the hero, and the hero's name on one that rises from the bottom
-	SenniteUi::Fade(Canvas, FBox2D(FVector2D(0.0f, 0.0f), FVector2D(560.0f * S, H)), FLinearColor(0.0f, 0.0f, 0.0f, 0.62f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
+	// from the screen's own left edge: on a phone the canvas begins past the camera's cutout
+	SenniteUi::Fade(Canvas, FBox2D(FVector2D(-Origin.X, -Origin.Y), FVector2D(560.0f * S, H + Canvas->SafeZonePadEY)), FLinearColor(0.0f, 0.0f, 0.0f, 0.62f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
 	SenniteUi::Fade(Canvas, FBox2D(FVector2D(0.0f, H - 180.0f * S), FVector2D(W, H)), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.5f), true);
 	Heading(TEXT("SENNITE"), TEXT("FACTIONS"), TEXT("BETA"));
 	const float X = 48.0f;

@@ -31,7 +31,7 @@ namespace
 	const TCHAR* QualityName(int32 Level)
 	{
 		static const TCHAR* Names[] = { TEXT("LOW"), TEXT("MEDIUM"), TEXT("HIGH"), TEXT("EPIC"), TEXT("CINEMATIC") };
-		return Level >= 0 && Level < UE_ARRAY_COUNT(Names) ? Names[Level] : TEXT("DEVICE DEFAULT");
+		return Level >= 0 && Level < UE_ARRAY_COUNT(Names) ? Names[Level] : TEXT("DEVICE");
 	}
 
 	/** A tenth, exactly: steps added up do not drift. */

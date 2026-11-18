@@ -35,9 +35,13 @@ void ASenniteHUD::DrawHUD()
 		DrawStatus();
 		DrawMatch();
 	}
-	ASenniteBaseEditor::DrawOn(this, Canvas);
-	if (ASennitePlayerController* Player = Cast<ASennitePlayerController>(PlayerOwner)) {
-		USenniteGameMenu* Menu = Player->GetGameMenu();
+	ASennitePlayerController* Player = Cast<ASennitePlayerController>(PlayerOwner);
+	USenniteGameMenu* Menu = Player != nullptr ? Player->GetGameMenu() : nullptr;
+	// the base editor's panel is where the in-game menu's buttons are: it is not drawn under them
+	if (Menu == nullptr || !Menu->IsOpen()) {
+		ASenniteBaseEditor::DrawOn(this, Canvas);
+	}
+	if (Player != nullptr) {
 		if (Menu != nullptr && Menu->IsOpen()) {
 			// the in-game menu, over the game: its own buttons are what is tapped
 			Menu->Draw(Canvas);
