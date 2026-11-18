@@ -16,6 +16,57 @@ namespace
 	// connectors' floors sit a hair under the bases', so two surfaces never share a plane
 	constexpr float FloorTop = -2.0f;
 
+	double Smooth(double Low, double High, double Value)
+	{
+		return FMath::SmoothStep(Low, High, Value);
+	}
+
+	/** A canyon's mesa rises from each plot over this far; its walls stand up from a gorge's floor over this far. */
+	constexpr double MesaRamp = 12000.0;
+	constexpr double WallRun = 1800.0;
+
+	/** How far a place, along and across a connector, is from a way cut through its land; with the way's floor and half-width there. */
+	double FromTrail(const FArenaTrail& Trail, const FVector2D& At, double& Floor, double& Half)
+	{
+		double Nearest = TNumericLimits<double>::Max();
+		for (int32 Each = 0; Each + 1 < Trail.Points.Num(); ++Each) {
+			const FArenaTrailPoint& A = Trail.Points[Each];
+			const FArenaTrailPoint& B = Trail.Points[Each + 1];
+			const FVector2D Run = B.At - A.At;
+			const double Part = FMath::Clamp(FVector2D::DotProduct(At - A.At, Run) / FMath::Max(1.0, Run.SizeSquared()), 0.0, 1.0);
+			const double Far = FVector2D::Distance(At, A.At + Run * Part);
+			if (Far < Nearest) {
+				Nearest = Far;
+				Floor = FMath::Lerp(A.Floor, B.Floor, Part);
+				Half = FMath::Lerp(A.Half, B.Half, Part);
+			}
+		}
+		return Nearest;
+	}
+
+	/**
+	 * A canyon's ground, over the plots' level ground, at a place along and across its land: the mesa,
+	 * sloping up from each plot and rolling a little on top, with the gorge and its side valleys cut
+	 * into it, each a floor with a wall standing up either side.
+	 */
+	double CanyonHeight(const FArenaConnector& Connector, double Along, double Across)
+	{
+		const double X = FMath::Clamp(Along, 0.0, static_cast<double>(Connector.Length));
+		const double Y = FMath::Clamp(Across, -Connector.Width * 0.5, Connector.Width * 0.5);
+		const double Stands = Smooth(0.0, MesaRamp, X) * Smooth(0.0, MesaRamp, Connector.Length - X);
+		// the top: broad swells of 4 m and ripples of 1.5 m over them
+		double Height = Connector.Rise * Stands
+			+ 400.0 * Stands * FMath::PerlinNoise2D(FVector2D(X, Y) / 9000.0 - Connector.GrainAt)
+			+ 150.0 * Stands * FMath::PerlinNoise2D(FVector2D(X, Y) / 3500.0 + Connector.GrainAt);
+		for (const FArenaTrail& Trail : Connector.Trails) {
+			double Floor = 0.0;
+			double Half = 0.0;
+			const double Far = FromTrail(Trail, FVector2D(X, Y), Floor, Half);
+			Height = FMath::Min(Height, Floor + Connector.Rise * 1.15 * Smooth(0.0, WallRun, Far - Half));
+		}
+		return Height;
+	}
+
 	/** Lays one connector's blocks, in the connector's own space: x from its near base to its far one, y across, z up from the bases' floor. */
 	struct FBuilder
 	{
@@ -209,61 +260,105 @@ namespace
 		Step(FVector(Length + 100.0f, FarY, 0.0f));
 	}
 
-	// A winding floor between two walls of cliff; a ramp at each end of each wall lets it be held from
-	// above. The cliffs are scenery over hidden blocks: the blocks are the walls and the ground on top.
+	// A canyon: the land between the plots stands up as a mesa, and a gorge winds through it at the
+	// plots' level from one to the other. Side valleys leave the gorge: most climb to the mesa's top,
+	// one ends in a bowl under its walls. The mesa slopes down to each plot, so it can be walked onto
+	// and the gorge held from its rim. All of it is ground (CanyonHeight); nothing here is a block.
 	void FBuilder::Canyon()
 	{
-		const float Half = Width * 0.5f;
-		Slab(-400.0f, Length + 400.0f, -Half, Half, FloorTop, 100.0f, EArenaTint::Rock);
-		// the cliff is 17.5 m high as it comes; the walls are about that
-		const float RimTop = R(1300.0f, 1600.0f);
-		const float Mouth = RimTop / FMath::Tan(FMath::DegreesToRadians(27.0f));
-		for (const float Rim : { -1.0f, 1.0f }) {
-			const float Y = Rim * (Half - 500.0f);
-			Ramp(40.0f, 0.0f, Mouth, RimTop, Y, 700.0f, EArenaTint::Rock);
-			Ramp(Length - Mouth, RimTop, Length - 40.0f, 0.0f, Y, 700.0f, EArenaTint::Rock);
-		}
+		// drawn one at a time, in this order
+		Connector.Rise = R(2800.0f, 3400.0f);
+		Connector.GrainAt.X = R(-500.0f, 500.0f);
+		Connector.GrainAt.Y = R(-500.0f, 500.0f);
+		const int32 Reaches = FMath::Max(6, FMath::RoundToInt(Length / 4000.0f));
+		const float Swing = Width * 0.5f - 7000.0f;
+		FArenaTrail Gorge;
+		float Across = 0.0f;
 		Step(FVector(-100.0f, 0.0f, 0.0f));
-		const int32 Reaches = FMath::Max(4, FMath::RoundToInt((Length - 2.0f * Mouth) / 1500.0f));
-		const float Reach = (Length - 2.0f * Mouth) / Reaches;
-		const float Drift = Width * 0.12f;
-		float Middle = R(-Drift * 0.5f, Drift * 0.5f);
-		for (int32 Each = 0; Each < Reaches; ++Each) {
-			// the floor shifts a little from one reach to the next, always leaving a way through
-			Middle = FMath::Clamp(Middle + R(-300.0f, 300.0f), -Drift, Drift);
-			const float Open = R(650.0f, 950.0f);
-			const float X0 = Mouth + Each * Reach;
-			const float X1 = X0 + Reach;
-			Slab(X0, X1, -Half, Middle - Open, RimTop, RimTop - FloorTop, EArenaTint::Hidden);
-			Slab(X0, X1, Middle + Open, Half, RimTop, RimTop - FloorTop, EArenaTint::Hidden);
-			const float Against = Side();
-			Box(FVector(R(X0 + 200.0f, X1 - 200.0f), Middle + Against * (Open - 160.0f), 100.0f), FVector(R(200.0f, 320.0f), R(180.0f, 280.0f), 200.0f), EArenaTint::Cover);
-			Step(FVector((X0 + X1) * 0.5f, Middle - Against * 150.0f, 0.0f));
-			// rocky ground along the foot of each wall
-			for (const float Wall : { -1.0f, 1.0f }) {
-				Prop(EArenaScenery::RockyGround, FVector(R(X0 + 100.0f, X1 - 100.0f), Middle + Wall * (Open - R(40.0f, 200.0f)), FloorTop), FRotator(0.0f, R(0.0f, 360.0f), 0.0f), FVector(R(1.2f, 2.2f)));
+		for (int32 Each = 0; Each <= Reaches; ++Each) {
+			// straight in from each plot, then winding: never more than 32 m aside from one point to the next
+			const bool bMouth = Each <= 1 || Each >= Reaches - 1;
+			const float Drift = R(-3200.0f, 3200.0f);
+			const float Open = R(700.0f, 1100.0f);
+			Across = bMouth ? 0.0f : FMath::Clamp(Across + Drift, -Swing, Swing);
+			FArenaTrailPoint Point;
+			Point.At = FVector2D(Length * Each / Reaches, Across);
+			Point.Half = bMouth ? 1200.0f : Open;
+			Gorge.Points.Add(Point);
+			if (Each > 0 && Each < Reaches) {
+				Step(FVector(Point.At.X, Point.At.Y, 0.0f));
 			}
-		}
-		// The cliffs: each is 60.6 m long and 23.7 m deep as it comes. They stand end to end along each
-		// wall, near their own size, from past the outer edge in to the nearest the floor comes, a
-		// little higher than the ground on top; each shows a different face.
-		const float Inner = Drift + 700.0f;
-		const float Outer = Half + 200.0f;
-		const int32 Cliffs = FMath::Max(1, FMath::RoundToInt((Length - 2.0f * Mouth) / 5600.0f));
-		const float Run = (Length - 2.0f * Mouth + 600.0f) / Cliffs;
-		for (const float Rim : { -1.0f, 1.0f }) {
-			for (int32 Each = 0; Each < Cliffs; ++Each) {
-				const float X = Mouth - 300.0f + (Each + 0.5f) * Run;
-				Prop(EArenaScenery::Cliff, FVector(X, Rim * (Inner + Outer) * 0.5f, FloorTop), FRotator(0.0f, (Rim > 0.0f ? 180.0f : 0.0f) + (Chance(0.5f) ? 180.0f : 0.0f), 0.0f),
-					FVector(Run * 1.08f / 6057.0f, (Outer - Inner) / 2367.0f, (RimTop + 250.0f) / 1718.0f));
-			}
-		}
-		// and rocky ground across the two mouths
-		for (int32 Each = 0; Each < 12; ++Each) {
-			const float X = Each % 2 == 0 ? R(150.0f, Mouth - 200.0f) : R(Length - Mouth + 200.0f, Length - 150.0f);
-			Prop(EArenaScenery::RockyGround, FVector(X, Side() * R(600.0f, Half - 1300.0f), FloorTop), FRotator(0.0f, R(0.0f, 360.0f), 0.0f), FVector(R(1.5f, 3.0f)));
 		}
 		Step(FVector(Length + 100.0f, 0.0f, 0.0f));
+		Connector.Trails.Add(Gorge);
+
+		// Three side valleys, from points of the gorge where the mesa stands at its full height. Each is
+		// tried to one side, then the other, leaning along the gorge and then straight out, and kept
+		// only if it and every valley before it can still be walked, a metre at a time, at under 31
+		// degrees: a valley that ran beside a bend of the gorge would be cut by the gorge's own wall.
+		// One valley is a bowl, at the gorge's level; the others climb to the mesa's top, and one that
+		// cannot is tried as a bowl.
+		const auto Walked = [this]() {
+			for (int32 Valley = 1; Valley < Connector.Trails.Num(); ++Valley) {
+				const FArenaTrail& Way = Connector.Trails[Valley];
+				double Before = CanyonHeight(Connector, Way.Points[0].At.X, Way.Points[0].At.Y);
+				for (int32 Each = 0; Each + 1 < Way.Points.Num(); ++Each) {
+					const double Far = FVector2D::Distance(Way.Points[Each].At, Way.Points[Each + 1].At);
+					for (double Gone = 100.0; Gone <= Far; Gone += 100.0) {
+						const FVector2D At = FMath::Lerp(Way.Points[Each].At, Way.Points[Each + 1].At, Gone / Far);
+						const double Here = CanyonHeight(Connector, At.X, At.Y);
+						if (FMath::Abs(Here - Before) > 60.0) {
+							return false;
+						}
+						Before = Here;
+					}
+				}
+			}
+			return true;
+		};
+		const int32 Box = Rand.RandRange(0, 2);
+		const int32 First = FMath::Min(4, Reaches / 2);
+		const int32 Last = Reaches - First;
+		for (int32 Valley = 0; Valley < 3 && Last > First; ++Valley) {
+			const int32 From = First + (Last - First) * Valley / 2;
+			const FArenaTrailPoint Start = Connector.Trails[0].Points[From];
+			// drawn one at a time, in this order
+			const float Toss = Side();
+			const float Leaning = R(-8.0f, 8.0f);
+			const float Short = R(1500.0f, 2500.0f);
+			const float Deep = R(5000.0f, 6000.0f);
+			const float Bend = R(-400.0f, 400.0f);
+			bool bMade = false;
+			for (int32 Try = 0; Try < 8 && !bMade; ++Try) {
+				const float Out = Try % 2 == 0 ? Toss : -Toss;
+				const float Lean = Try % 4 < 2 ? Leaning : 0.0f;
+				const bool bBowl = Valley == Box || Try >= 4;
+				if (Valley == Box && Try >= 4) {
+					break;
+				}
+				// a bowl ends 50 m and more inside the land's edge, so the mesa's top runs unbroken along it
+				const float End = bBowl ? FMath::Clamp(Start.At.Y + Out * Deep, -Width * 0.5f + 5000.0f, Width * 0.5f - 5000.0f) : Out * (Width * 0.5f - Short);
+				const float Far = FMath::Abs(End - Start.At.Y);
+				// the valley leaves the gorge on the level, to 4 m past the gorge's floor, and climbs from there: a
+				// floor that rose from the gorge's middle would meet the gorge's own wall as a step
+				const float Level = FMath::Min(0.5f, (Start.Half + 400.0f) / FMath::Max(1.0f, Far));
+				const float Parts[4] = { 0.0f, Level, (1.0f + Level) * 0.5f, 1.0f };
+				FArenaTrail Way;
+				for (int32 Each = 0; Each <= 3; ++Each) {
+					const float Part = Parts[Each];
+					FArenaTrailPoint Point;
+					Point.At = FVector2D(Start.At.X + Far * Part * FMath::Tan(FMath::DegreesToRadians(Lean)) + (Each == 2 ? Bend : 0.0f), FMath::Lerp(Start.At.Y, End, Part));
+					Point.Floor = bBowl ? 0.0f : Connector.Rise * FMath::Max(0.0f, Part - Level) / (1.0f - Level);
+					Point.Half = bBowl ? FMath::Lerp(600.0f, 1400.0f, Part) : 650.0f;
+					Way.Points.Add(Point);
+				}
+				Connector.Trails.Add(Way);
+				bMade = Walked();
+				if (!bMade) {
+					Connector.Trails.Pop();
+				}
+			}
+		}
 	}
 
 	// A road across the land that hovering craft cross, lane after lane, without stopping.
@@ -438,29 +533,38 @@ namespace
 		}
 	}
 
-	double Smooth(double Low, double High, double Value)
-	{
-		return FMath::SmoothStep(Low, High, Value);
-	}
-
-	/** Where a place is in a connector's strip, which runs from one plot's edge to the other's and is the connector's width across; and how far outside it. */
+	/**
+	 * Where a place is by a connector: along and across what it builds; how far outside the land
+	 * between its two plots, which runs from one plot's edge to the other's and is that land's width
+	 * across; and how far off what it builds, with 4 m past each of its ends.
+	 */
 	struct FStripPlace
 	{
 		double Along = 0.0;
 		double Across = 0.0;
 		double Outside = 0.0;
+		double OffPiece = 0.0;
 	};
+
+	/** How far before what a connector builds, and after it, its land runs: its lead, and the neck from the plot's edge to where the land's width clears the next connector's. */
+	double NeckOf(const FArenaPlan& Plan, const FArenaConnector& Connector)
+	{
+		return Plan.Reach - Plan.Size.BaseRadius + 400.0 + Connector.Lead;
+	}
 
 	FStripPlace InStrip(const FArenaPlan& Plan, const FArenaConnector& Connector, double X, double Y)
 	{
 		const FVector Local = Connector.Frame.InverseTransformPosition(FVector(X, Y, 0.0));
-		const double Neck = Plan.Reach - Plan.Size.BaseRadius + 400.0;
-		const double OutAlong = FMath::Max3(-Neck - Local.X, Local.X - (Plan.Size.ConnectorLength + Neck), 0.0);
+		const double Neck = NeckOf(Plan, Connector);
+		const double OutAlong = FMath::Max3(-Neck - Local.X, Local.X - (Connector.Length + Neck), 0.0);
 		const double OutAcross = FMath::Max(FMath::Abs(Local.Y) - Plan.Size.ConnectorWidth * 0.5, 0.0);
+		const double OffAlong = FMath::Max3(-400.0 - Local.X, Local.X - (Connector.Length + 400.0), 0.0);
+		const double OffAcross = FMath::Max(FMath::Abs(Local.Y) - Connector.Width * 0.5, 0.0);
 		FStripPlace Place;
 		Place.Along = Local.X;
 		Place.Across = Local.Y;
 		Place.Outside = FMath::Sqrt(OutAlong * OutAlong + OutAcross * OutAcross);
+		Place.OffPiece = FMath::Sqrt(OffAlong * OffAlong + OffAcross * OffAcross);
 		return Place;
 	}
 
@@ -480,6 +584,12 @@ namespace
 			return 5000.0;
 		}
 		return bFar ? 2300.0 : 600.0;
+	}
+
+	/** How high the ground of a connector that is land itself lies, at a place along and across it. */
+	double LandHeight(const FArenaConnector& Connector, double Along, double Across)
+	{
+		return FloorTop - 4.0 + CanyonHeight(Connector, Along, Across);
 	}
 
 	/** How far the hills take to rise from level ground: long enough that the rise is a slope to walk, not a wall. */
@@ -554,6 +664,17 @@ namespace
 	/** Past this far from a plot's middle, inside a way out, is where heroes come off a connector: nothing solid there. */
 	constexpr double ApronFrom = 9600.0;
 
+	/**
+	 * Which way a cell of the ground's mesh is split into its two triangles, from the heights of its
+	 * corners in order round it: from its first corner to the one opposite when those two are nearer
+	 * in height than the other two, so the split runs along a slope and not across it. A steep wall
+	 * split across is a row of saw teeth.
+	 */
+	bool SplitsFromFirst(double A, double B, double C, double D)
+	{
+		return FMath::Abs(A - C) < FMath::Abs(B - D);
+	}
+
 	/** Where the ground's mesh lies: its first point, and how many points across and down, a point every GroundCell. */
 	struct FGroundGrid
 	{
@@ -572,8 +693,8 @@ namespace
 			Reaches += FVector2D(Base) + FVector2D(Size.BaseRadius);
 		}
 		for (const FArenaConnector& Connector : Plan.Connectors) {
-			const double Neck = Plan.Reach - Size.BaseRadius + 400.0;
-			for (const double Along : { -Neck, Size.ConnectorLength + Neck }) {
+			const double Neck = NeckOf(Plan, Connector);
+			for (const double Along : { -Neck, Connector.Length + Neck }) {
 				for (const double Across : { -Size.ConnectorWidth * 0.5, Size.ConnectorWidth * 0.5 }) {
 					Reaches += FVector2D(Connector.Frame.TransformPosition(FVector(Along, Across, 0.0)));
 				}
@@ -619,13 +740,18 @@ namespace
 			const int32 Row = FMath::Clamp(FMath::FloorToInt32(V), 0, Grid.Down - 2);
 			const double InX = U - Column;
 			const double InY = V - Row;
-			// a cell's two triangles: (A, B, D) where InX + InY <= 1, else (B, C, D); A is the cell's first point, B a row on, D a column on
-			if (InX + InY <= 1.0) {
-				const double A = Point(Column, Row);
-				return A + InX * (Point(Column + 1, Row) - A) + InY * (Point(Column, Row + 1) - A);
-			}
+			// A is the cell's first point, B a row on, C a row and a column on, D a column on. A cell is
+			// two triangles, split from B to D or, where that would lie more across the slope, from A to C.
+			const double A = Point(Column, Row);
+			const double B = Point(Column, Row + 1);
 			const double C = Point(Column + 1, Row + 1);
-			return C + (1.0 - InX) * (Point(Column, Row + 1) - C) + (1.0 - InY) * (Point(Column + 1, Row) - C);
+			const double D = Point(Column + 1, Row);
+			if (SplitsFromFirst(A, B, C, D)) {
+				// (A, B, C) where InY >= InX, else (A, C, D)
+				return InY >= InX ? A + InX * (C - B) + InY * (B - A) : A + InX * (D - A) + InY * (C - D);
+			}
+			// (A, B, D) where InX + InY <= 1, else (B, C, D)
+			return InX + InY <= 1.0 ? A + InX * (D - A) + InY * (B - A) : C + (1.0 - InX) * (B - C) + (1.0 - InY) * (D - C);
 		}
 	};
 
@@ -824,7 +950,7 @@ namespace
 		{
 			const FVector2D Out = At - Middle;
 			for (const FVector2D& Way : Ways) {
-				if (FVector2D::DotProduct(Out, Way) > 0.0 && FMath::Abs(FVector2D::CrossProduct(Way, Out)) < Size.ConnectorWidth * 0.5 + Margin) {
+				if (FVector2D::DotProduct(Out, Way) > 0.0 && FMath::Abs(FVector2D::CrossProduct(Way, Out)) < Size.PieceWidth * 0.5 + Margin) {
 					return true;
 				}
 			}
@@ -1199,6 +1325,122 @@ namespace
 	}
 
 	/**
+	 * What stands in a canyon, from a stream of its own: rocks of cover on the gorge's floor, either
+	 * side of the way walked along its middle; rocks in the side valleys, most where one ends in a
+	 * bowl; and rocks along the rim, on the mesa's top, for whoever holds the gorge from above. All of
+	 * them slab rocks, solid by their own shapes, set on the ground as drawn.
+	 */
+	void DressCanyon(FArenaPlan& Plan, int32 Index, FDrawnGround& Drawn)
+	{
+		// (a copy: the plan's own grows as rocks are stood)
+		const FArenaConnector Connector = Plan.Connectors[Index];
+		if (Connector.Trails.Num() == 0) {
+			return;
+		}
+		FRandomStream Rand(static_cast<int32>(HashCombine(GetTypeHash(Plan.Seed ^ 0x43414E59), GetTypeHash(Index))));
+		const auto R = [&Rand](double Low, double High) { return static_cast<double>(Rand.FRandRange(Low, High)); };
+		TArray<FTaken> Stood;
+		constexpr int32 Slabs = 1;
+		// a rock at a place along and across the canyon, if there is room and the ground under it is not steeper than it is tall
+		const auto Rock = [&](EArenaScenery Kind, const FVector2D& Local, double Yaw, double Height) {
+			const FVector Shape = ASenniteArena::ShapeOf(Kind);
+			const FVector Box = Shape * (Height / Shape.Z);
+			const double Reach = 0.5 * FVector2D(Box.X, Box.Y).Size();
+			const FVector2D At(Connector.Frame.TransformPosition(FVector(Local.X, Local.Y, 0.0)));
+			// 3 m and more of clear floor along the middle of the gorge, the way walked, whichever way the rock was come to
+			double Floor = 0.0;
+			double Half = 0.0;
+			if (FromTrail(Connector.Trails[0], Local, Floor, Half) - Reach < 300.0) {
+				return false;
+			}
+			if (Stood.ContainsByPredicate([&At, Reach](const FTaken& Other) { return FVector2D::Distance(At, Other.At) < Other.Reach + Reach + 250.0; })) {
+				return false;
+			}
+			const TPair<double, double> Under = FootingOf(Drawn, At, Connector.Frame.Rotator().Yaw + Yaw, Box.X, Box.Y);
+			if (Under.Value - Under.Key > Height * 0.6) {
+				return false;
+			}
+			FArenaProp Piece;
+			Piece.Scenery = Kind;
+			Piece.Transform = FTransform(FRotator(0.0, Connector.Frame.Rotator().Yaw + Yaw, 0.0), FVector(At.X, At.Y, Under.Key - Height * RockSink + Box.Z * 0.5), Box);
+			Piece.bFit = true;
+			Plan.Props.Add(Piece);
+			FTaken Taken;
+			Taken.At = At;
+			Taken.Reach = Reach;
+			Stood.Add(Taken);
+			return true;
+		};
+		// a rock beside a way, Off its middle line to one side, at a part of the stretch from A to B
+		const auto Beside = [&](const FArenaTrailPoint& A, const FArenaTrailPoint& B, bool bTall) {
+			// drawn one at a time, in this order
+			const double Part = R(0.15, 0.85);
+			const double Toss = R(0.0, 1.0);
+			const double Lean = R(0.0, 1.0);
+			const double Yaw = R(0.0, 360.0);
+			const double Clear = R(TallClearLow, TallClearHigh);
+			const double Low = R(LowLow, LowHigh);
+			const int32 Which = Rand.RandRange(0, 1);
+			const EArenaScenery Kind = bTall ? TallRocks[Slabs][Which] : LowRocks[Slabs][Which];
+			const double Height = bTall ? TallFor(Clear) : Low;
+			const FVector Shape = ASenniteArena::ShapeOf(Kind);
+			const double Reach = 0.5 * FVector2D(Shape.X, Shape.Y).Size() * Height / Shape.Z;
+			const double Half = FMath::Lerp(A.Half, B.Half, Part);
+			// 3 m and more of clear floor along the middle, for the way walked; the rock may stand into the foot of the wall
+			const double Near = 300.0 + Reach;
+			const double Far = Half + 150.0;
+			if (Far <= Near) {
+				return;
+			}
+			const FVector2D Run = (B.At - A.At).GetSafeNormal();
+			const FVector2D Aside(-Run.Y, Run.X);
+			Rock(Kind, FMath::Lerp(A.At, B.At, Part) + Aside * (Toss < 0.5 ? -1.0 : 1.0) * FMath::Lerp(Near, Far, Lean), Yaw, Height);
+		};
+		const FArenaTrail& Gorge = Connector.Trails[0];
+		for (int32 Each = 1; Each + 2 < Gorge.Points.Num(); ++Each) {
+			Beside(Gorge.Points[Each], Gorge.Points[Each + 1], true);
+			Beside(Gorge.Points[Each], Gorge.Points[Each + 1], Each % 2 == 0);
+		}
+		for (int32 Valley = 1; Valley < Connector.Trails.Num(); ++Valley) {
+			const FArenaTrail& Way = Connector.Trails[Valley];
+			const bool bBowl = Way.Points.Last().Floor <= 0.0f;
+			for (int32 Each = bBowl ? 1 : 0; Each + 1 < Way.Points.Num(); ++Each) {
+				Beside(Way.Points[Each], Way.Points[Each + 1], true);
+				if (bBowl && Each + 2 == Way.Points.Num()) {
+					Beside(Way.Points[Each], Way.Points[Each + 1], true);
+					Beside(Way.Points[Each], Way.Points[Each + 1], false);
+				}
+			}
+		}
+		// the rim: on the mesa's top, from 3 m to 25 m back from where a wall begins to fall
+		for (int32 Each = 0; Each < 28; ++Each) {
+			for (int32 Try = 0; Try < 20; ++Try) {
+				// drawn one at a time, in this order
+				const double Along = R(MesaRamp, Connector.Length - MesaRamp);
+				const double Across = R(-Connector.Width * 0.5 + 800.0, Connector.Width * 0.5 - 800.0);
+				const double Yaw = R(0.0, 360.0);
+				const double Clear = R(TallClearLow, TallClearHigh);
+				const double Big = R(OutcropLow, OutcropHigh);
+				const double Sort = R(0.0, 1.0);
+				const int32 Which = Rand.RandRange(0, 1);
+				double Back = TNumericLimits<double>::Max();
+				for (const FArenaTrail& Trail : Connector.Trails) {
+					double Floor = 0.0;
+					double Half = 0.0;
+					const double Far = FromTrail(Trail, FVector2D(Along, Across), Floor, Half);
+					Back = FMath::Min(Back, Far - Half - WallRun);
+				}
+				if (Back < 300.0 || Back > 2500.0) {
+					continue;
+				}
+				if (Rock(TallRocks[Slabs][Which], FVector2D(Along, Across), Yaw, Sort < 0.3 ? Big : TallFor(Clear))) {
+					break;
+				}
+			}
+		}
+	}
+
+	/**
 	 * The land past the plots' rims, out to the shore. What stands there keeps OuterMargin and more
 	 * from every plot and from every connector's strip, so nothing of it is on the ground the plots'
 	 * dressing and the connectors are made for; it is dressed from OuterNear to OuterFar past a plot's
@@ -1521,7 +1763,19 @@ namespace
 				Dirt = FMath::Max(Dirt, 1.0 - Smooth(Disc.Z, Disc.Z + Disc.W, FVector2D::Distance(At, FVector2D(Disc.X, Disc.Y))));
 			}
 		}
-		return FLinearColor(Gravel, Dirt, 0.0f, Weights > 0.0 ? Dry / Weights : 0.0);
+		// the ground of a connector that is land: all of it but the first 30 m from each plot and the last 15 m to its sides, where the grass gives way to it
+		double Own = 0.0;
+		for (const FArenaConnector& Connector : Plan.Connectors) {
+			if (!ASenniteArena::IsLand(Connector.Kind)) {
+				continue;
+			}
+			const FVector Local = Connector.Frame.InverseTransformPosition(FVector(X, Y, 0.0));
+			const double In = FMath::Min3(Local.X, Connector.Length - Local.X, (Connector.Width * 0.5 - FMath::Abs(Local.Y)) * 2.0);
+			// its edge wanders, 6 m and more inside the land's own edge and as much as 24 m more in places, so it is not the land's straight outline
+			const double Wander = Wobble * 4.0 - 900.0 + 1020.0 * FMath::PerlinNoise2D(At / 5000.0 - Plan.RipplesAt);
+			Own = FMath::Max(Own, Smooth(600.0, 3600.0, In + Wander));
+		}
+		return FLinearColor(Gravel * (1.0 - Own), Dirt, Own, Weights > 0.0 ? Dry / Weights : 0.0);
 	}
 
 	uint32 HashOf(const FArenaPlan& Plan)
@@ -1535,6 +1789,13 @@ namespace
 		}
 		for (const FArenaConnector& Connector : Plan.Connectors) {
 			Hash = HashCombine(Hash, GetTypeHash(static_cast<uint8>(Connector.Kind)));
+			Mix(FVector(Connector.Rise, Connector.GrainAt.X, Connector.GrainAt.Y));
+			for (const FArenaTrail& Trail : Connector.Trails) {
+				for (const FArenaTrailPoint& Point : Trail.Points) {
+					Mix(FVector(Point.At.X, Point.At.Y, Point.Floor));
+					Mix(FVector(Point.Half, 0.0, 0.0));
+				}
+			}
 		}
 		for (const FArenaBox& Block : Plan.Boxes) {
 			Mix(Block.Centre);
@@ -1550,6 +1811,7 @@ namespace
 		Mix(FVector(Plan.RipplesAt.X, Plan.RipplesAt.Y, Plan.Size.HillHeight));
 		Mix(FVector(Plan.CoastAt.X, Plan.CoastAt.Y, Plan.Size.WaterDepth));
 		Mix(FVector(Plan.Size.PadRadius, Plan.Size.BaseRadius, Plan.Size.ConnectorWidth));
+		Mix(FVector(Plan.Size.ConnectorLength, Plan.Size.PieceLength, Plan.Size.PieceWidth));
 		for (int32 Base = 0; Base < Plan.Styles.Num() && Base < Plan.Dryness.Num(); ++Base) {
 			Hash = HashCombine(Hash, GetTypeHash(Plan.Styles[Base]));
 			Mix(FVector(Plan.Dryness[Base] * 1000.0, 0.0, 0.0));
@@ -1575,6 +1837,11 @@ const TCHAR* ASenniteArena::KindName(EConnectorKind Kind)
 	case EConnectorKind::Bridges: return TEXT("Bridges");
 	default: return TEXT("None");
 	}
+}
+
+bool ASenniteArena::IsLand(EConnectorKind Kind)
+{
+	return Kind == EConnectorKind::Canyon;
 }
 
 FString FArenaPlan::KindsText() const
@@ -1650,11 +1917,11 @@ double ASenniteArena::OutsideLand(const FArenaPlan& Plan, double X, double Y)
 		}
 		// a way over a gorge is land only at its two mouths; between them is the gorge, open to the lake at both sides
 		const double Near = MouthOf(Connector.Kind, false);
-		const double Far = Plan.Size.ConnectorLength - MouthOf(Connector.Kind, true);
-		const double Neck = Plan.Reach - Plan.Size.BaseRadius + 400.0;
+		const double Far = Connector.Length - MouthOf(Connector.Kind, true);
+		const double Neck = NeckOf(Plan, Connector);
 		const double PastMouth = Place.Along < (Near + Far) * 0.5
 			? FMath::Max3(Place.Along - Near, -Neck - Place.Along, 0.0)
-			: FMath::Max3(Far - Place.Along, Place.Along - (Plan.Size.ConnectorLength + Neck), 0.0);
+			: FMath::Max3(Far - Place.Along, Place.Along - (Connector.Length + Neck), 0.0);
 		Out = FMath::Min(Out, FMath::Sqrt(PastMouth * PastMouth + FMath::Square(FMath::Max(FMath::Abs(Place.Across) - Plan.Size.ConnectorWidth * 0.5, 0.0))));
 		FromGorge = FMath::Min(FromGorge, Place.Outside);
 	}
@@ -1678,13 +1945,14 @@ double ASenniteArena::GroundHeight(const FArenaPlan& Plan, double X, double Y)
 	TArray<TPair<double, double>, TInlineAllocator<6>> Strips;
 	for (const FArenaConnector& Connector : Plan.Connectors) {
 		const FStripPlace Place = InStrip(Plan, Connector, X, Y);
-		const double Weight = 1.0 - Smooth(0.0, LevelEase, Place.Outside);
+		// level under what the connector builds; the land that leads to it is hills like any other
+		const double Weight = 1.0 - Smooth(0.0, LevelEase, Place.OffPiece);
 		if (Weight <= 0.0) {
 			continue;
 		}
 		Level = FMath::Max(Level, Weight);
-		// a connector's own ground lies a hair under its floor; where it is a way over a gorge the shore, below, takes the ground down between its mouths
-		Strips.Emplace(Weight, FloorTop - 4.0);
+		// a connector's own ground lies a hair under its floor; where it is a way over a gorge the shore, below, takes the ground down between its mouths; a connector that is land has its own shape
+		Strips.Emplace(Weight, IsLand(Connector.Kind) ? LandHeight(Connector, Place.Along, Place.Across) : FloorTop - 4.0);
 	}
 	double Height = Hills * (1.0 - Level);
 	for (const TPair<double, double>& Strip : Strips) {
@@ -1704,7 +1972,6 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 	const float BaseRadius = Size.BaseRadius;
 	const float ConnectorLength = Size.ConnectorLength;
 	const float ConnectorWidth = Size.ConnectorWidth;
-	const float Length = ConnectorLength;
 	FArenaPlan Plan;
 	Plan.Seed = Seed;
 	Plan.Size = Size;
@@ -1747,11 +2014,16 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 		Connector.FromBase = Link;
 		Connector.ToBase = (Link + 1) % Bases;
 		const FVector Along = (Plan.Bases[Connector.ToBase] - Plan.Bases[Connector.FromBase]).GetSafeNormal();
-		Connector.Frame = FTransform(Along.Rotation(), Plan.Bases[Connector.FromBase] + Along * Reach);
 		Connector.Kind = ForcedKind >= 0 && ForcedKind < static_cast<int32>(EConnectorKind::Count) ? static_cast<EConnectorKind>(ForcedKind) : Kinds[Link % Kinds.Num()];
 
+		// what a connector builds stands in the middle of the land between its plots; a kind that is land itself fills it
+		const bool bLand = IsLand(Connector.Kind);
+		Connector.Length = bLand ? ConnectorLength : FMath::Min(Size.PieceLength, ConnectorLength);
+		Connector.Width = bLand ? ConnectorWidth : FMath::Min(Size.PieceWidth, ConnectorWidth);
+		Connector.Lead = (ConnectorLength - Connector.Length) * 0.5f;
+		Connector.Frame = FTransform(Along.Rotation(), Plan.Bases[Connector.FromBase] + Along * (Reach + Connector.Lead));
 		// where a connector starts short of its plot's edge, the land between is ground like any other
-		FBuilder Builder{ Plan, Connector, Rand, Link, ConnectorLength, ConnectorWidth, static_cast<float>(BedOf(Size)) };
+		FBuilder Builder{ Plan, Connector, Rand, Link, Connector.Length, Connector.Width, static_cast<float>(BedOf(Size)) };
 		switch (Connector.Kind) {
 		case EConnectorKind::Floating: Builder.Floating(); break;
 		case EConnectorKind::TreeTop: Builder.TreeTop(); break;
@@ -1768,6 +2040,12 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 	// The plots' dressing: each plot's style, then its crag, steel frame, rocks of cover, stones and
 	// stony ground, from streams of their own, so the connectors are what the seed makes with none.
 	FDrawnGround Drawn(Plan);
+	// what stands on a connector that is land itself, from a stream of its own
+	for (int32 Link = 0; Link < Plan.Connectors.Num(); ++Link) {
+		if (Plan.Connectors[Link].Kind == EConnectorKind::Canyon) {
+			DressCanyon(Plan, Link, Drawn);
+		}
+	}
 	const TArray<FTaken> Taken = DressPlots(Plan, Size, Drawn);
 	// the land past the plots' rims, out to the shore, clear of every plot and connector
 	DressOuterLand(Plan, Size, Drawn);
@@ -1795,10 +2073,10 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 			}
 		}
 		// clear of a way out: not in the strip, a connector wide and Margin more each side, that runs out along it
-		const auto Clear = [&Plan, &Ways, Base, ConnectorWidth](const FVector& At, float Margin) {
+		const auto Clear = [&Plan, &Ways, Base, WayWidth = Size.PieceWidth](const FVector& At, float Margin) {
 			const FVector Out = At - Plan.Bases[Base];
 			for (const FVector& Way : Ways) {
-				if (FVector::DotProduct(Out, Way) > 0.0 && FMath::Abs(FVector::CrossProduct(Way, Out).Z) < ConnectorWidth * 0.5f + Margin) {
+				if (FVector::DotProduct(Out, Way) > 0.0 && FMath::Abs(FVector::CrossProduct(Way, Out).Z) < WayWidth * 0.5f + Margin) {
 					return false;
 				}
 			}
@@ -1850,8 +2128,8 @@ FArenaPlan ASenniteArena::MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind
 		TArray<FVector> Trunks;
 		for (int32 Tree = 0; Tree < Size.TreesPerBase * 4; ++Tree) {
 			for (int32 Try = 0; Try < 8; ++Try) {
-				const float Along = Green.FRandRange(1500.0f, ConnectorLength - 1500.0f);
-				const float Across = Green.FRandRange(-ConnectorWidth * 0.5f + 400.0f, ConnectorWidth * 0.5f - 400.0f);
+				const float Along = Green.FRandRange(1500.0f, Connector.Length - 1500.0f);
+				const float Across = Green.FRandRange(-Connector.Width * 0.5f + 400.0f, Connector.Width * 0.5f - 400.0f);
 				FVector At = Connector.Frame.TransformPosition(FVector(Along, Across, 0.0f));
 				if (Trunks.ContainsByPredicate([&At](const FVector& Other) { return FVector::Dist2D(At, Other) < 700.0f; })) {
 					continue;
@@ -1967,26 +2245,58 @@ void ASenniteArena::Build()
 				bLand[Row * Across + Column] = OutsideLand(Plan, X, Y) < ShoreWidth + GroundCell;
 			}
 		}
-		// a cell is made if any corner of it is land or shore; a point is kept if a cell that is made uses it
-		TArray<int32> Kept;
-		Kept.Init(INDEX_NONE, Across * Down);
-		TArray<FVector> Points;
-		TArray<FVector> Normals;
-		TArray<FVector2D> Places;
-		// what each point is painted with: gravel, dirt, and how dry the grass (GroundPaint)
+		// A cell is made if any corner of it is land or shore; a point is kept if a cell that is made
+		// uses it. The mesh is in parts: the first is the land at large; each connector that is land
+		// itself has a part of its own, the cells whose middles are in it, drawn with that kind's own
+		// ground. Where two parts meet both hold the same points, with the same paint and the same
+		// normals, taken from the whole grid.
 		const FPaint Paint = PaintOf(Plan);
-		TArray<FLinearColor> Paints;
-		TArray<int32> Corners;
-		const auto Point = [&](int32 Column, int32 Row) {
-			int32& Index = Kept[Row * Across + Column];
-			if (Index == INDEX_NONE) {
-				Index = Points.Num();
-				const auto At = [&](int32 C, int32 R) { return High[FMath::Clamp(R, 0, Down - 1) * Across + FMath::Clamp(C, 0, Across - 1)]; };
-				Points.Add(FVector(Corner.X + Column * GroundCell, Corner.Y + Row * GroundCell, At(Column, Row)));
-				Normals.Add(FVector(At(Column - 1, Row) - At(Column + 1, Row), At(Column, Row - 1) - At(Column, Row + 1), 2.0 * GroundCell).GetSafeNormal());
-				Places.Add(FVector2D(Points.Last().X, Points.Last().Y) / 100.0);
-				Paints.Add(PaintAt(Plan, Paint, Points.Last().X, Points.Last().Y));
+		struct FGroundPart
+		{
+			TMap<int32, int32> Kept;
+			TArray<FVector> Points;
+			TArray<FVector> Normals;
+			TArray<FVector2D> Places;
+			// what each point is painted with: gravel, dirt, a land connector's own ground, and how dry the grass (GroundPaint)
+			TArray<FLinearColor> Paints;
+			TArray<int32> Corners;
+			UMaterialInterface* Material = nullptr;
+		};
+		UMaterialInterface* Earth = Surface(BaseGround, TEXT("What the land is drawn with"));
+		TArray<FGroundPart> Parts;
+		Parts.AddDefaulted();
+		Parts[0].Material = Earth;
+		TArray<int32> PartOfConnector;
+		for (const FArenaConnector& Connector : Plan.Connectors) {
+			PartOfConnector.Add(IsLand(Connector.Kind) ? Parts.AddDefaulted() : INDEX_NONE);
+			if (PartOfConnector.Last() != INDEX_NONE) {
+				UMaterialInterface* Own = Surface(CanyonGround, TEXT("What a canyon's ground is drawn with"));
+				Parts.Last().Material = Own != nullptr ? Own : Earth;
 			}
+		}
+		const auto PartAt = [&](int32 Column, int32 Row) {
+			const FVector Middle(Corner.X + (Column + 0.5) * GroundCell, Corner.Y + (Row + 0.5) * GroundCell, 0.0);
+			for (int32 Link = 0; Link < Plan.Connectors.Num(); ++Link) {
+				if (PartOfConnector[Link] == INDEX_NONE) {
+					continue;
+				}
+				const FVector Local = Plan.Connectors[Link].Frame.InverseTransformPosition(Middle);
+				if (Local.X >= 0.0 && Local.X <= Plan.Connectors[Link].Length && FMath::Abs(Local.Y) <= Plan.Connectors[Link].Width * 0.5) {
+					return PartOfConnector[Link];
+				}
+			}
+			return 0;
+		};
+		const auto Point = [&](FGroundPart& Part, int32 Column, int32 Row) {
+			if (const int32* Index = Part.Kept.Find(Row * Across + Column)) {
+				return *Index;
+			}
+			const auto At = [&](int32 C, int32 R) { return High[FMath::Clamp(R, 0, Down - 1) * Across + FMath::Clamp(C, 0, Across - 1)]; };
+			const int32 Index = Part.Points.Add(FVector(Corner.X + Column * GroundCell, Corner.Y + Row * GroundCell, At(Column, Row)));
+			Part.Normals.Add(FVector(At(Column - 1, Row) - At(Column + 1, Row), At(Column, Row - 1) - At(Column, Row + 1), 2.0 * GroundCell).GetSafeNormal());
+			Part.Places.Add(FVector2D(Part.Points.Last().X, Part.Points.Last().Y) / 100.0);
+			Part.Paints.Add(PaintAt(Plan, Paint, Part.Points.Last().X, Part.Points.Last().Y));
+			Part.Kept.Add(Row * Across + Column, Index);
 			return Index;
 		};
 		for (int32 Row = 0; Row + 1 < Down; ++Row) {
@@ -1994,12 +2304,18 @@ void ASenniteArena::Build()
 				if (!bLand[Row * Across + Column] && !bLand[Row * Across + Column + 1] && !bLand[(Row + 1) * Across + Column] && !bLand[(Row + 1) * Across + Column + 1]) {
 					continue;
 				}
-				const int32 A = Point(Column, Row);
-				const int32 B = Point(Column, Row + 1);
-				const int32 C = Point(Column + 1, Row + 1);
-				const int32 D = Point(Column + 1, Row);
-				// wound to face up
-				Corners.Append({ A, B, D, B, C, D });
+				FGroundPart& Part = Parts[PartAt(Column, Row)];
+				const int32 A = Point(Part, Column, Row);
+				const int32 B = Point(Part, Column, Row + 1);
+				const int32 C = Point(Part, Column + 1, Row + 1);
+				const int32 D = Point(Part, Column + 1, Row);
+				// wound to face up, split the way that lies along the slope
+				if (SplitsFromFirst(Part.Points[A].Z, Part.Points[B].Z, Part.Points[C].Z, Part.Points[D].Z)) {
+					Part.Corners.Append({ A, B, C, A, C, D });
+				}
+				else {
+					Part.Corners.Append({ A, B, D, B, C, D });
+				}
 			}
 		}
 		Ground = NewObject<UProceduralMeshComponent>(this, TEXT("ArenaGround"));
@@ -2010,11 +2326,18 @@ void ASenniteArena::Build()
 		Ground->SetupAttachment(RootComponent);
 		Ground->RegisterComponent();
 		Ground->SetWorldTransform(FTransform::Identity);
-		Ground->CreateMeshSection_LinearColor(0, Points, Corners, Normals, Places, Paints, TArray<FProcMeshTangent>(), true);
-		if (UMaterialInterface* Earth = Surface(BaseGround, TEXT("What the land is drawn with"))) {
-			Ground->SetMaterial(0, Earth);
+		int32 GroundPoints = 0;
+		int32 GroundCorners = 0;
+		for (int32 Index = 0; Index < Parts.Num(); ++Index) {
+			const FGroundPart& Part = Parts[Index];
+			Ground->CreateMeshSection_LinearColor(Index, Part.Points, Part.Corners, Part.Normals, Part.Places, Part.Paints, TArray<FProcMeshTangent>(), true);
+			if (Part.Material != nullptr) {
+				Ground->SetMaterial(Index, Part.Material);
+			}
+			GroundPoints += Part.Points.Num();
+			GroundCorners += Part.Corners.Num();
 		}
-		UE_LOG(LogTemp, Display, TEXT("Arena ground: %d points, %d triangles, %.0f by %.0f m"), Points.Num(), Corners.Num() / 3, (Across - 1) * GroundCell / 100.0, (Down - 1) * GroundCell / 100.0);
+		UE_LOG(LogTemp, Display, TEXT("Arena ground: %d points, %d triangles in %d parts, %.0f by %.0f m"), GroundPoints, GroundCorners / 3, Parts.Num(), (Across - 1) * GroundCell / 100.0, (Down - 1) * GroundCell / 100.0);
 	}
 
 	UStaticMesh* Cube = Cast<UStaticMesh>(BlockShape.TryLoad());
