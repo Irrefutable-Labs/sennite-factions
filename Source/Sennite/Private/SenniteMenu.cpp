@@ -33,6 +33,27 @@ namespace
 	const float Spacing = 190.0f;
 	/** The camera's field of view, across. */
 	const float FieldOfView = 60.0f;
+	/** How high a gun's middle is held on the stage, in cm: at a standing hero's eye, so that it is seen against the far rocks and the sky and not against the plants behind the stage, where a gun's thin shape is lost. The camera rises with it. */
+	const float GunHeight = 136.0f;
+	/** How far above the screen's middle the store's two arrows have theirs, in the screen's 720-line measure. */
+	const float ArrowsAbove = 18.0f;
+	/** How far above and below its middle a gun on the stage may reach, in cm. */
+	const float GunHalfHigh = 45.0f;
+	/** How wide one of the store's two arrows is, and how far inside them a gun's ends stay as it turns, in the screen's 720-line measure. */
+	const float ArrowWide = 76.0f;
+	const float GunClear = 24.0f;
+
+	/**
+	 * How far either side of the gun the store's two arrows stand, on a screen Wide across (both in the
+	 * screen's 720-line measure). A gun is long where a hero is tall: on a screen with the room for it the
+	 * arrows stand further apart than they do about a hero, never over the words at the left or off the
+	 * right edge, and never nearer than about a hero.
+	 */
+	float GunRoom(const float Wide)
+	{
+		const float Middle = Wide * 0.67f;
+		return FMath::Clamp(FMath::Min(Middle - ArrowWide - 527.0f, Wide - 100.0f - Middle), 254.0f, 344.0f);
+	}
 
 	int32 IndexOf(FName Id)
 	{
@@ -284,10 +305,6 @@ void ASenniteMenuController::UpdateStage(float DeltaTime)
 
 	// one hero turns on the turntable; the lobby's row faces the camera
 	Spin = FMath::Fmod(Spin + 30.0f * DeltaTime, 360.0f);
-	if (StageGun != nullptr) {
-		// a gun's model has its muzzle along +X: side on to the camera, turning
-		StageGun->SetActorRotation(FRotator(0.0, 90.0 + Spin, 0.0));
-	}
 	const bool bTurn = Figures.Num() == 1;
 	float Top = 150.0f;
 	for (int32 Index = 0; Index < Figures.Num(); ++Index) {
@@ -302,12 +319,9 @@ void ASenniteMenuController::UpdateStage(float DeltaTime)
 			Top = FMath::Max(Top, float(Bounds.Origin.Z + Bounds.BoxExtent.Z));
 		}
 	}
-	if (StageCamera == nullptr) {
-		return;
-	}
 	// frame them all, whole, with the menu's buttons to the left on every page but the character select
-	const float Aspect = GEngine != nullptr && GEngine->GameViewport != nullptr && GEngine->GameViewport->Viewport != nullptr && GEngine->GameViewport->Viewport->GetSizeXY().Y > 0
-		? float(GEngine->GameViewport->Viewport->GetSizeXY().X) / GEngine->GameViewport->Viewport->GetSizeXY().Y : 16.0f / 9.0f;
+	const FIntPoint View = GEngine != nullptr && GEngine->GameViewport != nullptr && GEngine->GameViewport->Viewport != nullptr ? GEngine->GameViewport->Viewport->GetSizeXY() : FIntPoint::ZeroValue;
+	const float Aspect = View.Y > 0 ? float(View.X) / View.Y : 16.0f / 9.0f;
 	const float HalfAcross = FMath::Tan(FMath::DegreesToRadians(FieldOfView * 0.5f));
 	const float HalfUp = HalfAcross / Aspect;
 	const float Row = (Figures.Num() - 1) * Spacing + 160.0f;
@@ -318,9 +332,35 @@ void ASenniteMenuController::UpdateStage(float DeltaTime)
 	const bool bSkins = Page == ESenniteMenuPage::Skins;
 	const bool bSelect = Page == ESenniteMenuPage::Heroes || bSkins || Page == ESenniteMenuPage::Weapons;
 	const float Distance = FMath::Max(Top * (bSkins ? 1.6f : bSelect ? 1.38f : 1.2f) / (2.0f * HalfUp), Row * (Figures.Num() > 1 ? 2.1f : 1.25f) / (2.0f * HalfAcross));
+	if (StageGun != nullptr) {
+		// a gun's model has its muzzle along +X: side on to the camera, turning about its own middle, and as
+		// large as turns whole between the store's two arrows. The screen is 720 lines high whatever its
+		// shape, and at the stage a line is this many cm
+		const float PerLine = 2.0f * Distance * HalfUp / 720.0f;
+		float Reach = (GunRoom(720.0f * Aspect) - GunClear) * PerLine;
+		// where the last frame drew the arrows is the room there is: a screen with a notch or rounded corners
+		// draws them inside its safe part. The stage's middle is 0.67 of the way across, as the camera stands
+		const ASenniteMenuHUD* Drawn = Cast<ASenniteMenuHUD>(GetHUD());
+		const FSenniteMenuButton* Before = Drawn != nullptr ? Drawn->Buttons.FindByPredicate([](const FSenniteMenuButton& Each) { return Each.Action == TEXT("prev"); }) : nullptr;
+		const FSenniteMenuButton* After = Drawn != nullptr ? Drawn->Buttons.FindByPredicate([](const FSenniteMenuButton& Each) { return Each.Action == TEXT("next"); }) : nullptr;
+		if (Before != nullptr && After != nullptr && View.Y > 0) {
+			const float Middle = View.X * 0.67f;
+			const float Lines = FMath::Min(Middle - float(Before->Box.Max.X), float(After->Box.Min.X) - Middle) * 720.0f / View.Y;
+			Reach = (Lines - GunClear) * PerLine;
+		}
+		const float Scale = FMath::Max(0.1f, FMath::Min(Reach / FMath::Max(1.0f, StageGunReach), GunHalfHigh / FMath::Max(1.0f, StageGunHalfHigh)));
+		const FRotator Turned(0.0, 90.0 + Spin, 0.0);
+		StageGun->SetActorScale3D(FVector(Scale));
+		StageGun->SetActorLocationAndRotation(FVector(0.0, 0.0, GunHeight) - Turned.RotateVector(StageGunMiddle * Scale), Turned);
+	}
+	if (StageCamera == nullptr) {
+		return;
+	}
 	const float Across = 2.0f * Distance * HalfAcross;
 	const float Aside = -0.17f * Across;
-	const FVector Goal(-Distance, Aside, Top * (bSkins ? 0.4f : bSelect ? 0.47f : 0.52f));
+	// a gun is held level with the arrows either side of it: the camera looks level, from that much under the gun's middle
+	const float Height = Page == ESenniteMenuPage::Weapons ? GunHeight - ArrowsAbove * 2.0f * Distance * HalfUp / 720.0f : Top * (bSkins ? 0.4f : bSelect ? 0.47f : 0.52f);
+	const FVector Goal(-Distance, Aside, Height);
 	const FVector Now = FMath::VInterpTo(StageCamera->GetActorLocation(), Goal, DeltaTime, 4.0f);
 	StageCamera->SetActorLocationAndRotation(Now, FRotator(bSelect ? 0.0 : -2.0, 0.0, 0.0));
 }
@@ -382,8 +422,13 @@ void ASenniteMenuController::StandGun(const FString& WeaponId)
 	if (Model == nullptr) {
 		return;
 	}
-	// held up where a hero's chest would be, larger than life: a gun is an arm's length, the stage a hero's height
-	const FVector Where(0.0, 0.0, 78.0);
+	// held up larger than life: a gun is an arm's length, the stage a hero's height. Where its middle is, how far it reaches from the upright line through that middle as it turns,
+	// and how far above and below: what each frame sizes and places it by
+	const FBoxSphereBounds Bounds = Model->GetBounds();
+	StageGunMiddle = Bounds.Origin;
+	StageGunReach = float(FVector2D(Bounds.BoxExtent.X, Bounds.BoxExtent.Y).Size());
+	StageGunHalfHigh = float(Bounds.BoxExtent.Z);
+	const FVector Where(0.0, 0.0, GunHeight);
 	FActorSpawnParameters Spawn;
 	Spawn.ObjectFlags |= RF_Transient;
 	Spawn.bDeferConstruction = true;
@@ -394,7 +439,7 @@ void ASenniteMenuController::StandGun(const FString& WeaponId)
 	// the stage is this player's own: nothing on it goes to anyone else's game
 	StageGun->SetReplicates(false);
 	StageGun->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
-	StageGun->FinishSpawning(FTransform(FRotator(0.0, 90.0, 0.0), Where, FVector(1.6)));
+	StageGun->FinishSpawning(FTransform(FRotator(0.0, 90.0, 0.0), Where));
 	StageGun->GetStaticMeshComponent()->SetStaticMesh(Model);
 	StageGun->SetActorEnableCollision(false);
 }
@@ -1422,10 +1467,11 @@ void ASenniteMenuHUD::DrawWeapons(ASenniteMenuController* Menu)
 	Text(TEXT("free"), TEXT("THE RIFLE AND THE SHOTGUN ARE FREE: EVERY CRATE GIVES THEM. A GUN SOLD HERE COMES OUT OF A CRATE ONLY FOR ITS OWNERS."),
 		(Left + 2.0f) * S, (H - 112.0f) * S, 12, White, 0.0f, false);
 
-	// the arrows, either side of the gun
+	// the arrows, either side of the gun: as far apart as the screen has room for, the gun turning whole between them
 	const float HeroX = W * 0.67f;
-	Button(TEXT("prev"), TEXT("<"), HeroX - 330.0f, H * 0.5f - 76.0f, 76.0f, 116.0f, true, 34, false, -1);
-	Button(TEXT("next"), TEXT(">"), FMath::Min(HeroX + 254.0f, W - 100.0f), H * 0.5f - 76.0f, 76.0f, 116.0f, true, 34, false, 1);
+	const float Apart = GunRoom(W);
+	Button(TEXT("prev"), TEXT("<"), HeroX - Apart - ArrowWide, H * 0.5f - 76.0f, ArrowWide, 116.0f, true, 34, false, -1);
+	Button(TEXT("next"), TEXT(">"), FMath::Min(HeroX + Apart, W - 100.0f), H * 0.5f - 76.0f, ArrowWide, 116.0f, true, 34, false, 1);
 
 	// every gun along the bottom, each on its own tile: the one shown in gold, one not owned faint
 	const float Gap = 8.0f;

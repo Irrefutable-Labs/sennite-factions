@@ -114,6 +114,9 @@ public:
 	/** The gun turning on the stage now, by the shop's id; empty when a hero stands there. What a check reads. */
 	FString StageWeapon() const { return StageGunId; }
 
+	/** The gun on the stage, or none: where a check sees that it turns whole between the store's arrows. */
+	const AStaticMeshActor* GunOnStage() const { return StageGun; }
+
 	/** The store's swap: what is paid and what is got, by their places among what the publisher's vaults hold, and the amount typed. */
 	int32 SwapFrom = 0;
 	int32 SwapTo = 1;
@@ -182,6 +185,10 @@ private:
 	TObjectPtr<AStaticMeshActor> StageGun;
 
 	FString StageGunId;
+	/** The gun's model as it ships: where its middle is, how far it reaches from the upright line through its middle, and how far above and below it. */
+	FVector StageGunMiddle = FVector::ZeroVector;
+	float StageGunReach = 1.0f;
+	float StageGunHalfHigh = 1.0f;
 	void StandGun(const FString& WeaponId);
 
 	TArray<FName> FigureHeroes;
