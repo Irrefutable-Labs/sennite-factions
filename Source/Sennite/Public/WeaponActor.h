@@ -39,6 +39,10 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Grip")
 	FVector GripPoint;
 
+	/** Where the other hand holds the gun, in the mesh's own space: its foregrip. Set per weapon class in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Grip")
+	FVector OffHandPoint;
+
 	/** The end of the barrel, in the mesh's own space. Set per weapon class in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Bullet")
 	FVector MuzzleOffset;

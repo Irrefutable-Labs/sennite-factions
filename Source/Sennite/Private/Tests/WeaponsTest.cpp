@@ -1,8 +1,10 @@
 // Weapons check. Run in the game on the test range, which has a weapon crate to the right of the
 // start: the hero walks to it and opens it, has the rifle and the shotgun it held with the rifle in
 // her hand at once and nothing lying about, holds each one fixed to her weapon bone with her own
-// built-in weapon hidden, switches between them with the number keys, and a pull of the trigger
-// plays her firing animation, spends a round and sends a bullet out.
+// built-in weapon hidden and both hands on the gun, which points where the player aims, switches
+// between them with the number keys, and a pull of the trigger kicks the gun, spends a round and
+// sends a bullet out: a bolt that is seen, starts at
+// the muzzle, flies the way the gun points and is sent to every machine.
 //
 // Tools/check_weapons.sh runs this and reads the result.
 
@@ -13,6 +15,7 @@
 #include "GameCheck.h"
 #include "ProjectileActor.h"
 #include "SenniteCharacter.h"
+#include "SenniteHeroMesh.h"
 #include "SennitePlayerState.h"
 #include "SenniteWeapons.h"
 #include "Animation/AnimInstance.h"
@@ -72,6 +75,17 @@ namespace
 		TWeakObjectPtr<UWorld> SpawnWorld;
 		FDelegateHandle SpawnHandle;
 		GameCheck::FCrateRun Crate;
+		/** The last bullet fired: where it started, how far it has been seen from there, and what it looked like. */
+		TWeakObjectPtr<AProjectileActor> Bullet;
+		bool bBulletNoted = false;
+		FVector BulletFrom = FVector::ZeroVector;
+		FVector BulletWay = FVector::ZeroVector;
+		double BulletFar = 0.0;
+		double BulletOffLine = 0.0;
+		double BulletFromMuzzle = 0.0;
+		bool bBoltSeen = false;
+		bool bBulletSent = false;
+		float BoltLongest = 0.0f;
 		int32 BulletsSpawned = 0;
 		int32 RoundsBefore = 0;
 		int32 RoundsWhenLetGo = 0;
@@ -93,7 +107,16 @@ namespace
 			}
 			SpawnWorld = World;
 			SpawnHandle = World->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateLambda([this](AActor* Spawned) {
-				BulletsSpawned += Spawned != nullptr && Spawned->IsA<AProjectileActor>() ? 1 : 0;
+				if (AProjectileActor* Fired = Cast<AProjectileActor>(Spawned)) {
+					++BulletsSpawned;
+					Bullet = Fired;
+					bBulletNoted = false;
+					// where it starts, before it has flown at all
+					BulletFrom = Fired->GetActorLocation();
+					BulletWay = Fired->GetActorForwardVector();
+					const ASenniteCharacter* Shooter = Cast<ASenniteCharacter>(Fired->GetWorld()->GetFirstPlayerController()->GetPawn());
+					BulletFromMuzzle = Shooter != nullptr && Shooter->CurrentWeapon != nullptr ? FVector::Dist(BulletFrom, Shooter->CurrentWeapon->GetMuzzleLocation()) : -1.0;
+				}
 			}));
 			// a run without a window starts with a stray mouse movement; begin from the view behind the hero
 			Controller->SetControlRotation(FRotator(-12.0, Hero->GetActorRotation().Yaw, 0.0));
@@ -110,6 +133,26 @@ namespace
 			return Fail(TEXT("The hero went away during the check"));
 		}
 		USkeletalMeshComponent* Mesh = Hero->GetMesh();
+		const USenniteHeroMesh* Body = Cast<USenniteHeroMesh>(Mesh);
+		// the bullet in flight, each frame it is there
+		if (const AProjectileActor* Flying = Bullet.Get()) {
+			if (!bBulletNoted) {
+				bBulletNoted = true;
+				BulletFar = 0.0;
+				BulletOffLine = 0.0;
+				BoltLongest = 0.0f;
+				bBoltSeen = Flying->Bolt != nullptr && Flying->Bolt->GetStaticMesh() != nullptr && Flying->Bolt->GetMaterial(0) != nullptr && Flying->Bolt->IsVisible() && !Flying->IsHidden();
+				bBulletSent = Flying->GetIsReplicated() && Flying->IsReplicatingMovement();
+				if (BulletsSpawned == 4) {
+					// a bolt of the held burst, on its way
+					GameCheck::Shot(TEXT("Weapons"), TEXT("bolt.png"));
+				}
+			}
+			const FVector Gone = Flying->GetActorLocation() - BulletFrom;
+			BulletFar = FMath::Max(BulletFar, FVector::DotProduct(Gone, BulletWay));
+			BulletOffLine = FMath::Max(BulletOffLine, (Gone - BulletWay * FVector::DotProduct(Gone, BulletWay)).Size());
+			BoltLongest = FMath::Max(BoltLongest, Flying->Bolt->GetRelativeScale3D().X * 100.0f);
+		}
 
 		switch (Phase) {
 		case EPhase::OpenCrate:
@@ -178,6 +221,15 @@ namespace
 					UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK hand: level grip=(Pitch=%.1f,Yaw=%.1f,Roll=%.1f) palm=(X=%.1f,Y=%.1f,Z=%.1f) muzzle points (fwd %.2f, right %.2f, up %.2f)"),
 						Level.Pitch, Level.Yaw, Level.Roll, Palm.X, Palm.Y, Palm.Z, MuzzleAhead.X, MuzzleAhead.Y, MuzzleAhead.Z);
 					Test->TestTrue(TEXT("Standing, the hero holds the rifle pointing ahead of her, not behind or at the ground"), MuzzleAhead.X > 0.7);
+					// both hands on it, and it points where the player aims
+					const FVector Aim = Controller->GetControlRotation().Vector();
+					const double AlongAim = FVector::DotProduct(Hero->CurrentWeapon->WeaponMesh->GetForwardVector(), Aim);
+					Test->TestTrue(TEXT("The hero's body holds the rifle in both hands"), Body != nullptr && Body->bHolding);
+					Test->TestTrue(TEXT("Her grip hand is on the rifle's grip and her other hand on its foregrip"), Body != nullptr && Body->GripGap < 2.0 && Body->OffHandGap < 3.0);
+					Test->TestTrue(TEXT("The rifle points where the player aims"), AlongAim > 0.99);
+					Test->TestTrue(TEXT("With a gun in hand she faces where the player aims"), FMath::Abs(FMath::FindDeltaAngleDegrees(Hero->GetActorRotation().Yaw, Controller->GetControlRotation().Yaw)) < 5.0);
+					UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK hold: both hands=%d grip hand %.1f cm off, other hand %.1f cm off, rifle along the aim %.3f"),
+						Body != nullptr && Body->bHolding ? 1 : 0, Body ? Body->GripGap : -1.0, Body ? Body->OffHandGap : -1.0, AlongAim);
 				}
 				GameCheck::Shot(TEXT("Weapons"), TEXT("rifle.png"));
 				return false;
@@ -199,15 +251,22 @@ namespace
 				bTriggerPulled = true;
 				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
 			}
-			bSawFireAnimation |= Mesh->GetAnimInstance() != nullptr && Mesh->GetAnimInstance()->Montage_IsPlaying(Hero->RifleHipShootingAnimation);
+			bSawFireAnimation |= Body != nullptr && Body->KickNow > 0.3;
 			if (Elapsed(World) < 0.5) {
 				return false;
 			}
-			Test->TestNotNull(TEXT("The hero has a firing animation"), Hero->RifleHipShootingAnimation);
-			Test->TestTrue(TEXT("Pulling the trigger plays the hero's firing animation"), bSawFireAnimation);
+			Test->TestTrue(TEXT("Pulling the trigger kicks the gun in her hands"), bSawFireAnimation);
 			Test->TestEqual(TEXT("One pull of the trigger sends one bullet out"), BulletsSpawned, 1);
+			Test->TestTrue(TEXT("The bullet is seen: a bolt with a shape and a material, showing"), bBoltSeen);
+			Test->TestTrue(TEXT("The bullet is sent to every machine, with where it is going"), bBulletSent);
+			Test->TestTrue(TEXT("The bullet starts at the rifle's muzzle"), BulletFromMuzzle >= 0.0 && BulletFromMuzzle < 60.0);
+			Test->TestTrue(TEXT("The bullet travels: seen more than 10 m out from where it started"), BulletFar > 1000.0);
+			Test->TestTrue(TEXT("The bullet flies straight, the way it was fired"), BulletOffLine < 5.0);
+			Test->TestTrue(TEXT("The bolt grows behind the bullet to its length and no longer"), BoltLongest > 100.0f && BoltLongest <= GetDefault<ASenniteRifleBullet>()->BoltLength + 0.5f);
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK bolt: seen=%d sent=%d started %.0f from the muzzle, seen %.0f out, %.1f off its line, bolt up to %.0f long"),
+				bBoltSeen ? 1 : 0, bBulletSent ? 1 : 0, BulletFromMuzzle, BulletFar, BulletOffLine, BoltLongest);
 			Test->TestTrue(TEXT("The shot spends one round"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->CurrentBulletCount == RoundsBefore - 1);
-			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK fire: bullets=%d rounds %d -> %d animation=%d"), BulletsSpawned, RoundsBefore,
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK fire: bullets=%d rounds %d -> %d kick=%d"), BulletsSpawned, RoundsBefore,
 				Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1, bSawFireAnimation ? 1 : 0);
 			// then the button held down: the rifle goes on firing until it is let go
 			RoundsBefore = Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : 0;

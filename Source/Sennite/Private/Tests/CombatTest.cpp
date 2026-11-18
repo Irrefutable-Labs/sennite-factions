@@ -18,6 +18,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "GameCheck.h"
+#include "ProjectileActor.h"
 #include "SenniteCharacter.h"
 #include "SenniteHUD.h"
 #include "SennitePlayerState.h"
@@ -99,6 +100,8 @@ namespace
 		int32 Step = 0;
 		int32 Shots = 0;
 		GameCheck::FCrateRun Crate;
+		int32 BoltFrames = 0;
+		float BoltFar = 0.0f;
 		bool bSawHitMarker = false;
 		bool bSawHurt = false;
 		TArray<float> HealthSeen;
@@ -129,6 +132,13 @@ namespace
 			return Fail(TEXT("The joining player's state or HUD went away during the check"));
 		}
 		Watch(Hud);
+		// bullets in flight on the joining player's own machine: its own and the host's, sent by the server
+		for (TActorIterator<AProjectileActor> It(World); It; ++It) {
+			if (It->Bolt != nullptr && It->Bolt->GetStaticMesh() != nullptr && It->Bolt->IsVisible() && !It->IsHidden()) {
+				++BoltFrames;
+				BoltFar = FMath::Max(BoltFar, It->Flown);
+			}
+		}
 		if (Hero != nullptr) {
 			NoteHealth(Hero->Health);
 		}
@@ -210,6 +220,8 @@ namespace
 			}
 			Test->TestTrue(TEXT("The joining player's health fell 25 a shot: 100, 75, 50, 25"), HealthTrail() == TEXT("100 75 50 25") || HealthTrail() == TEXT("100 75 50 25 0"));
 			Test->TestTrue(TEXT("The joining player's HUD flashed red when they were hurt"), bSawHurt);
+			Test->TestTrue(TEXT("The joining player's machine saw bullets in flight, as bolts"), BoltFrames > 0 && BoltFar > 100.0f);
+			UE_LOG(LogCombatCheck, Display, TEXT("GAMECHECK joiner: saw bolts in flight on %d frames, up to %.0f cm flown"), BoltFrames, BoltFar);
 			UE_LOG(LogCombatCheck, Display, TEXT("GAMECHECK joiner: own health seen %s, hurt flash %d"), *HealthTrail(), bSawHurt ? 1 : 0);
 			Enter(EPhase::Fallen, World);
 			return false;
