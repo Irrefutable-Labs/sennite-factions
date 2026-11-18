@@ -477,6 +477,17 @@ void ASenniteMenuHUD::Text(const TCHAR* Name, const FString& Line, float X, floa
 	Drawing.Add(FString::Printf(TEXT("%s=%s"), Name, *Line));
 }
 
+FBox2D ASenniteMenuHUD::Screen() const
+{
+	// On a phone the engine moves the canvas in from the screen's edges, clear of its rounded corners and
+	// camera: the buttons and text stay in there, and the shades behind them go on to the edges themselves.
+	if (Canvas->SafeZonePadX == 0 && Canvas->SafeZonePadY == 0 && Canvas->SafeZonePadEX == 0 && Canvas->SafeZonePadEY == 0) {
+		return FBox2D(FVector2D::ZeroVector, FVector2D(Canvas->ClipX, Canvas->ClipY));
+	}
+	const FVector2D Min(-float(Canvas->SafeZonePadX), -float(Canvas->SafeZonePadY));
+	return FBox2D(Min, Min + FVector2D(FMath::Max(Canvas->UnsafeSizeX, Canvas->SizeX), FMath::Max(Canvas->UnsafeSizeY, Canvas->SizeY)));
+}
+
 float ASenniteMenuHUD::Width(const FString& Line, float Points) const
 {
 	return SenniteUi::Measure(Line, Points, S).X;
@@ -575,8 +586,9 @@ void ASenniteMenuHUD::DrawMain(ASenniteMenuController* Menu)
 	const float W = Canvas->ClipX;
 	const float H = Canvas->ClipY;
 	// the buttons stand on a shade that fades out toward the hero, and the hero's name on one that rises from the bottom
-	SenniteUi::Fade(Canvas, FBox2D(FVector2D(0.0f, 0.0f), FVector2D(560.0f * S, H)), FLinearColor(0.0f, 0.0f, 0.0f, 0.62f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
-	SenniteUi::Fade(Canvas, FBox2D(FVector2D(0.0f, H - 180.0f * S), FVector2D(W, H)), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.5f), true);
+	const FBox2D Whole = Screen();
+	SenniteUi::Fade(Canvas, FBox2D(Whole.Min, FVector2D(560.0f * S, Whole.Max.Y)), FLinearColor(0.0f, 0.0f, 0.0f, 0.62f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
+	SenniteUi::Fade(Canvas, FBox2D(FVector2D(Whole.Min.X, H - 180.0f * S), Whole.Max), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.5f), true);
 	Heading(TEXT("SENNITE"), TEXT("FACTIONS"), TEXT("BETA"));
 	const float X = 48.0f;
 	float Y = 156.0f;
@@ -606,8 +618,9 @@ void ASenniteMenuHUD::DrawHeroes(ASenniteMenuController* Menu)
 	const FLinearColor White = FLinearColor::White;
 	// the hero's name and what is done with it stand on a shade at the left that fades out toward the hero,
 	// as the menu's buttons do; the row of heroes on one that rises from the bottom
-	SenniteUi::Fade(Canvas, FBox2D(FVector2D(0.0f, 0.0f), FVector2D(600.0f * S, H * S)), FLinearColor(0.0f, 0.0f, 0.0f, 0.66f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
-	SenniteUi::Fade(Canvas, FBox2D(FVector2D(0.0f, (H - 190.0f) * S), FVector2D(W * S, H * S)), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.7f), true);
+	const FBox2D Whole = Screen();
+	SenniteUi::Fade(Canvas, FBox2D(Whole.Min, FVector2D(600.0f * S, Whole.Max.Y)), FLinearColor(0.0f, 0.0f, 0.0f, 0.66f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
+	SenniteUi::Fade(Canvas, FBox2D(FVector2D(Whole.Min.X, (H - 190.0f) * S), Whole.Max), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.7f), true);
 	Button(TEXT("back"), TEXT("BACK"), 24.0f, 24.0f, 184.0f, 58.0f, true, 17, false, -1);
 
 	const float Left = 48.0f;
@@ -722,7 +735,7 @@ void ASenniteMenuHUD::DrawJoin(ASenniteMenuController* Menu)
 	const float W = Canvas->ClipX / S;
 	const float H = Canvas->ClipY / S;
 	const FLinearColor White = FLinearColor::White;
-	SenniteUi::Fade(Canvas, FBox2D(FVector2D(0.0f, 0.0f), FVector2D(W * S, H * S)), FLinearColor(0.0f, 0.0f, 0.0f, 0.6f), FLinearColor(0.0f, 0.0f, 0.0f, 0.35f), false);
+	SenniteUi::Fade(Canvas, Screen(), FLinearColor(0.0f, 0.0f, 0.0f, 0.6f), FLinearColor(0.0f, 0.0f, 0.0f, 0.35f), false);
 	Heading(TEXT("JOIN"), TEXT("A LOBBY"), TEXT("THE HOST'S ADDRESS, AS THEIR LOBBY SHOWS IT"));
 	// the address being typed, in a field with a gold edge
 	const FBox2D Field(FVector2D(48.0f * S, 134.0f * S), FVector2D(568.0f * S, 206.0f * S));
@@ -754,7 +767,8 @@ void ASenniteMenuHUD::DrawLobby(ASenniteMenuController* Menu)
 	const float H = Canvas->ClipY / S;
 	const FLinearColor White = FLinearColor::White;
 	const bool bHost = GetNetMode() != NM_Client;
-	SenniteUi::Fade(Canvas, FBox2D(FVector2D(0.0f, 0.0f), FVector2D(620.0f * S, H * S)), FLinearColor(0.0f, 0.0f, 0.0f, 0.62f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
+	const FBox2D Whole = Screen();
+	SenniteUi::Fade(Canvas, FBox2D(Whole.Min, FVector2D(620.0f * S, Whole.Max.Y)), FLinearColor(0.0f, 0.0f, 0.0f, 0.62f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
 	Heading(TEXT("LOBBY"), FString(), FString());
 	if (bHost) {
 		const TArray<FString> Addresses = Menu->LocalAddresses();

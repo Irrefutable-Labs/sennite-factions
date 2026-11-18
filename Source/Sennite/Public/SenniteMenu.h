@@ -168,6 +168,9 @@ private:
 	FName Hovered;
 	FName Held;
 
+	/** The whole screen, in the canvas's own measure: on a phone the canvas starts inside the screen's safe zone. */
+	FBox2D Screen() const;
+
 	/** How wide a line of text is drawn at a point size, on the screen. */
 	float Width(const FString& Line, float Points) const;
 
