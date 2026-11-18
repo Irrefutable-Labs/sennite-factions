@@ -47,6 +47,14 @@ struct FSenniteHero
 	UPROPERTY()
 	FSoftClassPath AnimClass;
 
+	/** The hero's own attack, played when it attacks with its own weapon, no gun in hand: a cast, a punch, a swing. None for a hero that ships with none. */
+	UPROPERTY()
+	FSoftObjectPath AttackMontage;
+
+	/** The bone its own weapon's bolt leaves from: the top of a staff, the mouth of a cannon. The weapon bone, if none is named. */
+	UPROPERTY()
+	FName CastBone;
+
 	/** How far below the middle of the character's capsule the mesh's origin goes: its feet, for a mesh whose origin is at its feet.
 	 * Every hero has the same capsule (ASenniteCharacter's), so building and being hit are the same for all. */
 	UPROPERTY()

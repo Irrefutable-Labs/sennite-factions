@@ -69,3 +69,9 @@ ASenniteSniper::ASenniteSniper()
 	CurrentBulletCount = MagazineSize;
 	BulletClass = ASenniteSniperBullet::StaticClass();
 }
+
+ASenniteOwnBolt::ASenniteOwnBolt()
+{
+	// 40 m of reach; kind 0, the pickaxe's, so it takes materials from what it harvests
+	SetBullet(this, 0, 20.0f, 12000.0f, 0.34f);
+}

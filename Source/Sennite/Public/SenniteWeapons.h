@@ -86,3 +86,13 @@ class SENNITE_API ASenniteSniper : public AWeaponActor
 public:
 	ASenniteSniper();
 };
+
+/** The bolt of a hero's own weapon, with no gun in hand: lighter than a rifle round, and it harvests as the pickaxe did. */
+UCLASS()
+class SENNITE_API ASenniteOwnBolt : public AProjectileActor
+{
+	GENERATED_BODY()
+
+public:
+	ASenniteOwnBolt();
+};

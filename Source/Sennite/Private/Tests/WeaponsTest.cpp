@@ -1,5 +1,6 @@
 // Weapons check. Run in the game on the test range, which has a weapon crate to the right of the
-// start: the hero walks to it and opens it, has the rifle and the shotgun it held with the rifle in
+// start. With no gun in hand the fire button attacks with the hero's own weapon: she plays her own
+// attack and a bolt leaves her staff. Then the hero walks to the crate and opens it, has the rifle and the shotgun it held with the rifle in
 // her hand at once and nothing lying about, holds each one fixed to her weapon bone with her own
 // built-in weapon hidden and both hands on the gun, which points where the player aims, switches
 // between them with the number keys, and a pull of the trigger kicks the gun, spends a round and
@@ -45,7 +46,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, OpenCrate, FromCrate, HoldShotgun, HoldRifle, Fire, HoldFire, OtherGuns, Done };
+		enum class EPhase { WaitForPawn, OwnWeapon, OpenCrate, FromCrate, HoldShotgun, HoldRifle, Fire, HoldFire, OtherGuns, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -80,6 +81,7 @@ namespace
 		int32 Step = 0;
 		int32 OtherGun = 0;
 		UClass* BulletClass = nullptr;
+		FVector OwnTip = FVector::ZeroVector;
 		GameCheck::FOnlooker Onlooker;
 		/** The last bullet fired: where it started, how far it has been seen from there, and what it looked like. */
 		TWeakObjectPtr<AProjectileActor> Bullet;
@@ -141,7 +143,8 @@ namespace
 			}
 			Test->TestTrue(TEXT("A shot fades with distance"), Cast<USoundAttenuation>(GetDefault<AWeaponActor>()->FireFalloff.TryLoad()) != nullptr);
 			Test->TestTrue(TEXT("Opening a crate has a sound that loads"), Cast<USoundBase>(GetDefault<ASenniteCrate>()->OpenSound.TryLoad()) != nullptr);
-			Enter(EPhase::OpenCrate, World);
+			Enter(EPhase::OwnWeapon, World);
+			Step = 0;
 			return false;
 		}
 		if (Hero == nullptr || State == nullptr) {
@@ -170,6 +173,54 @@ namespace
 		}
 
 		switch (Phase) {
+		case EPhase::OwnWeapon:
+			// No gun in hand: the fire button attacks with the hero's own weapon. She plays her own attack
+			// and a bolt leaves her staff and travels; R does nothing, there being nothing to load.
+			if (Step == 0) {
+				if (Elapsed(World) < 0.8) {
+					return false;
+				}
+				Step = 1;
+				BulletsSpawned = 0;
+				BulletClass = nullptr;
+				bSawFireAnimation = false;
+				OwnTip = Hero->OwnWeaponTip();
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Pressed);
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			bSawFireAnimation |= Hero->OwnAttack != nullptr && Mesh->GetAnimInstance() != nullptr && Mesh->GetAnimInstance()->Montage_IsPlaying(Hero->OwnAttack);
+			if (Step == 1) {
+				if (Elapsed(World) < 0.25) {
+					return false;
+				}
+				Step = 2;
+				// a second pull before her attack is over sends nothing, and R loads nothing
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Pressed);
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
+				GameCheck::Key(Controller, EKeys::R, IE_Pressed);
+				GameCheck::Key(Controller, EKeys::R, IE_Released);
+				return false;
+			}
+			if (Elapsed(World) < 1.0) {
+				return false;
+			}
+			Test->TestNotNull(TEXT("The hero has an attack of her own"), Hero->OwnAttack.Get());
+			Test->TestTrue(TEXT("With no gun in hand, the fire button plays the hero's own attack"), bSawFireAnimation);
+			Test->TestEqual(TEXT("and one bolt leaves her own weapon, not two: the second pull came too soon"), BulletsSpawned, 1);
+			Test->TestTrue(TEXT("The bolt is her own weapon's"), BulletClass == ASenniteOwnBolt::StaticClass());
+			Test->TestTrue(TEXT("The bolt starts at the top of her staff"), FVector::Dist(BulletFrom, OwnTip) < 40.0);
+			Test->TestTrue(TEXT("The bolt is seen and sent to every machine"), bBoltSeen && bBulletSent);
+			Test->TestTrue(TEXT("The bolt travels: seen more than 10 m out, straight"), BulletFar > 1000.0 && BulletOffLine < 5.0);
+			Test->TestTrue(TEXT("She still holds no game weapon"), Hero->CurrentWeapon == nullptr);
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK own weapon: attack=%d bolts=%d of %s, started %.0f from the staff's top, seen %.0f out"),
+				bSawFireAnimation ? 1 : 0, BulletsSpawned, *GetNameSafe(BulletClass), FVector::Dist(BulletFrom, OwnTip), BulletFar);
+			GameCheck::Shot(TEXT("Weapons"), TEXT("own_weapon.png"));
+			bSawFireAnimation = false;
+			Enter(EPhase::OpenCrate, World);
+			return false;
+
 		case EPhase::OpenCrate:
 			// D walks her to the right, to the crate; E opens it
 			if (!Crate.Step(World, Controller, Hero, EKeys::D)) {

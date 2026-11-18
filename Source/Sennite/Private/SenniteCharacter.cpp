@@ -144,6 +144,7 @@ ASenniteCharacter::ASenniteCharacter(const FObjectInitializer& ObjectInitializer
 	WeaponClasses[2] = ASenniteShotgun::StaticClass();
 	WeaponClasses[3] = ASenniteEnergyRifle::StaticClass();
 	WeaponClasses[4] = ASenniteSniper::StaticClass();
+	OwnBoltClass = ASenniteOwnBolt::StaticClass();
 
 	// healing items: 0 the bandage, 1 the potion
 	HealingItemClasses = { ASenniteBandage::StaticClass(), ASennitePotion::StaticClass() };
@@ -276,6 +277,13 @@ void ASenniteCharacter::ApplyHero()
 	HeroBuiltInWeaponBones = Hero.BuiltInWeaponBones;
 	HeroItemBone = Hero.ItemBone;
 	HeroItemPalmOffset = Hero.ItemPalmOffset;
+	HeroAttackMontage = Hero.AttackMontage;
+	HeroCastBone = Hero.CastBone;
+	// the hero's own attack, for when it has no gun in hand
+	OwnAttack = HeroAttackMontage.IsNull() ? nullptr : Cast<UAnimMontage>(HeroAttackMontage.TryLoad());
+	if (!HeroAttackMontage.IsNull() && OwnAttack == nullptr) {
+		UE_LOG(LogSenniteCharacter, Error, TEXT("Hero attack animation '%s' did not load"), *HeroAttackMontage.ToString());
+	}
 
 	if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(HeroMesh.TryLoad())) {
 		Body->SetSkeletalMeshAsset(Mesh);
@@ -1597,17 +1605,25 @@ bool ASenniteCharacter::ServerSetBuildModeFloor_Validate() {
 
 void ASenniteCharacter::ServerFireWeapon_Implementation() {
 	ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
-	if (CurrentWeapon == nullptr || State == nullptr || !State->HoldingWeapon) {
+	if (State == nullptr || !State->HoldingWeapon) {
 		return;
 	}
-	if (!IsGun(State->CurrentWeapon)) {
-		// the pickaxe: swung, not fired
-		if (State->CurrentWeapon == 0 && !State->AimedIn && !State->JustSwungPickaxe) {
-			NetMulticastPlayPickaxeSwingAnimation();
-			State->JustSwungPickaxe = true;
-			FTimerHandle PickaxeTimerHandle;
-			GetWorldTimerManager().SetTimer(PickaxeTimerHandle, this, &ASenniteCharacter::ServerPickaxeTimeOut, 0.403f, false);
+	if (State->CurrentWeapon == 0) {
+		// No gun in hand: the hero attacks with its own weapon (a staff, a fist, a hammer). It plays its
+		// own attack and a bolt leaves the weapon, good up close and at a distance; there is nothing to
+		// load and nothing to run out of, only OwnAttackSeconds between one and the next.
+		if (CurrentWeapon != nullptr || State->InBuildMode || State->AimedIn || State->JustSwungPickaxe || State->JustUsedHealingItem) {
+			return;
 		}
+		NetMulticastOwnAttack();
+		State->JustSwungPickaxe = true;
+		FTimerHandle Again;
+		GetWorldTimerManager().SetTimer(Again, this, &ASenniteCharacter::ServerPickaxeTimeOut, FMath::Max(0.05f, OwnAttackSeconds), false);
+		bShotAuthorized = true;
+		ClientGetBulletTransform();
+		return;
+	}
+	if (CurrentWeapon == nullptr || !IsGun(State->CurrentWeapon)) {
 		return;
 	}
 	if (CurrentWeapon->CurrentBulletCount <= 0) {
@@ -2090,8 +2106,10 @@ void ASenniteCharacter::ServerSpawnProjectile_Implementation(FTransform SpawnTra
 	// ammunition, cooldowns), once, and only from close to the shooter.
 	const bool bAuthorized = bShotAuthorized;
 	bShotAuthorized = false;
-	if (bAuthorized && CurrentWeapon != nullptr && FVector::Dist(SpawnTransform.GetLocation(), GetActorLocation()) <= MaxMuzzleDistance) {
-		auto Bullet = Cast<AProjectileActor>(UGameplayStatics::BeginDeferredActorSpawnFromClass(this, CurrentWeapon->BulletClass, SpawnTransform, ESpawnActorCollisionHandlingMethod::AlwaysSpawn));
+	// a gun's own bullet, or with no gun in hand the bolt of the hero's own weapon
+	const TSubclassOf<AProjectileActor> BulletClass = CurrentWeapon != nullptr ? CurrentWeapon->BulletClass : OwnBoltClass;
+	if (bAuthorized && BulletClass != nullptr && FVector::Dist(SpawnTransform.GetLocation(), GetActorLocation()) <= MaxMuzzleDistance) {
+		auto Bullet = Cast<AProjectileActor>(UGameplayStatics::BeginDeferredActorSpawnFromClass(this, BulletClass, SpawnTransform, ESpawnActorCollisionHandlingMethod::AlwaysSpawn));
 		if (Bullet != nullptr)
 		{
 			//spawnactor has no way of passing parameters so need to use begindeferredactorspawn and finishspawningactor
@@ -2191,10 +2209,10 @@ void ASenniteCharacter::ClientCameraAimOut_Implementation() {
 }
 
 void ASenniteCharacter::ClientGetBulletTransform_Implementation() {
-	// The shot leaves the barrel of the held weapon, along the line the camera looks down,
-	// when that line meets something.
+	// The shot leaves the barrel of the held gun, or the hero's own weapon when it holds none, along
+	// the line the camera looks down, when that line meets something.
 	APlayerController* PlayerController = Cast<APlayerController>(GetController());
-	if (CurrentWeapon == nullptr || PlayerController == nullptr) {
+	if (PlayerController == nullptr) {
 		return;
 	}
 	FRotator CameraRotation;
@@ -2208,7 +2226,7 @@ void ASenniteCharacter::ClientGetBulletTransform_Implementation() {
 	CollisionParams.AddIgnoredActor(this);
 	GetWorld()->LineTraceSingleByChannel(Impact, StartTrace, EndTrace, ECC_Visibility, CollisionParams);
 	if (Impact.bBlockingHit) {
-		ServerSpawnProjectile(FTransform(ShootDirection.Rotation(), CurrentWeapon->GetMuzzleLocation()));
+		ServerSpawnProjectile(FTransform(ShootDirection.Rotation(), CurrentWeapon != nullptr ? CurrentWeapon->GetMuzzleLocation() : OwnWeaponTip()));
 	}
 }
 
@@ -2218,6 +2236,23 @@ void ASenniteCharacter::KickGun() {
 	if (USenniteHeroMesh* Body = Cast<USenniteHeroMesh>(GetMesh())) {
 		Body->Kick();
 	}
+}
+
+void ASenniteCharacter::NetMulticastOwnAttack_Implementation() {
+	if (OwnAttack != nullptr) {
+		PlayAnimMontage(OwnAttack);
+	}
+}
+
+FVector ASenniteCharacter::OwnWeaponTip() const {
+	const USkeletalMeshComponent* Body = GetMesh();
+	for (const FName& Bone : { HeroCastBone, HeroWeaponBone }) {
+		if (Body != nullptr && !Bone.IsNone() && Body->GetBoneIndex(Bone) != INDEX_NONE) {
+			return Body->GetSocketLocation(Bone);
+		}
+	}
+	// a body with neither bone: in front of its chest
+	return GetActorLocation() + GetActorForwardVector() * 50.0 + FVector(0.0, 0.0, 30.0);
 }
 
 void ASenniteCharacter::NetMulticastPlayPickaxeSwingAnimation_Implementation() {

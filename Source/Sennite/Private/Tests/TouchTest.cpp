@@ -171,10 +171,11 @@ namespace
 			}
 			// a run without a window starts with a stray mouse movement; begin from the view behind the hero
 			Controller->SetControlRotation(FRotator(-12.0, Hero->GetActorRotation().Yaw, 0.0));
-			for (const TCHAR* Name : { TEXT("FIRE=SWING"), TEXT("JUMP=JUMP"), TEXT("RELOAD=RELOAD"), TEXT("AIM=AIM"), TEXT("WALL=WALL"), TEXT("RAMP=RAMP"),
+			for (const TCHAR* Name : { TEXT("FIRE=ATTACK"), TEXT("JUMP=JUMP"), TEXT("AIM=AIM"), TEXT("WALL=WALL"), TEXT("RAMP=RAMP"),
 				TEXT("FLOOR=FLOOR"), TEXT("RIFLE=RIFLE"), TEXT("SHOTGUN=SHOTGUN"), TEXT("BANDAGE=BANDAGE"), TEXT("POTION=POTION"), TEXT("STICK=0.00,0.00") }) {
 				Test->TestTrue(FString::Printf(TEXT("The HUD draws %s"), Name), Drawn(Name));
 			}
+			Test->TestFalse(TEXT("With no gun in hand, there is no RELOAD button: her own weapon has nothing to load"), Controls->LastDrawn.ContainsByPredicate([](const FString& Each) { return Each.StartsWith(TEXT("RELOAD=")); }));
 			Test->TestFalse(TEXT("With no crate near, there is no OPEN button"), Controls->LastDrawn.ContainsByPredicate([](const FString& Each) { return Each.StartsWith(TEXT("OPEN=")); }));
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK controls: %s"), *FString::Join(Controls->LastDrawn, TEXT(" ")));
 			GameCheck::Shot(TEXT("Touch"), TEXT("controls.png"));
@@ -252,6 +253,7 @@ namespace
 			}
 			Test->TestTrue(TEXT("OPEN gives her the crate's rifle and shotgun"), State->EquippedWeapons.Contains(1) && State->EquippedWeapons.Contains(2));
 			Test->TestTrue(TEXT("The crate's rifle is in her hand at once"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 1);
+			Test->TestTrue(TEXT("With a gun in hand there is a RELOAD button, and FIRE says FIRE"), Drawn(TEXT("RELOAD=RELOAD")) && Drawn(TEXT("FIRE=FIRE")));
 			Test->TestTrue(TEXT("and its bandages and potions are hers"), State->HealingItemCounts[0] > 0 && State->HealingItemCounts[1] > 0);
 			Test->TestEqual(TEXT("The opened crate laid nothing on the ground"), GameCheck::LyingAbout(World), 0);
 			Test->TestFalse(TEXT("Beside the opened crate there is no OPEN button"), Controls->LastDrawn.ContainsByPredicate([](const FString& Each) { return Each.StartsWith(TEXT("OPEN=")); }));

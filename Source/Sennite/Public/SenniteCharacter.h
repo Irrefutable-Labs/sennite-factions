@@ -8,6 +8,7 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogSenniteCharacter, Log, All);
 
+class AProjectileActor;
 class USpringArmComponent;
 class UCameraComponent;
 class UCapsuleComponent;
@@ -117,6 +118,28 @@ public:
 
 	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FVector HeroItemPalmOffset;
+
+	/** The hero's own attack and the bone its own weapon's bolt leaves from (FSenniteHero::AttackMontage, CastBone). */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
+	FSoftObjectPath HeroAttackMontage;
+
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
+	FName HeroCastBone;
+
+	/** The hero's own attack, loaded. */
+	UPROPERTY()
+	TObjectPtr<UAnimMontage> OwnAttack;
+
+	/** How long after an attack with the hero's own weapon before the next. */
+	UPROPERTY(EditDefaultsOnly, Category = "Hero")
+	float OwnAttackSeconds = 0.5f;
+
+	/** What the hero's own weapon sends out. */
+	UPROPERTY(EditDefaultsOnly, Category = "Hero")
+	TSubclassOf<AProjectileActor> OwnBoltClass;
+
+	/** Where the hero's own weapon's bolt leaves from, in the world: its cast bone, or the hand that holds a weapon. */
+	FVector OwnWeaponTip() const;
 
 	/** Fix a weapon to the hero's weapon bone, at the weapon's own grip. */
 	void AttachWeaponToHand(AWeaponActor* Weapon);
@@ -712,6 +735,10 @@ public:
 
 	UFUNCTION(NetMulticast, Unreliable)
 	void NetMulticastPlayPickaxeSwingAnimation();
+
+	/** The hero attacked with its own weapon: on every machine it plays the hero's own attack. */
+	UFUNCTION(NetMulticast, Unreliable)
+	void NetMulticastOwnAttack();
 
 	/** The gun in hand fired: on every machine it kicks and is heard. */
 	UFUNCTION(NetMulticast, Unreliable)

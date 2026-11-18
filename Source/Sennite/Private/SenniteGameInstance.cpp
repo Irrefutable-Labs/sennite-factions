@@ -50,4 +50,9 @@ void USenniteGameInstance::KeepHero(FName Id)
 	if (UClass* AnimClass = Hero->AnimClass.TryLoadClass<UAnimInstance>()) {
 		HeroAssets.Add(AnimClass);
 	}
+	if (!Hero->AttackMontage.IsNull()) {
+		if (UObject* Attack = Hero->AttackMontage.TryLoad()) {
+			HeroAssets.Add(Attack);
+		}
+	}
 }

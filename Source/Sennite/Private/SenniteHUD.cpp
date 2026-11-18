@@ -221,7 +221,7 @@ void ASenniteHUD::DrawStatus()
 	if (Now.bHoldingWeapon) {
 		// a gun by its own name (AWeaponActor::DisplayName)
 		const ASenniteCharacter* Armed = Cast<ASenniteCharacter>(GetOwningPawn());
-		const FString Named = Now.WeaponType == 0 ? FString(TEXT("PICKAXE"))
+		const FString Named = Now.WeaponType == 0 ? FString(TEXT("OWN WEAPON"))
 			: Armed != nullptr && Armed->CurrentWeapon != nullptr ? GetDefault<AWeaponActor>(Armed->CurrentWeapon->GetClass())->DisplayName : FString(TEXT("WEAPON"));
 		const float AmmoX = W - 210.0f * S;
 		HudPlate(Canvas, AmmoX - 12.0f * S, H - 110.0f * S, 150.0f * S, 86.0f * S);

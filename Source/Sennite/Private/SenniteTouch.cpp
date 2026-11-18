@@ -190,6 +190,10 @@ bool USenniteTouchControls::Shows(const FButton& Button) const
 		// the base editor is in a world only when a publisher's server is set
 		return ASenniteBaseEditor::Find(Hero->GetWorld()) != nullptr;
 	}
+	if (Button.Key == EKeys::R) {
+		// only a gun reloads: the hero's own weapon, a bandage or a potion has nothing to load
+		return Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType > 0;
+	}
 	if (Button.Key == EKeys::G) {
 		// what G would start editing, or the edit G would finish
 		int32 Tile = INDEX_NONE;
@@ -223,7 +227,8 @@ FString USenniteTouchControls::LabelOf(const FButton& Button) const
 			return TEXT("USE");
 		}
 		if (Hero->CurrentWeapon == nullptr || Hero->CurrentWeapon->WeaponType == 0) {
-			return TEXT("SWING");
+			// no gun in hand: the hero's own weapon
+			return TEXT("ATTACK");
 		}
 	}
 	if (Button.Key == EKeys::RightMouseButton && bBuilding) {
