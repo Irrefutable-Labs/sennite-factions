@@ -472,8 +472,8 @@ export class Publisher {
     // objects each: no one proof grows with the shop's sales. What they prove is one answer only if every one of
     // them was made at the same position of the wallet; if the wallet moved on between them, they are all asked
     // again, and after PROOF_ATTEMPTS tries nothing is established.
-    const { skins, heroes } = this.options.store.data.shop;
-    const all = [...this.options.catalogue.resources, this.shop.symbol, "ERA", ...Object.keys(skins), ...Object.keys(heroes)];
+    const { skins, heroes, weapons } = this.options.store.data.shop;
+    const all = [...this.options.catalogue.resources, this.shop.symbol, "ERA", ...Object.keys(skins), ...Object.keys(heroes), ...Object.keys(weapons)];
     for (let attempt = 0; attempt < PROOF_ATTEMPTS; attempt++) {
       const owned = new Map<string, bigint>();
       let position: bigint | undefined;

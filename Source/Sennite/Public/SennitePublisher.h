@@ -302,10 +302,22 @@ public:
 	 */
 	FString DBucksLine(bool& bKnown) const;
 
-	/** The heroes the shop sells, and those the wallet proved it owns (by the shop's hero id). */
+	/**
+	 * The heroes the shop sells, and what the wallet proved it owns of what is sold as a hero is: its heroes
+	 * and its guns, by the shop's ids, in one list (no gun has a hero's id). It is the list a game server is
+	 * given for a hero pass too.
+	 */
 	TArray<FSenniteHeroForSale> ShopHeroes;
 	TArray<FString> OwnedHeroes;
 	bool OwnsHero(const FString& HeroId) const { return OwnedHeroes.Contains(HeroId); }
+
+	/** The guns the shop sells, each with its price in D-bucks: sold and owned as a hero is. The game's free guns are not here. */
+	TArray<FSenniteHeroForSale> ShopWeapons;
+	const FSenniteHeroForSale* WeaponForSale(const FString& WeaponId) const { return ShopWeapons.FindByPredicate([&WeaponId](const FSenniteHeroForSale& W) { return W.Id == WeaponId; }); }
+	/** Whether the wallet proved it owns a gun the shop sells. */
+	bool OwnsWeapon(const FString& WeaponId) const { return OwnedHeroes.Contains(WeaponId); }
+	/** Buy a gun from the shop with D-bucks. Until the wallet proves it owns it, it is on its way as a hero is (HeroOnItsWay). */
+	void BuyWeapon(const FString& WeaponId);
 	const FSenniteHeroForSale* HeroForSale(const FString& HeroId) const { return ShopHeroes.FindByPredicate([&HeroId](const FSenniteHeroForSale& H) { return H.Id == HeroId; }); }
 	/** Buy a hero from the shop with D-bucks. */
 	void BuyHero(const FString& HeroId);

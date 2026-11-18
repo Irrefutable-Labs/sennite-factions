@@ -9,6 +9,8 @@
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "IPAddress.h"
 #include "Kismet/GameplayStatics.h"
@@ -19,6 +21,7 @@
 #include "SennitePlayerState.h"
 #include "SennitePublisher.h"
 #include "SenniteUi.h"
+#include "SenniteWeapons.h"
 #include "SocketSubsystem.h"
 
 namespace
@@ -81,6 +84,16 @@ namespace
 		}
 		Known.Add(SkinId, Of);
 		return Of.IsNone() ? nullptr : USenniteHeroes::Find(Of);
+	}
+
+	/**
+	 * The gun a shop's id is: the game's own weapon, whose model and name the store shows. Null for an id that
+	 * is no gun of this game's.
+	 */
+	const AWeaponActor* ShopGun(const FString& WeaponId)
+	{
+		const UClass* Gun = WeaponId == TEXT("energy-rifle") ? ASenniteEnergyRifle::StaticClass() : WeaponId == TEXT("sniper") ? ASenniteSniper::StaticClass() : nullptr;
+		return Gun != nullptr ? GetDefault<AWeaponActor>(Gun) : nullptr;
 	}
 
 	/** What the stage calls a shop skin standing on it. */
@@ -246,12 +259,26 @@ void ASenniteMenuController::UpdateStage(float DeltaTime)
 	else {
 		Want.Add(USenniteProfile::Get().PlayingHero(this));
 	}
+	// the store's weapons: the gun shown turns on the stage, in the hero's place
+	FString WantGun;
+	if (const USennitePublisher* Seller = Shop(this); Page == ESenniteMenuPage::Weapons && Seller != nullptr && Seller->ShopWeapons.IsValidIndex(BrowseWeapon)
+		&& ShopGun(Seller->ShopWeapons[BrowseWeapon].Id) != nullptr) {
+		WantGun = Seller->ShopWeapons[BrowseWeapon].Id;
+		Want.Reset();
+	}
 	if (Want != FigureHeroes) {
 		StandHeroes(Want);
+	}
+	if (WantGun != StageGunId) {
+		StandGun(WantGun);
 	}
 
 	// one hero turns on the turntable; the lobby's row faces the camera
 	Spin = FMath::Fmod(Spin + 30.0f * DeltaTime, 360.0f);
+	if (StageGun != nullptr) {
+		// a gun's model has its muzzle along +X: side on to the camera, turning
+		StageGun->SetActorRotation(FRotator(0.0, 90.0 + Spin, 0.0));
+	}
 	const bool bTurn = Figures.Num() == 1;
 	float Top = 150.0f;
 	for (int32 Index = 0; Index < Figures.Num(); ++Index) {
@@ -280,7 +307,7 @@ void ASenniteMenuController::UpdateStage(float DeltaTime)
 	// it; a lobby's row is seen from far enough that the heroes at its ends are whole too
 	// the skins have two rows along the bottom, the heroes that have skins over the skins of one: a little further back again
 	const bool bSkins = Page == ESenniteMenuPage::Skins;
-	const bool bSelect = Page == ESenniteMenuPage::Heroes || bSkins;
+	const bool bSelect = Page == ESenniteMenuPage::Heroes || bSkins || Page == ESenniteMenuPage::Weapons;
 	const float Distance = FMath::Max(Top * (bSkins ? 1.6f : bSelect ? 1.38f : 1.2f) / (2.0f * HalfUp), Row * (Figures.Num() > 1 ? 2.1f : 1.25f) / (2.0f * HalfAcross));
 	const float Across = 2.0f * Distance * HalfAcross;
 	const float Aside = -0.17f * Across;
@@ -334,6 +361,35 @@ void ASenniteMenuController::StandHeroes(const TArray<FName>& Heroes)
 	}
 }
 
+void ASenniteMenuController::StandGun(const FString& WeaponId)
+{
+	if (StageGun != nullptr) {
+		StageGun->Destroy();
+		StageGun = nullptr;
+	}
+	StageGunId = WeaponId;
+	const AWeaponActor* Gun = WeaponId.IsEmpty() ? nullptr : ShopGun(WeaponId);
+	UStaticMesh* Model = Gun != nullptr ? Cast<UStaticMesh>(Gun->MeshAsset.TryLoad()) : nullptr;
+	if (Model == nullptr) {
+		return;
+	}
+	// held up where a hero's chest would be, larger than life: a gun is an arm's length, the stage a hero's height
+	const FVector Where(0.0, 0.0, 78.0);
+	FActorSpawnParameters Spawn;
+	Spawn.ObjectFlags |= RF_Transient;
+	Spawn.bDeferConstruction = true;
+	StageGun = GetWorld()->SpawnActor<AStaticMeshActor>(Where, FRotator(0.0, 90.0, 0.0), Spawn);
+	if (StageGun == nullptr) {
+		return;
+	}
+	// the stage is this player's own: nothing on it goes to anyone else's game
+	StageGun->SetReplicates(false);
+	StageGun->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+	StageGun->FinishSpawning(FTransform(FRotator(0.0, 90.0, 0.0), Where, FVector(1.6)));
+	StageGun->GetStaticMeshComponent()->SetStaticMesh(Model);
+	StageGun->SetActorEnableCollision(false);
+}
+
 bool ASenniteMenuController::InputTouch(const FTouchId TouchId, const ETouchType::Type Type, const FVector2D& TouchLocation, const float Force, const uint64 Timestamp)
 {
 	if (Type == ETouchType::Began) {
@@ -365,7 +421,7 @@ bool ASenniteMenuController::InputKey(const FInputKeyEventArgs& Params)
 		Act(TEXT("back"));
 		return true;
 	}
-	if (Page == ESenniteMenuPage::Heroes || Page == ESenniteMenuPage::Skins) {
+	if (Page == ESenniteMenuPage::Heroes || Page == ESenniteMenuPage::Skins || Page == ESenniteMenuPage::Weapons) {
 		if (Key == EKeys::Left || Key == EKeys::A) {
 			Act(TEXT("prev"));
 			return true;
@@ -479,6 +535,35 @@ void ASenniteMenuController::Act(FName Action)
 		const USennitePublisher* Server = Shop(this);
 		BrowseSkin = Server != nullptr ? FMath::Max(0, Server->ShopSkins.IndexOfByPredicate([Server](const FSenniteSkinForSale& Skin) { return Skin.Id == Server->Wearing; })) : 0;
 		Note.Reset();
+	}
+	else if (Name == TEXT("tab:weapons")) {
+		Page = ESenniteMenuPage::Weapons;
+		BrowseWeapon = 0;
+		Note.Reset();
+	}
+	else if ((Name == TEXT("prev") || Name == TEXT("next")) && Page == ESenniteMenuPage::Weapons) {
+		const USennitePublisher* Server = Shop(this);
+		const int32 Count = Server != nullptr ? Server->ShopWeapons.Num() : 0;
+		BrowseWeapon = Count > 0 ? (BrowseWeapon + (Name == TEXT("next") ? 1 : -1) + Count) % Count : 0;
+		Note.Reset();
+	}
+	else if (Name.StartsWith(TEXT("gun:"))) {
+		// a gun's own tile in the store
+		const USennitePublisher* Server = Shop(this);
+		const FString Id = Name.Mid(4);
+		const int32 At = Server != nullptr ? Server->ShopWeapons.IndexOfByPredicate([&Id](const FSenniteHeroForSale& Gun) { return Gun.Id == Id; }) : INDEX_NONE;
+		if (At != INDEX_NONE) {
+			BrowseWeapon = At;
+			Note.Reset();
+		}
+	}
+	else if (Name == TEXT("buygun")) {
+		const UGameInstance* Game = GetGameInstance();
+		USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+		if (Server != nullptr && Server->IsOn() && Server->bConnected && !Server->bBusy && Server->ShopWeapons.IsValidIndex(BrowseWeapon)
+			&& !Server->OwnsWeapon(Server->ShopWeapons[BrowseWeapon].Id)) {
+			Server->BuyWeapon(Server->ShopWeapons[BrowseWeapon].Id);
+		}
 	}
 	else if (Name == TEXT("tab:swap")) {
 		Page = ESenniteMenuPage::Swap;
@@ -843,6 +928,7 @@ void ASenniteMenuHUD::DrawHUD()
 	case ESenniteMenuPage::Main: DrawMain(Menu); break;
 	case ESenniteMenuPage::Heroes: DrawHeroes(Menu); break;
 	case ESenniteMenuPage::Skins: DrawSkins(Menu); break;
+	case ESenniteMenuPage::Weapons: DrawWeapons(Menu); break;
 	case ESenniteMenuPage::Swap: DrawSwap(Menu); break;
 	case ESenniteMenuPage::Join: DrawJoin(Menu); break;
 	case ESenniteMenuPage::Lobby: DrawLobby(Menu); break;
@@ -1031,7 +1117,7 @@ void ASenniteMenuHUD::StoreTop(ASenniteMenuController* Menu)
 	};
 	float X = 232.0f;
 	for (const FSection& Each : { FSection{ TEXT("tab:heroes"), TEXT("HEROES"), ESenniteMenuPage::Heroes }, FSection{ TEXT("tab:skins"), TEXT("SKINS"), ESenniteMenuPage::Skins },
-			FSection{ TEXT("tab:swap"), TEXT("SWAP"), ESenniteMenuPage::Swap } }) {
+			FSection{ TEXT("tab:weapons"), TEXT("WEAPONS"), ESenniteMenuPage::Weapons }, FSection{ TEXT("tab:swap"), TEXT("SWAP"), ESenniteMenuPage::Swap } }) {
 		Button(Each.Action, Each.Name, X, 24.0f, 160.0f, 58.0f, true, 16, Menu->Page == Each.Page);
 		if (Menu->Page == Each.Page) {
 			Drawing.Add(FString::Printf(TEXT("section=%s"), Each.Name));
@@ -1242,6 +1328,120 @@ void ASenniteMenuHUD::DrawSkins(ASenniteMenuController* Menu)
 			SenniteUi::Plate(Canvas, FBox2D(FVector2D(Box.Min.X + 14.0f * S, Box.Min.Y - 7.0f * S), FVector2D(Box.Max.X, Box.Min.Y - 4.0f * S)), 0.0f, SenniteUi::Gold, SenniteUi::Gold);
 		}
 		Drawing.Add(FString::Printf(TEXT("tile%d=%s%s%s"), Place, *Label, bOn ? TEXT("  WORN") : TEXT(""), bHad ? TEXT("") : TEXT("  NOT HAD")));
+		FSenniteMenuButton Tile;
+		Tile.Action = Action;
+		Tile.Text = Label;
+		Tile.Box = Box.ShiftBy(Inset);
+		Buttons.Add(Tile);
+	}
+}
+
+void ASenniteMenuHUD::DrawWeapons(ASenniteMenuController* Menu)
+{
+	const float W = Canvas->ClipX / S;
+	const float H = Canvas->ClipY / S;
+	const FLinearColor White = FLinearColor::White;
+	// as the heroes' section: the gun's name and what is done with it on a shade at the left, the row of guns
+	// on one that rises from the bottom
+	const FBox2D Whole = Screen();
+	SenniteUi::Fade(Canvas, FBox2D(Whole.Min, FVector2D(600.0f * S, Whole.Max.Y)), FLinearColor(0.0f, 0.0f, 0.0f, 0.66f), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), false);
+	SenniteUi::Fade(Canvas, FBox2D(FVector2D(Whole.Min.X, (H - 190.0f) * S), Whole.Max), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.7f), true);
+	StoreTop(Menu);
+
+	const float Left = 48.0f;
+	const float BW = 340.0f;
+	const float BY = 304.0f;
+	const USennitePublisher* Server = Shop(Menu);
+	const bool bShop = Server != nullptr && Server->IsOn();
+	if (!bShop || !Server->ShopWeapons.IsValidIndex(Menu->BrowseWeapon)) {
+		// no shop on this game, or a shop that has listed no gun: nothing is shown as if it were for sale
+		Text(TEXT("name"), TEXT("WEAPONS"), Left * S, 142.0f * S, 54, White);
+		SenniteUi::Plate(Canvas, FBox2D(FVector2D(Left * S, 226.0f * S), FVector2D((Left + 96.0f) * S, 229.0f * S)), 0.0f, SenniteUi::Gold, SenniteUi::Gold);
+		if (!bShop) {
+			FForSale Thing;
+			Thing.Kind = TEXT("GUNS");
+			Thing.Buy = TEXT("buygun");
+			NextStep(Server, Thing, Left, BY, BW);
+		}
+		else {
+			Text(TEXT("status"), TEXT("NO GUNS FROM THE SHOP YET"), (Left + 2.0f) * S, 254.0f * S, 13, SenniteUi::Gold);
+		}
+		Text(TEXT("free"), TEXT("THE RIFLE AND THE SHOTGUN ARE FREE: EVERY CRATE GIVES THEM."), (Left + 2.0f) * S, (H - 112.0f) * S, 12, White, 0.0f, false);
+		return;
+	}
+
+	const TArray<FSenniteHeroForSale>& Guns = Server->ShopWeapons;
+	const FSenniteHeroForSale& Gun = Guns[Menu->BrowseWeapon];
+	const AWeaponActor* Known = ShopGun(Gun.Id);
+	const bool bOwned = Server->bConnected && Server->OwnsWeapon(Gun.Id);
+	Text(TEXT("count"), FString::Printf(TEXT("GUN %d OF %d"), Menu->BrowseWeapon + 1, Guns.Num()), Left * S, 122.0f * S, 12, SenniteUi::Gold);
+	// the name the game calls it in play, where it is one of the game's guns
+	const FString Name = Known != nullptr && !Known->DisplayName.IsEmpty() ? Known->DisplayName : Gun.Name.ToUpper();
+	const float Room = 440.0f * S;
+	const float NamePoints = FMath::Min(54.0f, 54.0f * Room / FMath::Max(1.0f, Width(Name, 54)));
+	Text(TEXT("name"), Name, Left * S, 142.0f * S, NamePoints, White);
+	SenniteUi::Plate(Canvas, FBox2D(FVector2D(Left * S, 226.0f * S), FVector2D((Left + 96.0f) * S, 229.0f * S)), 0.0f, SenniteUi::Gold, SenniteUi::Gold);
+
+	// how the gun is had, on a small plate under its name
+	{
+		const FString Status = bOwned ? FString(TEXT("YOURS")) : FString::Printf(TEXT("%s D-BUCKS"), *SenniteUi::Grouped(Gun.Price));
+		const float Wide = Width(Status, 13) + 36.0f * S;
+		const FBox2D Tag(FVector2D(Left * S, 246.0f * S), FVector2D(Left * S + Wide, 280.0f * S));
+		SenniteUi::Plate(Canvas, Tag, 7.0f * S, FLinearColor(0.0f, 0.0f, 0.0f, 0.55f), FLinearColor(0.0f, 0.0f, 0.0f, 0.55f));
+		SenniteUi::Outline(Canvas, Tag, 7.0f * S, bOwned ? SenniteUi::Edge : SenniteUi::Gold.CopyWithNewOpacity(0.8f), FMath::Max(1.0f, 1.5f * S));
+		Text(TEXT("status"), Status, Left * S + 18.0f * S, 254.0f * S, 13, bOwned ? White : SenniteUi::Gold);
+	}
+
+	// bought once, it is the wallet's; until then, the next thing toward having it
+	bool bHint = false;
+	if (bOwned) {
+		Button(TEXT("bought"), TEXT("BOUGHT"), Left, BY, BW, 66.0f, false);
+		Text(TEXT("hint"), TEXT("CRATES GIVE IT TO YOU IN EVERY GAME, WHILE YOUR WALLET HOLDS IT."), (Left + 2.0f) * S, (BY + 80.0f) * S, 12, White, 0.0f, false);
+	}
+	else {
+		FForSale Thing;
+		Thing.Kind = TEXT("GUNS");
+		Thing.Buy = TEXT("buygun");
+		Thing.bListed = true;
+		Thing.Price = Gun.Price;
+		Thing.bOnItsWay = Server->HeroOnItsWay == Gun.Id;
+		bHint = NextStep(Server, Thing, Left, BY, BW);
+	}
+	ShopWord(Server, !Server->HeroOnItsWay.IsEmpty(), (Left + 2.0f) * S, (BY + 80.0f + (bHint ? 52.0f : bOwned ? 26.0f : 0.0f)) * S);
+
+	// which guns are bought and which are not
+	Text(TEXT("free"), TEXT("THE RIFLE AND THE SHOTGUN ARE FREE: EVERY CRATE GIVES THEM. A GUN SOLD HERE COMES OUT OF A CRATE ONLY FOR ITS OWNERS."),
+		(Left + 2.0f) * S, (H - 112.0f) * S, 12, White, 0.0f, false);
+
+	// the arrows, either side of the gun
+	const float HeroX = W * 0.67f;
+	Button(TEXT("prev"), TEXT("<"), HeroX - 330.0f, H * 0.5f - 76.0f, 76.0f, 116.0f, true, 34, false, -1);
+	Button(TEXT("next"), TEXT(">"), FMath::Min(HeroX + 254.0f, W - 100.0f), H * 0.5f - 76.0f, 76.0f, 116.0f, true, 34, false, 1);
+
+	// every gun along the bottom, each on its own tile: the one shown in gold, one not owned faint
+	const float Gap = 8.0f;
+	const float TileWide = FMath::Min(240.0f, (W - 2.0f * Left - Gap * (Guns.Num() - 1)) / FMath::Max(1, Guns.Num()));
+	const float TileHigh = 56.0f;
+	const float TileTop = H - 82.0f;
+	for (int32 Index = 0; Index < Guns.Num(); ++Index) {
+		const FSenniteHeroForSale& Each = Guns[Index];
+		const FName Action(*(FString(TEXT("gun:")) + Each.Id));
+		const float X = Left + Index * (TileWide + Gap);
+		const FBox2D Box(FVector2D(X * S, TileTop * S), FVector2D((X + TileWide) * S, (TileTop + TileHigh) * S));
+		const bool bHad = Server->bConnected && Server->OwnsWeapon(Each.Id);
+		const SenniteUi::EButton State = Action == Held ? SenniteUi::EButton::Pressed
+			: Index == Menu->BrowseWeapon ? SenniteUi::EButton::Primary
+			: Action == Hovered ? SenniteUi::EButton::Hover : SenniteUi::EButton::Plain;
+		FLinearColor Ink = SenniteUi::ButtonPlate(Canvas, Box, S, State);
+		if (!bHad && Index != Menu->BrowseWeapon) {
+			Ink = FLinearColor(1.0f, 1.0f, 1.0f, 0.5f);
+		}
+		const AWeaponActor* Theirs = ShopGun(Each.Id);
+		const FString Label = Theirs != nullptr && !Theirs->DisplayName.IsEmpty() ? Theirs->DisplayName : Each.Name.ToUpper();
+		const float Points = FMath::Min(13.0f, 13.0f * (TileWide - 22.0f) * S / FMath::Max(1.0f, Width(Label, 13)));
+		const float High = SenniteUi::Measure(Label, Points, S).Y;
+		SenniteUi::Text(Canvas, Label, Box.GetCenter().X, Box.GetCenter().Y - High * 0.5f, Points, S, Ink, 0.5f);
+		Drawing.Add(FString::Printf(TEXT("tile%d=%s%s"), Index, *Label, bHad ? TEXT("  YOURS") : TEXT("  NOT HAD")));
 		FSenniteMenuButton Tile;
 		Tile.Action = Action;
 		Tile.Text = Label;

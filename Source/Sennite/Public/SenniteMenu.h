@@ -5,7 +5,7 @@
 // HOST opens a lobby others on the network can join; JOIN takes an address, typed on the screen's own
 // keypad or the keyboard; QUIT.
 //
-// STORE: what the publisher's shop sells, a section each, named along the top: HEROES, SKINS, SWAP.
+// STORE: what the publisher's shop sells, a section each, named along the top: HEROES, SKINS, WEAPONS, SWAP.
 // Top right, beside a wallet, is how many D-bucks the player's wallet proved it holds (on a game with a shop).
 //
 // HEROES: the hero turns on the stage, its name and what is done with it to the left, every hero on a
@@ -20,6 +20,10 @@
 // the heroes that have skins and, under them, the skins of the hero shown. One not owned is
 // bought as a hero is; one the wallet proves it owns is worn or taken off (it is on the hero in play only
 // while the wallet proves it owns it).
+//
+// WEAPONS: each gun the shop sells, turning on the stage, with its price. The rifle and the shotgun are free
+// and come out of every crate; a gun the shop sells comes out of a crate only for a player whose wallet
+// proves it owns it. It is bought as a hero is, once.
 //
 // SWAP: one thing the publisher's vaults hold for another (ERA for D-bucks, D-bucks back for ERA, and
 // whatever else the publisher opens a vault for). The player picks what is paid and what is got, types
@@ -43,6 +47,7 @@
 
 class ACameraActor;
 class ASkeletalMeshActor;
+class AStaticMeshActor;
 class ASennitePlayerState;
 class USennitePublisher;
 
@@ -53,6 +58,7 @@ enum class ESenniteMenuPage : uint8
 	/** The store's sections. */
 	Heroes,
 	Skins,
+	Weapons,
 	Swap,
 	Join,
 	Lobby,
@@ -100,7 +106,13 @@ public:
 	int32 BrowseSkin = 0;
 
 	/** Whether a page is one of the store's sections. */
-	static bool InStore(ESenniteMenuPage Which) { return Which == ESenniteMenuPage::Heroes || Which == ESenniteMenuPage::Skins || Which == ESenniteMenuPage::Swap; }
+	static bool InStore(ESenniteMenuPage Which) { return Which == ESenniteMenuPage::Heroes || Which == ESenniteMenuPage::Skins || Which == ESenniteMenuPage::Weapons || Which == ESenniteMenuPage::Swap; }
+
+	/** The gun the store's weapons section shows, by its place in the shop's list. */
+	int32 BrowseWeapon = 0;
+
+	/** The gun turning on the stage now, by the shop's id; empty when a hero stands there. What a check reads. */
+	FString StageWeapon() const { return StageGunId; }
 
 	/** The store's swap: what is paid and what is got, by their places among what the publisher's vaults hold, and the amount typed. */
 	int32 SwapFrom = 0;
@@ -165,6 +177,13 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<ASkeletalMeshActor>> Figures;
 
+	/** The gun the store shows, on the stage in the hero's place, and which one it is. */
+	UPROPERTY()
+	TObjectPtr<AStaticMeshActor> StageGun;
+
+	FString StageGunId;
+	void StandGun(const FString& WeaponId);
+
 	TArray<FName> FigureHeroes;
 };
 
@@ -193,6 +212,7 @@ private:
 	void DrawMain(ASenniteMenuController* Menu);
 	void DrawHeroes(ASenniteMenuController* Menu);
 	void DrawSkins(ASenniteMenuController* Menu);
+	void DrawWeapons(ASenniteMenuController* Menu);
 	void DrawSwap(ASenniteMenuController* Menu);
 
 	/** The top of every section of the store: BACK, the sections' names, and the wallet's D-bucks top right. */

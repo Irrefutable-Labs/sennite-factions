@@ -385,7 +385,7 @@ export class Service {
     // The shop: the game's currency and the skins and heroes the publisher sells for it (spec 10.5).
     if (is("GET", "shop")) {
       const shop = publisher.shop.world;
-      return { status: 200, body: { currency: { symbol: shop.currency.symbol, name: shop.currency.name }, skins: shop.skins, heroes: shop.heroes } };
+      return { status: 200, body: { currency: { symbol: shop.currency.symbol, name: shop.currency.name }, skins: shop.skins, heroes: shop.heroes, weapons: shop.weapons } };
     }
 
     // The wallet trades ERA for D-bucks through the publisher's vault, at the price the vault's reserves set.
@@ -474,6 +474,20 @@ export class Service {
       };
     }
 
+    // The wallet buys a gun, as it buys a hero.
+    if (is("POST", "shop", "weapons")) {
+      const player = this.player(req);
+      const connection = await this.connected(player);
+      const weapon = publisher.shop.weapon(text((await body(req)).weaponId, "weaponId"));
+      return {
+        status: 202,
+        body: this.start(player, async () => {
+          const sold = await publisher.shop.buyWeapon(connection, weapon.id);
+          return sold.ok ? { ok: true, message: `${sold.weapon.name} #${sold.weapon.serial} is the wallet's` } : { ok: false, message: sold.why };
+        }),
+      };
+    }
+
     // A hero pass for the player's game to show one game server it has joined, named by its audience (as that
     // game's GET /players/me gave it, or "match" for the publisher's match server). That server alone can ask
     // here with it, once: which heroes the wallet proved it owns at its last proof, and whose wallet it is. A
@@ -527,7 +541,10 @@ export class Service {
         status: 202,
         body: this.start(player, async () => {
           const holdings = await publisher.holdings(connection);
-          if (holdings !== undefined) this.keepProvenHeroes(hex(connection.opponent.signingKey), holdings.heroes.map((h) => h.heroId));
+          // what a hero pass speaks for: the heroes and the guns the wallet proved it owns, by the shop's ids, in one list
+          if (holdings !== undefined) {
+            this.keepProvenHeroes(hex(connection.opponent.signingKey), [...holdings.heroes.map((h) => h.heroId), ...holdings.weapons.map((w) => w.weaponId)]);
+          }
           return holdings === undefined
             ? { ok: false, message: "the wallet proved nothing about what it holds" }
             : { ok: true, message: "the wallet proved what it holds", data: { ...holdings } };
