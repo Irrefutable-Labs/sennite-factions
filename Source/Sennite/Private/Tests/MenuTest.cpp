@@ -21,6 +21,7 @@
 #include "SenniteGameMenu.h"
 #include "SenniteCharacter.h"
 #include "SenniteHeroes.h"
+#include "SenniteSounds.h"
 #include "SennitePlayerState.h"
 #include "Animation/SkeletalMeshActor.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -132,12 +133,15 @@ namespace
 			{
 				TSet<FString> Heard;
 				for (const TCHAR* Action : { TEXT("play"), TEXT("tab:skins"), TEXT("next"), TEXT("hero:1"), TEXT("back"), TEXT("choose"), TEXT("num:1"), TEXT("music+") }) {
-					const FSoftObjectPath Sound = ASenniteMenuController::ButtonSoundOf(Action);
-					Test->TestNotNull(FString::Printf(TEXT("The button %s has a sound"), Action), Cast<USoundBase>(Sound.TryLoad()));
-					Heard.Add(Sound.ToString());
+					const TArray<FSoftObjectPath> Takes = USenniteSounds::Takes(USenniteSounds::ButtonSound(Action));
+					Test->TestEqual(FString::Printf(TEXT("The button %s has one sound"), Action), Takes.Num(), 1);
+					if (Takes.Num() == 1) {
+						Test->TestNotNull(FString::Printf(TEXT("The sound of the button %s loads"), Action), Cast<USoundBase>(Takes[0].TryLoad()));
+						Heard.Add(Takes[0].ToString());
+					}
 				}
 				Test->TestEqual(TEXT("A menu button, a section, an arrow, one of a row, back, a thing done, a digit and a setting each sound their own"), Heard.Num(), 8);
-				Test->TestEqual(TEXT("The two arrows sound alike"), ASenniteMenuController::ButtonSoundOf(TEXT("prev")), ASenniteMenuController::ButtonSoundOf(TEXT("next")));
+				Test->TestEqual(TEXT("The two arrows sound alike"), USenniteSounds::ButtonSound(TEXT("prev")), USenniteSounds::ButtonSound(TEXT("next")));
 			}
 			for (const TCHAR* Action : { TEXT("play"), TEXT("store"), TEXT("base"), TEXT("host"), TEXT("join"), TEXT("settings"), TEXT("quit") }) {
 				Test->TestTrue(FString::Printf(TEXT("The menu has %s"), Action), MenuCheck::Has(Menu, Action));

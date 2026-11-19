@@ -76,10 +76,6 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
 	FSoftObjectPath FireFalloff;
 
-	/** What a hero's own weapon sounds like, no gun in hand: the hero packs ship voices and no weapon sounds. Held by the base class, as the falloff is. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
-	FSoftObjectPath OwnAttackSound;
-
 	/** Where the other hand holds the gun, in the mesh's own space: its foregrip. Set per weapon class in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Grip")
 	FVector OffHandPoint;
