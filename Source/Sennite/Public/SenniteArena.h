@@ -83,8 +83,16 @@ struct FArenaProp
 struct FArenaSizes
 {
 	float BaseRadius = 12000.0f;
-	float ConnectorLength = 24000.0f;
-	float ConnectorWidth = 12000.0f;
+	/** The land between two plots: this long from one plot to the next, and this wide. */
+	float ConnectorLength = 48000.0f;
+	float ConnectorWidth = 24000.0f;
+	/**
+	 * A built crossing (bridges, a tunnel, a road of traffic, floating pieces, a tree-top walk) is this
+	 * long and this wide, in the middle of the land between its two plots; a kind that is land itself
+	 * fills that land.
+	 */
+	float PieceLength = 24000.0f;
+	float PieceWidth = 12000.0f;
 	/** How many trees and bushes the seed tries to stand round the rim of each base. */
 	int32 TreesPerBase = 14;
 	int32 BushesPerBase = 24;
@@ -149,13 +157,39 @@ struct FArenaStep
 	int32 Lane = INDEX_NONE;
 };
 
-/** A connector: its kind, where it starts and which way it runs, and a way across it. */
+/** A point of a way cut through land: where, along and across from its connector's frame; how high its floor lies there over the plots' level ground; and how far the floor reaches either side. */
+struct FArenaTrailPoint
+{
+	FVector2D At = FVector2D::ZeroVector;
+	float Floor = 0.0f;
+	float Half = 0.0f;
+};
+
+/** A way cut through land, point to point: a gorge, a side valley, a trail. */
+struct FArenaTrail
+{
+	TArray<FArenaTrailPoint> Points;
+};
+
+/**
+ * A connector: its kind, where what it builds starts and which way it runs, and a way across it. What
+ * it builds is Length long and Width wide from its frame; the land between its two plots begins Lead
+ * before that, at the first plot's edge, and ends Lead after it. A kind that is land itself (a
+ * canyon) fills that land: its ground stands Rise over the plots' level ground, with the ways in
+ * Trails cut through it, the first of them the way across.
+ */
 struct FArenaConnector
 {
 	EConnectorKind Kind = EConnectorKind::Bridges;
 	int32 FromBase = 0;
 	int32 ToBase = 0;
 	FTransform Frame = FTransform::Identity;
+	float Length = 0.0f;
+	float Width = 0.0f;
+	float Lead = 0.0f;
+	float Rise = 0.0f;
+	FVector2D GrainAt = FVector2D::ZeroVector;
+	TArray<FArenaTrail> Trails;
 	TArray<FArenaStep> Route;
 };
 
@@ -203,12 +237,12 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	float BaseRadius = 12000.0f;
 
-	/** A connector is this long between two bases, and this wide. Set in DefaultGame.ini. */
+	/** The land between two plots is this long from one to the next, and this wide. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
-	float ConnectorLength = 24000.0f;
+	float ConnectorLength = 48000.0f;
 
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
-	float ConnectorWidth = 12000.0f;
+	float ConnectorWidth = 24000.0f;
 
 	/**
 	 * How many trees and bushes the seed tries to stand round the rim of each base, clear of every
@@ -289,8 +323,9 @@ public:
 	/**
 	 * What the ground is painted with at a place, from the plan alone: red is gravel (the paths from
 	 * each pad out to its ways and the yard round each steel frame), green is dirt (under trees and
-	 * round the plots' rocks), alpha is how dry the grass of the nearest plot is. The ground's material
-	 * draws grass, dirt and gravel by it.
+	 * round the plots' rocks), blue is the ground of a connector that is land itself (a canyon's sand
+	 * and rock), alpha is how dry the grass of the nearest plot is. The ground's material draws grass,
+	 * dirt and gravel by it; the material of a land connector's own ground draws its ground by blue.
 	 */
 	static FLinearColor GroundPaint(const FArenaPlan& Plan, double X, double Y);
 
@@ -321,6 +356,9 @@ public:
 	static FArenaPlan MakePlan(int32 Seed, int32 BaseCount, int32 ForcedKind, const FArenaSizes& Size);
 
 	static const TCHAR* KindName(EConnectorKind Kind);
+
+	/** A kind that is land itself, shaped ground a hero walks through, not a crossing built on level ground. */
+	static bool IsLand(EConnectorKind Kind);
 
 	/** The plan this arena built, on this machine. */
 	const FArenaPlan& GetPlan() const { return Plan; }
@@ -359,6 +397,10 @@ public:
 	/** What the land is drawn with. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	FSoftObjectPath BaseGround;
+
+	/** What the ground of a canyon is drawn with: the land's own material with sand and rock where the ground's paint is blue. Empty: the land's. Set in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	FSoftObjectPath CanyonGround;
 
 	/** What the traffic deck and the bridge spans are drawn with. Empty: their plain tints. Set in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")

@@ -3,12 +3,12 @@
 //
 // Host: taps HOST; the lobby opens with them in it, as their hero (the default). Once the other player
 // is in and has chosen another hero, both heroes stand on the stage and the list names both; the host
-// taps START, and both travel to the test range together, each as their own hero.
+// taps START, and both travel to the arena together, each as their own hero.
 //
 // Joiner: taps JOIN, types the host's address on the screen's keypad, taps JOIN; in the lobby, taps
 // HEROES, goes to the second free hero and taps CHOOSE; the host sees it. Before that it sends what a
 // game changed to lie would: a claim to a hero bought in the shop, with a made-up pass; the server keeps it
-// as the hero it is. On the test range they are
+// as the hero it is. In the arena they are
 // that hero, and the host's hero is the host's.
 
 #include "Misc/AutomationTest.h"
@@ -42,11 +42,11 @@ namespace
 		return NAME_None;
 	}
 
-	/** On the test range: every hero there, with the hero each is. Empty until both are standing. */
-	TArray<ASenniteCharacter*> HeroesOnRange(UWorld* World)
+	/** In the arena: every hero there, with the hero each is. Empty until both are standing. */
+	TArray<ASenniteCharacter*> HeroesInArena(UWorld* World)
 	{
 		TArray<ASenniteCharacter*> Found;
-		if (World == nullptr || UGameplayStatics::GetCurrentLevelName(World) != TEXT("TestRange")) {
+		if (World == nullptr || UGameplayStatics::GetCurrentLevelName(World) != TEXT("Arena")) {
 			return Found;
 		}
 		for (TActorIterator<ASenniteCharacter> It(World); It; ++It) {
@@ -241,22 +241,22 @@ namespace
 			return false;
 
 		case EPhase::Travel: {
-			const TArray<ASenniteCharacter*> Heroes = HeroesOnRange(World);
+			const TArray<ASenniteCharacter*> Heroes = HeroesInArena(World);
 			APlayerController* Controller = World != nullptr ? World->GetFirstPlayerController() : nullptr;
 			ASenniteCharacter* Mine = Controller != nullptr ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
 			if (Heroes.Num() < 2 || Mine == nullptr || !Mine->GetCharacterMovement()->IsMovingOnGround() || Elapsed() < 2.0) {
-				return Elapsed() > 120.0 ? Fail(FString::Printf(TEXT("The %s did not reach the test range with both heroes in 120 s"), Side())) : false;
+				return Elapsed() > 120.0 ? Fail(FString::Printf(TEXT("The %s did not reach the arena with both heroes in 120 s"), Side())) : false;
 			}
 			const FName Own = bHost ? Default : Chosen;
 			const FName Other = bHost ? Chosen : Default;
 			ASenniteCharacter* Theirs = Heroes[0] == Mine ? Heroes[1] : Heroes[0];
-			Test->TestEqual(TEXT("Everyone travelled together to the test range"), UGameplayStatics::GetCurrentLevelName(World), FString(TEXT("TestRange")));
+			Test->TestEqual(TEXT("Everyone travelled together to the arena"), UGameplayStatics::GetCurrentLevelName(World), FString(TEXT("Arena")));
 			Test->TestEqual(TEXT("This player is their own hero there"), Mine->HeroId, Own);
 			Test->TestEqual(TEXT("And wears its mesh"), FSoftObjectPath(Mine->GetMesh()->GetSkeletalMeshAsset()).ToString(), USenniteHeroes::FindOrDefault(Own).Mesh.ToString());
 			Test->TestEqual(TEXT("The other player is theirs"), Theirs->HeroId, Other);
 			Test->TestEqual(TEXT("And this player's game draws it so"), FSoftObjectPath(Theirs->GetMesh()->GetSkeletalMeshAsset()).ToString(), USenniteHeroes::FindOrDefault(Other).Mesh.ToString());
-			GameCheck::Shot(TEXT("Lobby"), *FString::Printf(TEXT("%s_range.png"), Side()));
-			UE_LOG(LogLobbyCheck, Display, TEXT("GAMECHECK %s on the range: me=%s other=%s"), Side(), *Mine->HeroId.ToString(), *Theirs->HeroId.ToString());
+			GameCheck::Shot(TEXT("Lobby"), *FString::Printf(TEXT("%s_arena.png"), Side()));
+			UE_LOG(LogLobbyCheck, Display, TEXT("GAMECHECK %s in the arena: me=%s other=%s"), Side(), *Mine->HeroId.ToString(), *Theirs->HeroId.ToString());
 			UE_LOG(LogLobbyCheck, Display, TEXT("GAMECHECK finished"));
 			Phase = EPhase::Done;
 			return true;

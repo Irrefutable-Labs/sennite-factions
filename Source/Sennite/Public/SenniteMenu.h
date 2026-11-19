@@ -1,6 +1,6 @@
 // The game's first screen, its character select and its lobby, on the Menu map (Tools/build_menu.py).
 //
-// MENU: PLAY opens the test range on this machine; STORE opens the store; BASE EDITOR opens the test
+// MENU: PLAY opens the arena, a freshly seeded one, on this machine; STORE opens the store; BASE EDITOR opens the test
 // range on the planning view of the player's base (where there is a publisher's server, and so bases);
 // HOST opens a lobby others on the network can join; JOIN takes an address, typed on the screen's own
 // keypad or the keyboard; QUIT.
@@ -32,7 +32,7 @@
 //
 // LOBBY: the Menu map hosted with ?listen?game=lobby. Every player's hero stands on the stage, and
 // the list says who is in and as which hero. Anyone can change hero (HEROES, the store's section); the host starts, and
-// everyone travels to the test range together.
+// everyone travels to an arena together.
 //
 // Everything is drawn on the canvas, sized to the screen as the HUD is, and every button works by a
 // tap or a click; the arrow keys, Enter and Escape work too.

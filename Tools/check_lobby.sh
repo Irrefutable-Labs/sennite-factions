@@ -3,7 +3,7 @@
 # neither with a window, each starting on the menu with a profile of its own, new each run, and doing
 # everything by taps on the screen. One taps HOST; the other taps JOIN, types the host's address on the
 # keypad, joins, and chooses another hero in the lobby; the host sees it and taps START; both reach the
-# test range together, each as their own hero. Logs (host.log, joiner.log) and screenshots in Saved/Lobby/.
+# arena together, each as their own hero. Logs (host.log, joiner.log) and screenshots in Saved/Lobby/.
 cd "$(dirname "$0")/.."
 UE="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.8}"
 PORT="${SENNITE_PORT:-7791}"
