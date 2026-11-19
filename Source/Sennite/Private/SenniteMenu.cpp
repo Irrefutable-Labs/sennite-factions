@@ -33,7 +33,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogSenniteMenu, Log, All);
 namespace
 {
 	const TCHAR* MenuMap = TEXT("/Game/Maps/Menu");
-	const TCHAR* PlayMap = TEXT("/Game/Maps/TestRange");
+	/** Where a base is planned: the range the factions' bases stand on. */
+	const TCHAR* BaseMap = TEXT("/Game/Maps/TestRange");
 	/** How far apart the lobby's heroes stand, in cm. */
 	const float Spacing = 190.0f;
 	/** The camera's field of view, across. */
@@ -191,11 +192,13 @@ void ASenniteMenuController::PlayNextSong()
 		UE_LOG(LogSenniteMenu, Warning, TEXT("The menu's song %s is not a sound"), *Songs[Which].ToString());
 		return;
 	}
+	// turned all the way down it plays on, unheard: it does not end, and the next does not begin, for want of loudness
+	Song->VirtualizationMode = EVirtualizationMode::PlayWhenSilent;
 	// the song before this one is stopped where it has not ended: that end is not a call for the next
 	bSongChanging = true;
 	if (Music == nullptr) {
 		// no sound device, no player: a game run without sound has chosen its song and plays it to nobody
-		Music = UGameplayStatics::CreateSound2D(this, Song, SongVolume, 1.0f, 0.0f, nullptr, false, false);
+		Music = UGameplayStatics::CreateSound2D(this, Song, FMath::Clamp(USenniteProfile::Get().MusicVolume, 0.0f, 1.0f), 1.0f, 0.0f, nullptr, false, false);
 		if (Music != nullptr) {
 			Music->OnAudioFinishedNative.AddUObject(this, &ASenniteMenuController::SongEnded);
 		}
@@ -291,6 +294,12 @@ void ASenniteMenuController::PlayerTick(float DeltaTime)
 	Super::PlayerTick(DeltaTime);
 	if (!IsLocalController()) {
 		return;
+	}
+	// the songs are as loud as the player's MUSIC VOLUME says, as it is changed
+	const float Loud = FMath::Clamp(USenniteProfile::Get().MusicVolume, 0.0f, 1.0f);
+	if (Music != nullptr && Loud != SongLoud) {
+		SongLoud = Loud;
+		Music->SetVolumeMultiplier(Loud);
 	}
 	// what the menu said to do in the wallet is done once the wallet is connected
 	if (bNoteForWallet) {
@@ -501,8 +510,54 @@ void ASenniteMenuController::StandGun(const FString& WeaponId)
 	StageGun->SetActorEnableCollision(false);
 }
 
+USenniteGameMenu* ASenniteMenuController::SettingsIfOpen() const
+{
+	return Settings != nullptr && Settings->IsOpen() ? Settings.Get() : nullptr;
+}
+
+FSoftObjectPath ASenniteMenuController::ButtonSoundOf(FName Action)
+{
+	const ASenniteMenuController* Sounds = GetDefault<ASenniteMenuController>();
+	const FString Name = Action.ToString();
+	if (Name == TEXT("prev") || Name == TEXT("next")) {
+		return Sounds->TurnSound;
+	}
+	if (Name.StartsWith(TEXT("tab:"))) {
+		return Sounds->TabSound;
+	}
+	if (Name.StartsWith(TEXT("hero:")) || Name.StartsWith(TEXT("gun:")) || Name.StartsWith(TEXT("skinsof:")) || Name.StartsWith(SkinOnStage) || Name == TEXT("swap:from") || Name == TEXT("swap:to")) {
+		return Sounds->PickSound;
+	}
+	if (Name == TEXT("back") || Name == TEXT("leave") || Name == TEXT("stay") || Name == TEXT("resume")) {
+		return Sounds->BackSound;
+	}
+	if (Name.StartsWith(TEXT("num:")) || Name.StartsWith(TEXT("key:"))) {
+		return Sounds->KeySound;
+	}
+	if (Name.EndsWith(TEXT("-")) || Name.EndsWith(TEXT("+")) || Name == TEXT("invert") || Name == TEXT("swap:flip")) {
+		return Sounds->StepSound;
+	}
+	for (const TCHAR* Done : { TEXT("choose"), TEXT("buy"), TEXT("buygun"), TEXT("buyskin"), TEXT("wear"), TEXT("takeoff"), TEXT("dbucks"), TEXT("wallet"), TEXT("price"), TEXT("trade"), TEXT("connect"), TEXT("start") }) {
+		if (Name == Done) {
+			return Sounds->ConfirmSound;
+		}
+	}
+	return Sounds->PressSound;
+}
+
+void ASenniteMenuController::PlayButtonSound(const UObject* WorldContext, FName Action)
+{
+	if (USoundBase* Sound = Cast<USoundBase>(ButtonSoundOf(Action).TryLoad())) {
+		UGameplayStatics::PlaySound2D(WorldContext, Sound, GetDefault<ASenniteMenuController>()->ButtonVolume);
+	}
+}
+
 bool ASenniteMenuController::InputTouch(const FTouchId TouchId, const ETouchType::Type Type, const FVector2D& TouchLocation, const float Force, const uint64 Timestamp)
 {
+	// SETTINGS, while it is open, takes every touch
+	if (USenniteGameMenu* Open = SettingsIfOpen()) {
+		return Open->Touch(Type, TouchLocation);
+	}
 	if (Type == ETouchType::Began) {
 		Press(TouchLocation);
 		return true;
@@ -516,6 +571,10 @@ bool ASenniteMenuController::InputTouch(const FTouchId TouchId, const ETouchType
 
 bool ASenniteMenuController::InputKey(const FInputKeyEventArgs& Params)
 {
+	// SETTINGS, while it is open, takes every key: Escape or the back button closes it
+	if (USenniteGameMenu* Open = SettingsIfOpen()) {
+		return Open->Key(Params);
+	}
 	const FKey Key = Params.Key;
 	if (Key == EKeys::LeftMouseButton && (Params.Event == IE_Pressed || Params.Event == IE_Released)) {
 		float X = 0.0f;
@@ -631,8 +690,16 @@ void ASenniteMenuController::Act(FName Action)
 	const FString Name = Action.ToString();
 	const TArray<FSenniteHero>& Heroes = USenniteHeroes::All();
 	USenniteProfile& Profile = USenniteProfile::Get();
+	PlayButtonSound(this, Action);
 	if (Name == TEXT("play")) {
-		UGameplayStatics::OpenLevel(this, FName(PlayMap));
+		UGameplayStatics::OpenLevel(this, FName(*PlayMap));
+	}
+	else if (Name == TEXT("settings")) {
+		if (Settings == nullptr) {
+			Settings = NewObject<USenniteGameMenu>(this);
+			Settings->Bind(this);
+		}
+		Settings->OpenSettings();
 	}
 	else if (Name == TEXT("store") || Name == TEXT("heroes") || Name == TEXT("tab:heroes")) {
 		// the store opens on its heroes; the lobby's HEROES is the same section
@@ -756,7 +823,7 @@ void ASenniteMenuController::Act(FName Action)
 		// the player's base is on the map the game is played on: it opens there, on the planning view
 		const USennitePublisher* Server = Shop(this);
 		if (Server != nullptr && Server->IsOn()) {
-			UGameplayStatics::OpenLevel(this, FName(PlayMap), true, ASenniteBaseEditor::OpenOption);
+			UGameplayStatics::OpenLevel(this, FName(BaseMap), true, ASenniteBaseEditor::OpenOption);
 		}
 	}
 	else if (Name == TEXT("host")) {
@@ -1034,6 +1101,13 @@ void ASenniteMenuHUD::DrawHUD()
 	if (Menu == nullptr) {
 		return;
 	}
+	if (USenniteGameMenu* Settings = Menu->SettingsIfOpen()) {
+		// SETTINGS is over the first screen, which is not drawn under it: its own buttons are what is tapped
+		Drawing.Add(TEXT("page=settings"));
+		Settings->Draw(Canvas);
+		LastDrawn = Drawing;
+		return;
+	}
 	Drawing.Add(FString::Printf(TEXT("page=%d"), int32(Menu->Page)));
 	switch (Menu->Page) {
 	case ESenniteMenuPage::Main: DrawMain(Menu); break;
@@ -1080,13 +1154,14 @@ void ASenniteMenuHUD::DrawMain(ASenniteMenuController* Menu)
 	SenniteUi::Fade(Canvas, FBox2D(FVector2D(Whole.Min.X, H - 180.0f * S), Whole.Max), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.5f), true);
 	Heading(TEXT("SENNITE"), TEXT("FACTIONS"), TEXT("BETA"));
 	const float X = 48.0f;
-	float Y = 140.0f;
-	const float Step = 72.0f;
+	float Y = 128.0f;
+	const float Step = 70.0f;
 	// a base is planned where there is a publisher's server, which keeps the factions' bases
 	const USennitePublisher* Server = Shop(Menu);
 	const bool bBases = Server != nullptr && Server->IsOn();
 	for (const TPair<const TCHAR*, const TCHAR*>& Each : { TPair<const TCHAR*, const TCHAR*>(TEXT("play"), TEXT("PLAY")), { TEXT("store"), TEXT("STORE") },
-			{ TEXT("base"), TEXT("BASE EDITOR") }, { TEXT("host"), TEXT("HOST A LOBBY") }, { TEXT("join"), TEXT("JOIN A LOBBY") }, { TEXT("quit"), TEXT("QUIT") } }) {
+			{ TEXT("base"), TEXT("BASE EDITOR") }, { TEXT("host"), TEXT("HOST A LOBBY") }, { TEXT("join"), TEXT("JOIN A LOBBY") }, { TEXT("settings"), TEXT("SETTINGS") },
+			{ TEXT("quit"), TEXT("QUIT") } }) {
 		Button(Each.Key, Each.Value, X, Y, 320.0f, 60.0f, bBases || FName(Each.Key) != TEXT("base"), 18, FName(Each.Key) == TEXT("play"));
 		Y += Step;
 	}

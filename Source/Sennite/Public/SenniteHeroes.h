@@ -134,6 +134,10 @@ public:
 	UPROPERTY()
 	float Volume = 1.0f;
 
+	/** How loud the menu's songs are, 0 to 1, of that: low from the start, so a button is heard over them. */
+	UPROPERTY()
+	float MusicVolume = 0.3f;
+
 	/** The graphics quality the player chose, 0 (low) to 3 (epic); -1 while they have chosen none and the device's own is kept. */
 	UPROPERTY()
 	int32 Quality = -1;

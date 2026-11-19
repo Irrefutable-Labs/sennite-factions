@@ -47,6 +47,7 @@
 
 class ACameraActor;
 class UAudioComponent;
+class USenniteGameMenu;
 class USoundBase;
 class ASkeletalMeshActor;
 class AStaticMeshActor;
@@ -160,9 +161,43 @@ public:
 	UPROPERTY(Config)
 	TArray<FSoftObjectPath> Songs;
 
-	/** How loud the menu's songs are, of the game's own loudness. */
+	/** The map PLAY opens: the land the game is played on. */
 	UPROPERTY(Config)
-	float SongVolume = 1.0f;
+	FString PlayMap = TEXT("/Game/Maps/Arena");
+
+	/**
+	 * What a button sounds like, by what kind of button it is (Tools/import_sounds.py): one of the first
+	 * screen or the in-game menu; a section of the store; the arrows that turn to the next hero, skin or
+	 * gun; one of a row along the bottom; back; a thing done (choose, buy, swap, start); a digit of a
+	 * keypad; a setting a step less or more. ButtonVolume is how loud they are, of the game's own loudness:
+	 * over the songs, which play at the player's own MUSIC VOLUME.
+	 */
+	UPROPERTY(Config)
+	FSoftObjectPath PressSound;
+	UPROPERTY(Config)
+	FSoftObjectPath TabSound;
+	UPROPERTY(Config)
+	FSoftObjectPath TurnSound;
+	UPROPERTY(Config)
+	FSoftObjectPath PickSound;
+	UPROPERTY(Config)
+	FSoftObjectPath BackSound;
+	UPROPERTY(Config)
+	FSoftObjectPath ConfirmSound;
+	UPROPERTY(Config)
+	FSoftObjectPath KeySound;
+	UPROPERTY(Config)
+	FSoftObjectPath StepSound;
+	UPROPERTY(Config)
+	float ButtonVolume = 0.6f;
+
+	/** The sound the button for Action makes: every menu's buttons, the in-game menu's too. */
+	static FSoftObjectPath ButtonSoundOf(FName Action);
+	/** Make it heard. */
+	static void PlayButtonSound(const UObject* WorldContext, FName Action);
+
+	/** SETTINGS, over the first screen: the in-game menu's own page, or none while it is closed. */
+	USenniteGameMenu* SettingsIfOpen() const;
 
 	/** The song the menu is playing now, or none where it has no songs. */
 	const USoundBase* SongNow() const { return Song; }
@@ -220,7 +255,12 @@ private:
 	TObjectPtr<UAudioComponent> Music;
 
 	bool bSongChanging = false;
+	/** How loud the song was last set: the player's MUSIC VOLUME, followed as it is changed. */
+	float SongLoud = -1.0f;
 	void SongEnded(UAudioComponent* Played);
+
+	UPROPERTY()
+	TObjectPtr<USenniteGameMenu> Settings;
 };
 
 /** The menu's pages, drawn on the canvas. */
