@@ -10,10 +10,11 @@ The packs are "Sonniss.com-GDC2024-GameAudioBundle1of9" (royalty-free for games,
 "License - GDC Game Audio.pdf") and "Essentials_Series_NOX_SOUND" (CC0: its README). They are looked
 for in ~/Downloads, or in the folders named; a file is found by its name, wherever it lies under them.
 
-Four are the owner's own recordings (2026-11-19), which lie loose in ~/Downloads or in a folder named:
+Five are the owner's own recordings (2026-11-19), which lie loose in ~/Downloads or in a folder named:
 menu-button-push.m4a, "the main button press sound in the menus and just throughout the game ... for
 approving or going through"; menu-button-press-2.m4a, "more of a lower register ... For canceling";
-placing-build-piece.m4a, "for placing build pieces"; and Removing-build-piece.m4a, the "removing one".
+placing-build-piece.m4a, "for placing build pieces"; Removing-build-piece.m4a, the "removing one"; and
+small-ticks.m4a, "use this for smaller ticks, like checking something off".
 
 Every sound is named for what it is in the packs, so which file is which sound was chosen from the
 names and each file's length; nobody listened to them when this was written. To change a sound, change
@@ -55,7 +56,8 @@ ONE_SHOTS = [
     ("SW_UiDenied", "UI_Noisy_Impact_09.wav", "start", 0.6),
     ("SW_UiBought", "UIMisc_Feedback 36 up_CB Sounddesign_ACTIVATION2.wav", "start", None),
     ("SW_UiCoins", "UIData_Counter mid 54_CB Sounddesign_ACTIVATION2.wav", "start", 1.2),
-    ("SW_UiTick", "Bluezone_BC0301_tiny_gears_small_mechanism_click_003.wav", "start", None),
+    # the owner's own: every smaller tick (a section, an arrow, one of a row, a digit, a setting's step, the base editor's cursor)
+    ("SW_UiTick", "small-ticks.m4a", "start", None),
     ("SW_WalletConnected", "CREAMisc_Creature Power On 14_DDUMAIS_MCSFX.wav", "start", 1.5),
     # weapons
     # The guns are recordings of guns. The rifle and the sniper are one real rifle's shot, made full for a
