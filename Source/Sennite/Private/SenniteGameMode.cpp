@@ -2,6 +2,7 @@
 
 #include "SenniteGameMode.h"
 #include "SenniteCharacter.h"
+#include "SenniteHeroes.h"
 #include "SennitePlayerState.h"
 #include "SennitePlayerController.h"
 #include "GameFramework/GameModeBase.h"
@@ -12,6 +13,7 @@
 #include "GameFramework/GameState.h"
 #include "GameFramework/PlayerStart.h"
 #include "SenniteArena.h"
+#include "SenniteMatch.h"
 #include "EngineUtils.h"
 
 DEFINE_LOG_CATEGORY(LogMyServerGame);
@@ -60,7 +62,35 @@ void ASenniteGameMode::PreLogin(const FString& Options, const FString& Address, 
 	Super::PreLogin(Options, Address, UniqueId, ErrorMessage);
 }
 
+void ASenniteGameMode::HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) {
+	if (ASenniteMatch::Find(GetWorld()) != nullptr) {
+		// Until the publisher's server has said who they play for they have no hero: they look down
+		// on the arena from above its middle, the bases to either side.
+		TActorIterator<ASenniteArena> It(GetWorld());
+		const TArray<FVector> Bases = It ? It->GetPlan().Bases : TArray<FVector>();
+		if (NewPlayer != nullptr && Bases.Num() >= 2) {
+			FVector Middle = FVector::ZeroVector;
+			for (const FVector& Base : Bases) {
+				Middle += Base / Bases.Num();
+			}
+			double Reach = 0.0;
+			for (const FVector& Base : Bases) {
+				Reach = FMath::Max(Reach, FVector::Dist2D(Base, Middle) + It->BaseRadius);
+			}
+			const FVector Eye = Middle + FVector(0.0, 0.0, Reach);
+			const FRotator Down(-89.0, (Bases[1] - Bases[0]).Rotation().Yaw - 90.0, 0.0);
+			NewPlayer->SetInitialLocationAndRotation(Eye, Down);
+			NewPlayer->ClientSetLocation(Eye, Down);
+		}
+		return;
+	}
+	Super::HandleStartingNewPlayer_Implementation(NewPlayer);
+}
+
 void ASenniteGameMode::Logout(AController* Exiting) {
+	if (ASenniteMatch* Match = ASenniteMatch::Find(GetWorld())) {
+		Match->Left(Exiting);
+	}
 	Super::Logout(Exiting);
 	if (Exiting != nullptr) {
 		ASennitePlayerController* SennitePlayerController = Cast<ASennitePlayerController>(Exiting);
@@ -73,6 +103,10 @@ void ASenniteGameMode::Logout(AController* Exiting) {
 
 FString ASenniteGameMode::InitNewPlayer(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId, const FString& Options, const FString& Portal) {
 	FString InitializedString = Super::InitNewPlayer(NewPlayerController, UniqueId, Options, Portal);
+	// the hero the player's game logged in as (USenniteLocalPlayer), claimed as any choice is; or the default hero
+	if (ASennitePlayerState* State = NewPlayerController != nullptr ? NewPlayerController->GetPlayerState<ASennitePlayerState>() : nullptr) {
+		State->ClaimHero(FName(UGameplayStatics::ParseOption(Options, TEXT("Hero"))), FString());
+	}
 	
 	/*const FString& PlayerSessionId = UGameplayStatics::ParseOption(Options, "PlayerSessionId");
 	UE_LOG(LogMyServerGame, Log, TEXT("InitNewPlayer playersessionid: %s"), *PlayerSessionId);
@@ -88,13 +122,7 @@ void ASenniteGameMode::GenericPlayerInitialization(AController* NewPlayer) {
 	Super::GenericPlayerInitialization(NewPlayer);
 	if (!GameStarted && GetNumPlayers() >= PlayersToStartStorm) {
 		GameStarted = true;
-		TArray<AActor*> StormActors;
-		UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStormActor::StaticClass(), StormActors);
-		if (StormActors.Num() > 0) {
-			if (StormActors[0] != nullptr) {
-				CurrentStorm = Cast<AStormActor>(StormActors[0]);
-			}
-		}
+		CurrentStorm = AStormActor::Find(GetWorld());
 		FTimerHandle StormSetupTimerHandle;
 		GetWorldTimerManager().SetTimer(StormSetupTimerHandle, this, &ASenniteGameMode::GameModeStartStorm, FMath::Max(0.1f, StormStartDelay), false);
 		FTimerHandle InactivityCheckTimerHandle;

@@ -27,7 +27,7 @@ public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
-	/** The weapon's body: what a player walks over to pick it up, and what sits in the holder's hand. */
+	/** The weapon's body: what sits in the holder's hand. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh")
 	UStaticMeshComponent* WeaponMesh;
 
@@ -38,6 +38,47 @@ public:
 	/** The point of the mesh that sits in the holder's palm, in the mesh's own space (+X is the muzzle end). Set per weapon class in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Grip")
 	FVector GripPoint;
+
+	/** What the HUD and a crate call it. Set per weapon class in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
+	FString DisplayName;
+
+	/**
+	 * Whether every player has it from a crate. A gun that is not free is bought in the store, by ShopId:
+	 * a crate gives it only to a player whose wallet proved it owns it. Set per weapon class in DefaultGame.ini.
+	 */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
+	bool bFree = false;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
+	FString ShopId;
+
+	/** How long after a shot before the next, and how long a reload takes, in seconds. Set per weapon class in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
+	float FireSeconds = 0.233f;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
+	float ReloadSeconds = 2.167f;
+
+	/** Whether it goes on firing while the button is held; if not, it fires one shot a pull. Set per weapon class in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
+	bool bHeldFires = false;
+
+	/** The rounds a crate gives for it each time it is opened. Set per weapon class in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
+	int32 CrateRounds = 0;
+
+	/** What a shot sounds like. Set per weapon class in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
+	FSoftObjectPath FireSound;
+
+	/** How a shot fades with distance. One setting for every gun, held by the base class. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
+	FSoftObjectPath FireFalloff;
+
+	/** Where the other hand holds the gun, in the mesh's own space: its foregrip. Set per weapon class in DefaultGame.ini. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Grip")
+	FVector OffHandPoint;
 
 	/** The end of the barrel, in the mesh's own space. Set per weapon class in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Bullet")
@@ -62,7 +103,7 @@ public:
 	int CurrentBulletCount; // Only applies to assault rifle and shotgun
 
 	UPROPERTY(EditDefaultsOnly, Category = "WeaponType")
-	int WeaponType; // 0 for pickaxe, 1 for assault rifle, 2 for shotgun
+	int WeaponType; // 0 for pickaxe, 1 for the rifle, 2 for the shotgun, 3 for the energy rifle, 4 for the sniper
 
 	virtual bool IsSupportedForNetworking() const override
 	{

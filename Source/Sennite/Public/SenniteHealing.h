@@ -1,4 +1,4 @@
-// The healing items a player can pick up and use.
+// The healing items a player takes from a crate and uses.
 
 #pragma once
 

@@ -1,0 +1,31 @@
+{
+  "grid": 480,
+  "resources": ["WOOD", "STONE", "STEEL"],
+  "prefabs": [
+    {
+      "id": "watchtower",
+      "name": "Watchtower",
+      "footprint": { "width": 960, "depth": 960 },
+      "recipe": { "STEEL": 300 }
+    },
+    {
+      "id": "lookout",
+      "name": "Lookout post",
+      "footprint": { "width": 960, "depth": 960 },
+      "recipe": { "STEEL": 150 }
+    },
+    {
+      "id": "workshop",
+      "name": "Workshop",
+      "footprint": { "width": 1440, "depth": 960 },
+      "recipe": { "WOOD": 200, "STONE": 100 }
+    },
+    {
+      "id": "wall",
+      "name": "Wall",
+      "footprint": { "width": 480, "depth": 480 },
+      "recipe": { "WOOD": 50 },
+      "options": { "gate": ["closed", "open"] }
+    }
+  ]
+}

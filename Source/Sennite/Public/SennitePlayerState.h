@@ -59,6 +59,90 @@ public:
 	UPROPERTY(Replicated)
 	int KillCount;
 
+	/** In a match: the faction this player's wallet is a member of, as the publisher's server said. Empty until it has, and outside a match. */
+	UPROPERTY(Replicated)
+	FString FactionId;
+
+	/** In a match: the wallet's DSM identity, as people read it. */
+	UPROPERTY(Replicated)
+	FString Wallet;
+
+	/** Which hero this player is (USenniteHeroes): what they logged in with (Hero=), or chose in the lobby since. */
+	UPROPERTY(Replicated)
+	FName HeroId;
+
+	/**
+	 * This player chooses a hero, in the lobby, showing a hero pass made out to this server for a hero bought
+	 * in the shop. The server takes the choice only in a lobby, not more than twice a second, and only as
+	 * ClaimHero does.
+	 */
+	UFUNCTION(Server, Reliable)
+	void ServerChooseHero(FName Id, const FString& Pass);
+
+	/**
+	 * Once in, a player whose chosen hero was bought in the shop claims it, with a hero pass made out to this
+	 * server (they log in as the default hero). Taken once for each player, anywhere, as ClaimHero does.
+	 */
+	UFUNCTION(Server, Reliable)
+	void ServerClaimStartingHero(FName Id, const FString& Pass);
+
+	/** What this server is called as the audience of a hero pass: what the player's game asks a pass for. Sent to this player alone. */
+	UPROPERTY(Replicated)
+	FString HeroAudience;
+
+	/** On the server: the wallet (signing key) the first hero pass this player showed spoke for. Every later pass must be that wallet's. */
+	FString HeroWallet;
+
+	/**
+	 * The guns bought in the store that this player's wallet proved it owns: a bit for each weapon slot.
+	 * Set on the server, from what the publisher's server says of a pass the player showed; sent to the
+	 * player alone. A crate gives a player the free guns and these (ASenniteCharacter::TakeFromCrate).
+	 */
+	UPROPERTY(Replicated)
+	int32 GunsOwned = 0;
+
+	/**
+	 * Once in, a player whose wallet owns guns bought in the store shows a pass made out to this server.
+	 * Taken once for each player; the server asks the publisher's server what the pass speaks for, as it
+	 * does for a hero, and the player's own game is never taken at its word.
+	 */
+	UFUNCTION(Server, Reliable)
+	void ServerClaimGuns(const FString& Pass);
+
+	/** Whether the claim of guns was taken (on the server), or asked for (on the player's game). */
+	bool bGunClaimTaken = false;
+	bool bGunClaimAsked = false;
+
+	/** Whether the starting claim was taken (on the server), or asked for (on the player's game). */
+	bool bStartingClaimTaken = false;
+	bool bStartingClaimAsked = false;
+
+	/**
+	 * On the server: this player claims a hero. A free hero is theirs at once. A hero bought in the shop is
+	 * theirs only once the publisher's server, asked by this server with a pass made out to it, says the
+	 * wallet the pass speaks for proved it owns it, and that wallet is this player's: in a match, the wallet
+	 * their ticket named; elsewhere, the wallet of the first pass they showed. Until then, or if not, the
+	 * player stays the hero they are (the default hero, if none yet). The player's own game is never taken
+	 * at its word for it.
+	 */
+	void ClaimHero(FName Id, const FString& Pass);
+
+	/** When, on the server's clock, this player's next choice of hero is taken. */
+	double NextHeroChoice = 0.0;
+
+	/** On the server: whether a claim to a paid hero is being checked with the publisher's server, and which claim is the latest. */
+	bool bClaimChecking = false;
+	int32 ClaimSeq = 0;
+
+	/** On the server: this player is this hero from now on, if the list has it. */
+	void SetHero(FName Id);
+
+	/** What a player keeps from one map to the next when the server travels: their hero. */
+	virtual void CopyProperties(APlayerState* PlayerState) override;
+
+	/** On the server: back to what a hero starts with. The weapons, rounds and healing items picked up are gone. */
+	void StartOver();
+
 	UPROPERTY(Replicated)
 	bool JustShotRifle; // used to prevent player from spamming rifle
 

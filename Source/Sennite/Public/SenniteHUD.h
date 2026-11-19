@@ -32,6 +32,10 @@ struct FSenniteHudReadout
 	bool bSpectating = false;
 	bool bInStorm = false;
 	float StormDamage = 0.0f;
+	bool bEditing = false;
+	FString PieceName;
+	float PieceHealth = 0.0f;
+	float PieceMax = 0.0f;
 };
 
 /**
@@ -54,14 +58,21 @@ public:
 
 	void DrawHitMarker();
 
+	/** A shot of this player's took Damage off a built piece: the number shows by the aim for a moment. */
+	void DrawPieceHit(float Damage);
+
+	/** A crate this player opened gave this: it is said under the aim for a few seconds. */
+	void DrawCrateGave(const FString& Gave);
+
 	void DrawGameUI();
 
 	void DrawBloodSplash();
 
-	void DrawSettingsMenu();
-
 	/** Health and shield, the held weapon's rounds, the building materials, kills and players left: drawn on the canvas, sized to the screen. */
 	void DrawStatus();
+
+	/** In a match: the time left, each faction's kills and how it ended. Beside a closed weapon crate: how to open it. */
+	void DrawMatch();
 
 	/** The player's state as the HUD shows it. */
 	FSenniteHudReadout ReadState() const;
@@ -82,6 +93,12 @@ private:
 	/** Until when, by the world's clock, the hit marker and the hurt flash are drawn. */
 	double HitMarkerUntil = 0.0;
 	double HurtUntil = 0.0;
+	double PieceHitUntil = 0.0;
+	float PieceHitDamage = 0.0f;
+
+	/** What the crate this player just opened gave, and until when it is said. */
+	double CrateGaveUntil = 0.0;
+	FString CrateGave;
 
 	UPROPERTY(EditAnywhere, Category = "Health")
 	TSubclassOf<UUserWidget> HealthWidgetClass;

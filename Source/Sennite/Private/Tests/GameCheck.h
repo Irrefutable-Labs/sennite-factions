@@ -4,14 +4,28 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Camera/CameraActor.h"
 #include "Engine/Engine.h"
+#include "GameFramework/Character.h"
+#include "Engine/GameViewportClient.h"
+#include "HAL/PlatformTime.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GenericPlatform/GenericPlatformInputDeviceMapper.h"
 #include "InputKeyEventArgs.h"
 #include "Misc/App.h"
 #include "Misc/Paths.h"
+#include "HealingActor.h"
+#include "SenniteCharacter.h"
+#include "SenniteCrate.h"
+#include "SennitePlayerController.h"
+#include "SenniteTouch.h"
 #include "UnrealClient.h"
+#include "WeaponActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "EngineUtils.h"
+#include "Materials/Material.h"
 
 namespace GameCheck
 {
@@ -34,6 +48,49 @@ namespace GameCheck
 	{
 		Controller->InputKey(FInputKeyEventArgs::CreateSimulated(InKey, Event, Event == IE_Released ? 0.0f : 1.0f, -1,
 			IPlatformInputDeviceMapper::Get().GetDefaultInputDevice()));
+	}
+
+	/**
+	 * A finger touching the screen at a point and lifting there, as a phone's screen reports it: through the
+	 * game's viewport, which hands it to the player controller, as it does every real touch.
+	 */
+	inline void Tap(const FVector2D& Where)
+	{
+		UGameViewportClient* Client = GEngine != nullptr ? GEngine->GameViewport : nullptr;
+		if (Client == nullptr) {
+			return;
+		}
+		const FTouchId Finger(IPlatformInputDeviceMapper::Get().GetDefaultInputDevice(), ETouchIndex::Touch1);
+		Client->InputTouch(Client->Viewport, Finger, ETouchType::Began, Where, 1.0f, FPlatformTime::Cycles64());
+		Client->InputTouch(Client->Viewport, Finger, ETouchType::Ended, Where, 0.0f, FPlatformTime::Cycles64());
+	}
+
+	/** Whether this game is played by touch: its controls are on the screen (a phone, or bAlwaysShowTouchInterface). */
+	inline bool Touching(APlayerController* Controller)
+	{
+		ASennitePlayerController* Player = Cast<ASennitePlayerController>(Controller);
+		return Player != nullptr && Player->GetTouchControls() != nullptr;
+	}
+
+	/**
+	 * Press a key and let it go as the player would: played by touch, by tapping the control on the screen
+	 * that presses it (false if none on the screen does); otherwise on the keyboard.
+	 */
+	inline bool Press(APlayerController* Controller, const FKey& InKey)
+	{
+		ASennitePlayerController* Player = Cast<ASennitePlayerController>(Controller);
+		USenniteTouchControls* Touch = Player != nullptr ? Player->GetTouchControls() : nullptr;
+		if (Touch == nullptr) {
+			Key(Controller, InKey, IE_Pressed);
+			Key(Controller, InKey, IE_Released);
+			return true;
+		}
+		FVector2D At;
+		if (!Touch->WhereKey(InKey, At)) {
+			return false;
+		}
+		Tap(At);
+		return true;
 	}
 
 	/** Move the mouse along one axis by a number of mouse counts. */
@@ -98,6 +155,112 @@ namespace GameCheck
 		}
 		Mouse(Controller, EKeys::MouseX, FMath::Clamp(Yaw / 0.25, -40.0, 40.0));
 		Mouse(Controller, EKeys::MouseY, FMath::Clamp(Pitch / 0.25, -40.0, 40.0));
+		return false;
+	}
+
+	/**
+	 * The hero goes to the crate beside its start on the test range and opens it, with the player's
+	 * real keys: the walk key held (D for the crate to the right of the first start, A for the one to
+	 * the left of the second) until the hero is beside a closed crate, then E.
+	 */
+	struct FCrateRun
+	{
+		int32 Stage = 0;
+		double Since = 0.0;
+		/** Why it could not be done; empty while it can. */
+		FString Failure;
+
+		/** One step. True once the crate is open, or once it failed. */
+		bool Step(UWorld* World, APlayerController* Controller, const ASenniteCharacter* Hero, const FKey& WalkKey)
+		{
+			const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
+			const double Now = World->GetTimeSeconds();
+			const auto Next = [this, Now]() { ++Stage; Since = Now; return false; };
+			switch (Stage) {
+			case 0:
+				Key(Controller, WalkKey, IE_Pressed);
+				return Next();
+			case 1:
+				// well inside the crate's reach, so it is in reach on the server too
+				if (ASenniteCrate::Nearest(World, Hero->GetActorLocation(), Rules->Reach + Rules->Across - 80.0f, true) == nullptr) {
+					if (Now - Since > 8.0) {
+						Key(Controller, WalkKey, IE_Released);
+						Failure = TEXT("The hero did not get beside a closed crate in 8 s");
+						return true;
+					}
+					return false;
+				}
+				Key(Controller, WalkKey, IE_Released);
+				return Next();
+			case 2:
+				if (Now - Since < 0.4) {
+					return false;
+				}
+				Key(Controller, EKeys::E, IE_Pressed);
+				Key(Controller, EKeys::E, IE_Released);
+				return Next();
+			default: {
+				const ASenniteCrate* Beside = ASenniteCrate::Nearest(World, Hero->GetActorLocation(), Rules->Reach + Rules->Across, false);
+				if (Beside != nullptr && Beside->bOpen) {
+					return true;
+				}
+				if (Now - Since > 5.0) {
+					Failure = TEXT("The crate did not open at the key");
+					return true;
+				}
+				return false;
+			}
+			}
+		}
+	};
+
+	/**
+	 * A camera of the check's own, in front of the hero and to its right, for a picture of what the hero
+	 * holds: the player's own camera is behind the hero, where its body hides it.
+	 */
+	struct FOnlooker
+	{
+		TWeakObjectPtr<ACameraActor> Camera;
+
+		void Look(UWorld* World, APlayerController* Controller, const ACharacter* Hero)
+		{
+			if (!Camera.IsValid()) {
+				Camera = World->SpawnActor<ACameraActor>();
+			}
+			if (Camera.IsValid()) {
+				const FVector Chest = Hero->GetActorLocation() + FVector(0.0, 0.0, 30.0);
+				const FVector From = Chest + Hero->GetActorForwardVector() * 200.0 + Hero->GetActorRightVector() * 150.0 + FVector(0.0, 0.0, 25.0);
+				Camera->SetActorLocationAndRotation(From, (Chest - From).Rotation());
+				Controller->SetViewTarget(Camera.Get());
+			}
+		}
+
+		void Back(APlayerController* Controller, AActor* Hero) { Controller->SetViewTarget(Hero); }
+	};
+
+	/** How many weapons and healing items are in the world in nobody's hand. Crates hold them, so none should be. */
+	inline int32 LyingAbout(UWorld* World)
+	{
+		int32 Lying = 0;
+		for (TActorIterator<AWeaponActor> It(World); It; ++It) {
+			Lying += It->Holder == nullptr ? 1 : 0;
+		}
+		for (TActorIterator<AHealingActor> It(World); It; ++It) {
+			Lying += It->Holder == nullptr ? 1 : 0;
+		}
+		return Lying;
+	}
+
+	/** Whether the map has a mesh drawn with a material marked as sky: a phone draws the sky's atmosphere only on one. */
+	inline bool HasSkyDome(UWorld* World)
+	{
+		for (TActorIterator<AStaticMeshActor> It(World); It; ++It) {
+			const UStaticMeshComponent* Mesh = It->GetStaticMeshComponent();
+			const UMaterialInterface* Face = Mesh != nullptr && Mesh->GetStaticMesh() != nullptr ? Mesh->GetMaterial(0) : nullptr;
+			if (Face != nullptr && Face->GetMaterial() != nullptr && Face->GetMaterial()->bIsSky) {
+				return true;
+			}
+		}
 		return false;
 	}
 

@@ -1,4 +1,4 @@
-// The weapons a player can pick up, and the bullets they fire.
+// The weapons a player takes from a crate, and the bullets they fire.
 
 #pragma once
 
@@ -45,4 +45,54 @@ class SENNITE_API ASenniteShotgun : public AWeaponActor
 
 public:
 	ASenniteShotgun();
+};
+
+/** The energy rifle's bolt: light, quick to follow the last. */
+UCLASS()
+class SENNITE_API ASenniteEnergyBolt : public AProjectileActor
+{
+	GENERATED_BODY()
+
+public:
+	ASenniteEnergyBolt();
+};
+
+/** The sniper's round: one heavy shot that reaches across an arena. */
+UCLASS()
+class SENNITE_API ASenniteSniperBullet : public AProjectileActor
+{
+	GENERATED_BODY()
+
+public:
+	ASenniteSniperBullet();
+};
+
+/** Weapon slot 3: the energy rifle. */
+UCLASS()
+class SENNITE_API ASenniteEnergyRifle : public AWeaponActor
+{
+	GENERATED_BODY()
+
+public:
+	ASenniteEnergyRifle();
+};
+
+/** Weapon slot 4: the sniper. */
+UCLASS()
+class SENNITE_API ASenniteSniper : public AWeaponActor
+{
+	GENERATED_BODY()
+
+public:
+	ASenniteSniper();
+};
+
+/** The bolt of a hero's own weapon, with no gun in hand: lighter than a rifle round, and it harvests as the pickaxe did. */
+UCLASS()
+class SENNITE_API ASenniteOwnBolt : public AProjectileActor
+{
+	GENERATED_BODY()
+
+public:
+	ASenniteOwnBolt();
 };

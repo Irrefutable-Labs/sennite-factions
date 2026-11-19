@@ -2,9 +2,11 @@
 
   UnrealEditor-Cmd Sennite.uproject -run=pythonscript -script=Tools/build_test_range.py -unattended -nullrhi
 
-Phone-level lighting only: one shadowed sun, an unshadowed sky fill, no ray tracing, no Lumen.
+Phone-level lighting only: one shadowed sun, an unshadowed fill from a fixed daylight sky, no ray tracing, no Lumen.
 The floor is one build-grid cell thick and the blocks sit on the 480 cm build grid, so building pieces
 line up with them. Writes /Game/Maps/TestRange."""
+import os
+
 import unreal
 
 MAP = "/Game/Maps/TestRange"
@@ -126,13 +128,35 @@ for key, value in (("intensity", 6.0), ("atmosphere_sun_light", True), ("dynamic
                    ("dynamic_shadow_cascades", 3), ("cast_shadows", True)):
     sc.set_editor_property(key, value)
 
+# The sky fill is the engine's daylight sky, as a fixed texture: it lights the shaded side of a hero from
+# the first frame, on a phone as on a desktop (a sky captured live is black until it is captured, and a
+# phone may not capture one at all), and from below as well as above, so nothing in shade is black.
+daylight = unreal.load_asset("/Engine/MapTemplates/Sky/DaylightAmbientCubemap")  # by its path: the registry has not scanned the engine's templates
+if daylight is None:
+    raise RuntimeError("the engine's daylight sky did not load")
 sky = spawn(unreal.SkyLight, "sky_fill", unreal.Vector(0, 0, 1200), folder="lights")
 kc = sky.light_component
 kc.set_mobility(unreal.ComponentMobility.MOVABLE)
-for key, value in (("real_time_capture", True), ("cast_shadows", False), ("intensity", 1.0)):
+for key, value in (("source_type", unreal.SkyLightSourceType.SLS_SPECIFIED_CUBEMAP), ("cubemap", daylight),
+                   ("real_time_capture", False), ("lower_hemisphere_is_black", False), ("cast_shadows", False), ("intensity", 1.8)):
     kc.set_editor_property(key, value)
 
-spawn(unreal.SkyAtmosphere, "atmosphere", folder="lights")
+atmosphere = spawn(unreal.SkyAtmosphere, "atmosphere", folder="lights")
+# a daytime sky: the sun here is weak (phone-level lighting), so the sky it lights is brightened on its own
+SKY_BRIGHTNESS = float(os.environ.get("SKY_BRIGHTNESS", "6.0"))
+atmosphere.get_component_by_class(unreal.SkyAtmosphereComponent).set_editor_property(
+    "sky_luminance_factor", unreal.LinearColor(SKY_BRIGHTNESS, SKY_BRIGHTNESS, SKY_BRIGHTNESS, 1.0))
+# A phone draws the SkyAtmosphere only on a mesh whose material is marked as sky: the engine's own sky
+# dome and its sky material, 20 km out, seen and nothing else.
+dome = spawn(unreal.StaticMeshActor, "sky_dome", folder="lights")
+dome_mesh = dome.static_mesh_component
+dome_mesh.set_static_mesh(unreal.load_asset("/Engine/EngineSky/SM_SkySphere"))
+dome_mesh.set_material(0, unreal.load_asset("/Engine/EngineSky/SkyAtmosphere/SkyAtmosphere_MaterialSkyDome"))
+dome_mesh.set_collision_enabled(unreal.CollisionEnabled.NO_COLLISION)
+dome_mesh.set_editor_property("cast_shadow", False)
+dome.set_actor_scale3d(unreal.Vector(500.0, 500.0, 500.0))
+if dome_mesh.static_mesh is None or not dome_mesh.get_material(0).get_editor_property("is_sky"):
+    raise RuntimeError("the sky dome did not get its mesh and sky material")
 fog = spawn(unreal.ExponentialHeightFog, "haze", unreal.Vector(0, 0, 0), folder="lights")
 fog.component.set_editor_property("fog_density", 0.005)
 
@@ -145,17 +169,15 @@ for key, value in (("override_auto_exposure_method", True), ("auto_exposure_meth
     s.set_editor_property(key, value)
 ppv.set_editor_property("settings", s)
 
-# weapons to pick up, to the right of the start, lying at knee height
-spawn(unreal.SenniteRifle, "rifle_pickup", unreal.Vector(0, 250, 60), unreal.Rotator(0, 0, 0), "pickups")
-spawn(unreal.SenniteShotgun, "shotgun_pickup", unreal.Vector(0, 450, 60), unreal.Rotator(0, 0, 0), "pickups")
-spawn(unreal.SenniteRifle, "rifle_pickup_2", unreal.Vector(0, -2 * CELL - 250, 60), unreal.Rotator(0, 0, 0), "pickups")   # to the left of the second start
+# Weapons, bandages and potions are in crates, as on an arena: nothing lies about. A crate stands to
+# the right of the first start and one to the left of the second, each just out of reach of its start
+# (a crate opens from 400 away) and beside the line a hero walks along, not on it.
+spawn(unreal.SenniteCrate, "crate", unreal.Vector(200, 400, 0), unreal.Rotator(0, 0, -90), "crates")   # roll, pitch, yaw: its front to the start
+spawn(unreal.SenniteCrate, "crate_2", unreal.Vector(200, -2 * CELL - 400, 0), unreal.Rotator(0, 0, 90), "crates")
 
-# healing items to pick up, behind the start
-spawn(unreal.SenniteBandage, "bandage_pickup", unreal.Vector(-300, 0, 40), folder="pickups")
-spawn(unreal.SennitePotion, "potion_pickup", unreal.Vector(-500, 0, 40), folder="pickups")
-
-# the storm: its safe circle is centred ahead of the start, so the start is well inside it and its
-# wall crosses the range 2,500 behind the start
+# The storm: its safe circle is centred ahead of the start, so the start is well inside it and its
+# wall crosses the range 2,500 behind the start. The game has no storm for now (bEnabled is off in
+# DefaultGame.ini), so this one is not seen or felt; the storm and healing checks turn it on.
 storm = spawn(unreal.StormActor, "storm", unreal.Vector(2500, 0, 0), folder="range")
 storm.set_editor_property("start_radius", 5000.0)
 

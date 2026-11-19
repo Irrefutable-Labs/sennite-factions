@@ -4,6 +4,12 @@
 #include "SennitePlayerState.h"
 #include "SenniteCharacter.h"
 #include "SenniteSpectator.h"
+#include "SenniteMatch.h"
+#include "SenniteTouch.h"
+#include "SenniteGameMenu.h"
+#include "SenniteHeroes.h"
+#include "InputKeyEventArgs.h"
+#include "SenniteBaseEditor.h"
 #include "Engine/Engine.h"
 #include "Net/UnrealNetwork.h"
 #include "StormActor.h"
@@ -25,14 +31,37 @@ ASennitePlayerController::ASennitePlayerController() {
 void ASennitePlayerController::BeginPlay() {
 	Super::BeginPlay();
 	if (HasAuthority()) {
-		TArray<AActor*> StormActors;
-		UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStormActor::StaticClass(), StormActors);
-		if (StormActors.Num() > 0) {
-			if (StormActors[0] != nullptr) {
-				CurrentStorm = Cast<AStormActor>(StormActors[0]);
-			}
-		}
+		CurrentStorm = AStormActor::Find(GetWorld());
 	}
+	if (IsLocalController()) {
+		// the player's settings, in effect from the start of every game
+		USenniteGameMenu::ApplySettings(GetWorld());
+	}
+}
+
+USenniteGameMenu* ASennitePlayerController::GetGameMenu() {
+	if (GameMenu == nullptr && IsLocalPlayerController()) {
+		GameMenu = NewObject<USenniteGameMenu>(this);
+		GameMenu->Bind(this);
+	}
+	return GameMenu;
+}
+
+bool ASennitePlayerController::InputKey(const FInputKeyEventArgs& Params) {
+	USenniteGameMenu* Menu = GetGameMenu();
+	if (Menu != nullptr && Menu->Key(Params)) {
+		return true;
+	}
+	return Super::InputKey(Params);
+}
+
+void ASennitePlayerController::AddYawInput(float Val) {
+	Super::AddYawInput(Val * USenniteProfile::Get().LookSensitivity);
+}
+
+void ASennitePlayerController::AddPitchInput(float Val) {
+	const USenniteProfile& Profile = USenniteProfile::Get();
+	Super::AddPitchInput(Val * Profile.LookSensitivity * (Profile.bInvertLook ? -1.0f : 1.0f));
 }
 
 FVector ASennitePlayerController::SpectatorStart() const {
@@ -44,6 +73,43 @@ FVector ASennitePlayerController::SpectatorStart() const {
 	FRotator ViewRotation;
 	GetPlayerViewPoint(ViewLocation, ViewRotation);
 	return ViewLocation;
+}
+
+USenniteTouchControls* ASennitePlayerController::GetTouchControls() {
+	if (TouchControls == nullptr && IsLocalPlayerController() && USenniteTouchControls::Wanted()) {
+		TouchControls = NewObject<USenniteTouchControls>(this);
+		TouchControls->Bind(this);
+	}
+	return TouchControls;
+}
+
+bool ASennitePlayerController::InputTouch(const FTouchId TouchId, const ETouchType::Type Type, const FVector2D& TouchLocation, const float Force, const uint64 Timestamp) {
+	// the in-game menu, while it is open, takes every touch
+	USenniteGameMenu* Menu = GetGameMenu();
+	if (Menu != nullptr && Menu->IsOpen()) {
+		// the finger that tapped MENU lifts over the menu: the touch controls let go of it, and of any other
+		if (TouchControls != nullptr) {
+			TouchControls->ReleaseAll();
+		}
+		return Menu->Touch(Type, TouchLocation);
+	}
+	// in play the stick and buttons; in the planning view of a base, the editor's buttons and the map
+	USenniteTouchControls* Controls = GetTouchControls();
+	if (Controls != nullptr) {
+		return Controls->Touch(TouchId, Type, TouchLocation);
+	}
+	return Super::InputTouch(TouchId, Type, TouchLocation, Force, Timestamp);
+}
+
+void ASennitePlayerController::CreateTouchInterface() {
+}
+
+void ASennitePlayerController::PlayerTick(float DeltaTime) {
+	// the stick is read before the frame's input is: what it says moves the hero this frame
+	if (TouchControls != nullptr) {
+		TouchControls->Tick();
+	}
+	Super::PlayerTick(DeltaTime);
 }
 
 void ASennitePlayerController::Tick(float DeltaTime) {
@@ -79,6 +145,18 @@ void ASennitePlayerController::BecomeSpectator() {
 	ClientGotoState(NAME_Spectating);
 	Possess(Watcher);
 	PlayerState->SetIsSpectator(true); // has to be set after possessing a pawn
+}
+
+void ASennitePlayerController::ServerEnterMatch_Implementation(const FString& Ticket) {
+	if (ASenniteMatch* Match = ASenniteMatch::Find(GetWorld())) {
+		Match->Enter(this, Ticket.Left(128));
+	}
+}
+
+void ASennitePlayerController::ClientMatchSaid_Implementation(const FString& Said) {
+	if (ASenniteMatch* Match = ASenniteMatch::Find(GetWorld())) {
+		Match->Said = Said;
+	}
 }
 
 void ASennitePlayerController::ServerGetNumPlayers_Implementation() {

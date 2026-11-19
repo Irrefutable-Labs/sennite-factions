@@ -1,7 +1,11 @@
-// Weapons check. Run in the game on the test range, which has a rifle and a shotgun lying to the
-// right of the start: the hero walks over both and picks them up, holds each one fixed to her weapon
-// bone with her own built-in weapon hidden, switches between them with the number keys, and a pull
-// of the trigger plays her firing animation, spends a round and sends a bullet out.
+// Weapons check. Run in the game on the test range, which has a weapon crate to the right of the
+// start. With no gun in hand the fire button attacks with the hero's own weapon: she plays her own
+// attack and a bolt leaves her staff. Then the hero walks to the crate and opens it, has the rifle and the shotgun it held with the rifle in
+// her hand at once and nothing lying about, holds each one fixed to her weapon bone with her own
+// built-in weapon hidden and both hands on the gun, which points where the player aims, switches
+// between them with the number keys, and a pull of the trigger kicks the gun, spends a round and
+// sends a bullet out: a bolt that is seen, starts at
+// the muzzle, flies the way the gun points and is sent to every machine.
 //
 // Tools/check_weapons.sh runs this and reads the result.
 
@@ -12,8 +16,11 @@
 #include "GameCheck.h"
 #include "ProjectileActor.h"
 #include "SenniteCharacter.h"
+#include "SenniteHeroMesh.h"
 #include "SennitePlayerState.h"
 #include "SenniteWeapons.h"
+#include "Sound/SoundAttenuation.h"
+#include "Sound/SoundBase.h"
 #include "Animation/AnimInstance.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -39,7 +46,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, WalkOverPickups, HoldShotgun, HoldRifle, Fire, Done };
+		enum class EPhase { WaitForPawn, OwnWeapon, OpenCrate, FromCrate, HoldShotgun, HoldRifle, Fire, HoldFire, BoughtGuns, OtherGuns, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -70,9 +77,26 @@ namespace
 		double PhaseStart = 0.0;
 		TWeakObjectPtr<UWorld> SpawnWorld;
 		FDelegateHandle SpawnHandle;
-		int32 PickupsAtStart = 0;
+		GameCheck::FCrateRun Crate;
+		int32 Step = 0;
+		int32 OtherGun = 0;
+		UClass* BulletClass = nullptr;
+		FVector OwnTip = FVector::ZeroVector;
+		GameCheck::FOnlooker Onlooker;
+		/** The last bullet fired: where it started, how far it has been seen from there, and what it looked like. */
+		TWeakObjectPtr<AProjectileActor> Bullet;
+		bool bBulletNoted = false;
+		FVector BulletFrom = FVector::ZeroVector;
+		FVector BulletWay = FVector::ZeroVector;
+		double BulletFar = 0.0;
+		double BulletOffLine = 0.0;
+		double BulletFromMuzzle = 0.0;
+		bool bBoltSeen = false;
+		bool bBulletSent = false;
+		float BoltLongest = 0.0f;
 		int32 BulletsSpawned = 0;
 		int32 RoundsBefore = 0;
+		int32 RoundsWhenLetGo = 0;
 		bool bTriggerPulled = false;
 		bool bSawFireAnimation = false;
 		bool bShotTaken = false;
@@ -91,7 +115,17 @@ namespace
 			}
 			SpawnWorld = World;
 			SpawnHandle = World->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateLambda([this](AActor* Spawned) {
-				BulletsSpawned += Spawned != nullptr && Spawned->IsA<AProjectileActor>() ? 1 : 0;
+				if (AProjectileActor* Fired = Cast<AProjectileActor>(Spawned)) {
+					++BulletsSpawned;
+					BulletClass = Fired->GetClass();
+					Bullet = Fired;
+					bBulletNoted = false;
+					// where it starts, before it has flown at all
+					BulletFrom = Fired->GetActorLocation();
+					BulletWay = Fired->GetActorForwardVector();
+					const ASenniteCharacter* Shooter = Cast<ASenniteCharacter>(Fired->GetWorld()->GetFirstPlayerController()->GetPawn());
+					BulletFromMuzzle = Shooter != nullptr && Shooter->CurrentWeapon != nullptr ? FVector::Dist(BulletFrom, Shooter->CurrentWeapon->GetMuzzleLocation()) : -1.0;
+				}
 			}));
 			// a run without a window starts with a stray mouse movement; begin from the view behind the hero
 			Controller->SetControlRotation(FRotator(-12.0, Hero->GetActorRotation().Yaw, 0.0));
@@ -100,27 +134,132 @@ namespace
 				Test->TestTrue(TEXT("With no game weapon, the hero's own weapon shows"), !Hero->GetMesh()->IsBoneHiddenByName(Bone));
 			}
 			Test->TestTrue(TEXT("The hero has a built-in weapon to hide"), Hero->HeroBuiltInWeaponBones.Num() > 0);
-			for (TActorIterator<AWeaponActor> It(World); It; ++It) {
-				PickupsAtStart += It->Holder == nullptr ? 1 : 0;
+			Test->TestEqual(TEXT("No weapon or healing item lies about on the range: they are in the crate"), GameCheck::LyingAbout(World), 0);
+			// every gun has a name and a shot to be heard, and opening a crate a sound (a run without sound cannot hear them)
+			for (UClass* Gun : { ASenniteRifle::StaticClass(), ASenniteShotgun::StaticClass(), ASenniteEnergyRifle::StaticClass(), ASenniteSniper::StaticClass() }) {
+				const AWeaponActor* Made = GetDefault<AWeaponActor>(Gun);
+				Test->TestTrue(FString::Printf(TEXT("%s has a name"), *Gun->GetName()), !Made->DisplayName.IsEmpty());
+				Test->TestTrue(FString::Printf(TEXT("%s has a shot sound that loads"), *Gun->GetName()), Cast<USoundBase>(Made->FireSound.TryLoad()) != nullptr);
 			}
-			GameCheck::Key(Controller, EKeys::D, IE_Pressed);
-			Enter(EPhase::WalkOverPickups, World);
+			Test->TestTrue(TEXT("A shot fades with distance"), Cast<USoundAttenuation>(GetDefault<AWeaponActor>()->FireFalloff.TryLoad()) != nullptr);
+			Test->TestTrue(TEXT("Opening a crate has a sound that loads"), Cast<USoundBase>(GetDefault<ASenniteCrate>()->OpenSound.TryLoad()) != nullptr);
+			Enter(EPhase::OwnWeapon, World);
+			Step = 0;
 			return false;
 		}
 		if (Hero == nullptr || State == nullptr) {
 			return Fail(TEXT("The hero went away during the check"));
 		}
 		USkeletalMeshComponent* Mesh = Hero->GetMesh();
+		const USenniteHeroMesh* Body = Cast<USenniteHeroMesh>(Mesh);
+		// the bullet in flight, each frame it is there
+		if (const AProjectileActor* Flying = Bullet.Get()) {
+			if (!bBulletNoted) {
+				bBulletNoted = true;
+				BulletFar = 0.0;
+				BulletOffLine = 0.0;
+				BoltLongest = 0.0f;
+				bBoltSeen = Flying->Bolt != nullptr && Flying->Bolt->GetStaticMesh() != nullptr && Flying->Bolt->GetMaterial(0) != nullptr && Flying->Bolt->IsVisible() && !Flying->IsHidden();
+				bBulletSent = Flying->GetIsReplicated() && Flying->IsReplicatingMovement();
+				if (BulletsSpawned == 4) {
+					// a bolt of the held burst, on its way
+					GameCheck::Shot(TEXT("Weapons"), TEXT("bolt.png"));
+				}
+			}
+			const FVector Gone = Flying->GetActorLocation() - BulletFrom;
+			BulletFar = FMath::Max(BulletFar, FVector::DotProduct(Gone, BulletWay));
+			BulletOffLine = FMath::Max(BulletOffLine, (Gone - BulletWay * FVector::DotProduct(Gone, BulletWay)).Size());
+			BoltLongest = FMath::Max(BoltLongest, Flying->Bolt->GetRelativeScale3D().X * 100.0f);
+		}
 
 		switch (Phase) {
-		case EPhase::WalkOverPickups:
-			// D walks her to the right, over the rifle and then the shotgun
-			if (!(State->EquippedWeapons.Contains(1) && State->EquippedWeapons.Contains(2)) && Elapsed(World) < 6.0) {
+		case EPhase::OwnWeapon:
+			// No gun in hand: the fire button attacks with the hero's own weapon. She plays her own attack
+			// and a bolt leaves her staff and travels; R does nothing, there being nothing to load.
+			if (Step == 0) {
+				if (Elapsed(World) < 0.8) {
+					return false;
+				}
+				Step = 1;
+				BulletsSpawned = 0;
+				BulletClass = nullptr;
+				bSawFireAnimation = false;
+				OwnTip = Hero->OwnWeaponTip();
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Pressed);
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
+				PhaseStart = World->GetTimeSeconds();
 				return false;
 			}
-			GameCheck::Key(Controller, EKeys::D, IE_Released);
-			Test->TestTrue(TEXT("Walking over the rifle picks it up"), State->EquippedWeapons.Contains(1));
-			Test->TestTrue(TEXT("Walking over the shotgun picks it up"), State->EquippedWeapons.Contains(2));
+			bSawFireAnimation |= Hero->OwnAttack != nullptr && Mesh->GetAnimInstance() != nullptr && Mesh->GetAnimInstance()->Montage_IsPlaying(Hero->OwnAttack);
+			if (Step == 1) {
+				if (Elapsed(World) < 0.25) {
+					return false;
+				}
+				Step = 2;
+				// A second pull before her attack is over sends nothing, and R loads nothing. Not even when
+				// the player's game tells the server the attack is over, which a game that has been tampered
+				// with can do: the server keeps its own time.
+				Hero->ProcessEvent(Hero->FindFunctionChecked(TEXT("ServerPickaxeTimeOut")), nullptr);
+				Test->TestFalse(TEXT("The call that says the attack is over clears the mark the HUD reads"), State->JustSwungPickaxe);
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Pressed);
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
+				GameCheck::Key(Controller, EKeys::R, IE_Pressed);
+				GameCheck::Key(Controller, EKeys::R, IE_Released);
+				return false;
+			}
+			if (Elapsed(World) < 1.0) {
+				return false;
+			}
+			Test->TestNotNull(TEXT("The hero has an attack of her own"), Hero->OwnAttack.Get());
+			Test->TestTrue(TEXT("With no gun in hand, the fire button plays the hero's own attack"), bSawFireAnimation);
+			Test->TestEqual(TEXT("and one bolt leaves her own weapon, not two: the second pull came too soon, whatever her game told the server"), BulletsSpawned, 1);
+			Test->TestTrue(TEXT("The bolt is her own weapon's"), BulletClass == ASenniteOwnBolt::StaticClass());
+			Test->TestTrue(TEXT("The bolt starts at the top of her staff"), FVector::Dist(BulletFrom, OwnTip) < 40.0);
+			Test->TestTrue(TEXT("The bolt is seen and sent to every machine"), bBoltSeen && bBulletSent);
+			Test->TestTrue(TEXT("The bolt travels: seen more than 10 m out, straight"), BulletFar > 1000.0 && BulletOffLine < 5.0);
+			Test->TestTrue(TEXT("She still holds no game weapon"), Hero->CurrentWeapon == nullptr);
+			{
+				// a projectile asked for when the server has let no shot out is not made
+				struct FAsk { FTransform Where; } Ask{ FTransform(Controller->GetControlRotation(), OwnTip) };
+				const int32 Before = BulletsSpawned;
+				Hero->ProcessEvent(Hero->FindFunctionChecked(TEXT("ServerSpawnProjectile")), &Ask);
+				Test->TestEqual(TEXT("A projectile asked for with no shot let out is not made"), BulletsSpawned, Before);
+			}
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK own weapon: attack=%d bolts=%d of %s, started %.0f from the staff's top, seen %.0f out"),
+				bSawFireAnimation ? 1 : 0, BulletsSpawned, *GetNameSafe(BulletClass), FVector::Dist(BulletFrom, OwnTip), BulletFar);
+			GameCheck::Shot(TEXT("Weapons"), TEXT("own_weapon.png"));
+			bSawFireAnimation = false;
+			Enter(EPhase::OpenCrate, World);
+			return false;
+
+		case EPhase::OpenCrate:
+			// D walks her to the right, to the crate; E opens it
+			if (!Crate.Step(World, Controller, Hero, EKeys::D)) {
+				return false;
+			}
+			if (!Crate.Failure.IsEmpty()) {
+				return Fail(Crate.Failure);
+			}
+			Test->TestTrue(TEXT("Opening the crate gives her the rifle"), State->EquippedWeapons.Contains(1));
+			Test->TestTrue(TEXT("Opening the crate gives her the shotgun"), State->EquippedWeapons.Contains(2));
+			// the energy rifle and the sniper are bought in the store: she has bought neither, so the crate keeps them
+			Test->TestEqual(TEXT("She owns no gun bought in the store"), State->GunsOwned, 0);
+			Test->TestTrue(TEXT("The crate kept the energy rifle and the sniper, and their rounds"), !State->EquippedWeapons.Contains(3) && !State->EquippedWeapons.Contains(4)
+				&& State->EquippedWeaponsAmmunition[3] == 0 && State->EquippedWeaponsAmmunition[4] == 0);
+			GameCheck::Key(Controller, EKeys::Six, IE_Pressed);
+			GameCheck::Key(Controller, EKeys::Six, IE_Released);
+			Enter(EPhase::FromCrate, World);
+			return false;
+
+		case EPhase::FromCrate:
+			if (Elapsed(World) < 1.0) {
+				return false;
+			}
+			// the first weapon the crate gave is the one in hand (key 6 brought no energy rifle: she has none), and nothing was laid on the ground
+			CheckHeld(Hero, ASenniteRifle::StaticClass(), TEXT("rifle from the crate"));
+			Test->TestEqual(TEXT("The opened crate laid nothing on the ground"), GameCheck::LyingAbout(World), 0);
+			GameCheck::Key(Controller, EKeys::Three, IE_Pressed);
+			GameCheck::Key(Controller, EKeys::Three, IE_Released);
 			Enter(EPhase::HoldShotgun, World);
 			return false;
 
@@ -130,22 +269,19 @@ namespace
 			}
 			if (!bShotTaken) {
 				bShotTaken = true;
-				// the shotgun was picked up last, so it is the one in hand
+				// key 3 brought the shotgun to hand
 				CheckHeld(Hero, ASenniteShotgun::StaticClass(), TEXT("shotgun"));
 				for (const FName& Bone : Hero->HeroBuiltInWeaponBones) {
 					Test->TestTrue(TEXT("Holding a game weapon, the hero's own weapon is hidden"), Mesh->IsBoneHiddenByName(Bone));
 				}
-				int32 PickupsLeft = 0;
-				for (TActorIterator<AWeaponActor> It(World); It; ++It) {
-					PickupsLeft += It->Holder == nullptr ? 1 : 0;
-				}
-				Test->TestEqual(TEXT("The two pickups she walked over are gone from the ground"), PickupsLeft, PickupsAtStart - 2);
+				Onlooker.Look(World, Controller, Hero);
 				GameCheck::Shot(TEXT("Weapons"), TEXT("shotgun.png"));
 				return false;
 			}
 			if (Elapsed(World) < 1.5) {
 				return false;
 			}
+			Onlooker.Back(Controller, Hero);
 			bShotTaken = false;
 			GameCheck::Key(Controller, EKeys::Two, IE_Pressed);
 			GameCheck::Key(Controller, EKeys::Two, IE_Released);
@@ -170,6 +306,15 @@ namespace
 					UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK hand: level grip=(Pitch=%.1f,Yaw=%.1f,Roll=%.1f) palm=(X=%.1f,Y=%.1f,Z=%.1f) muzzle points (fwd %.2f, right %.2f, up %.2f)"),
 						Level.Pitch, Level.Yaw, Level.Roll, Palm.X, Palm.Y, Palm.Z, MuzzleAhead.X, MuzzleAhead.Y, MuzzleAhead.Z);
 					Test->TestTrue(TEXT("Standing, the hero holds the rifle pointing ahead of her, not behind or at the ground"), MuzzleAhead.X > 0.7);
+					// both hands on it, and it points where the player aims
+					const FVector Aim = Controller->GetControlRotation().Vector();
+					const double AlongAim = FVector::DotProduct(Hero->CurrentWeapon->WeaponMesh->GetForwardVector(), Aim);
+					Test->TestTrue(TEXT("The hero's body holds the rifle in both hands"), Body != nullptr && Body->bHolding);
+					Test->TestTrue(TEXT("Her grip hand is on the rifle's grip and her other hand on its foregrip"), Body != nullptr && Body->GripGap < 2.0 && Body->OffHandGap < 3.0);
+					Test->TestTrue(TEXT("The rifle points where the player aims"), AlongAim > 0.99);
+					Test->TestTrue(TEXT("With a gun in hand she faces where the player aims"), FMath::Abs(FMath::FindDeltaAngleDegrees(Hero->GetActorRotation().Yaw, Controller->GetControlRotation().Yaw)) < 5.0);
+					UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK hold: both hands=%d grip hand %.1f cm off, other hand %.1f cm off, rifle along the aim %.3f"),
+						Body != nullptr && Body->bHolding ? 1 : 0, Body ? Body->GripGap : -1.0, Body ? Body->OffHandGap : -1.0, AlongAim);
 				}
 				GameCheck::Shot(TEXT("Weapons"), TEXT("rifle.png"));
 				return false;
@@ -191,19 +336,139 @@ namespace
 				bTriggerPulled = true;
 				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
 			}
-			bSawFireAnimation |= Mesh->GetAnimInstance() != nullptr && Mesh->GetAnimInstance()->Montage_IsPlaying(Hero->RifleHipShootingAnimation);
+			bSawFireAnimation |= Body != nullptr && Body->KickNow > 0.3;
 			if (Elapsed(World) < 0.5) {
 				return false;
 			}
-			Test->TestNotNull(TEXT("The hero has a firing animation"), Hero->RifleHipShootingAnimation);
-			Test->TestTrue(TEXT("Pulling the trigger plays the hero's firing animation"), bSawFireAnimation);
+			Test->TestTrue(TEXT("Pulling the trigger kicks the gun in her hands"), bSawFireAnimation);
 			Test->TestEqual(TEXT("One pull of the trigger sends one bullet out"), BulletsSpawned, 1);
+			Test->TestTrue(TEXT("The bullet is seen: a bolt with a shape and a material, showing"), bBoltSeen);
+			Test->TestTrue(TEXT("The bullet is sent to every machine, with where it is going"), bBulletSent);
+			Test->TestTrue(TEXT("The bullet starts at the rifle's muzzle"), BulletFromMuzzle >= 0.0 && BulletFromMuzzle < 60.0);
+			Test->TestTrue(TEXT("The bullet travels: seen more than 10 m out from where it started"), BulletFar > 1000.0);
+			Test->TestTrue(TEXT("The bullet flies straight, the way it was fired"), BulletOffLine < 5.0);
+			Test->TestTrue(TEXT("The bolt grows behind the bullet to its length and no longer"), BoltLongest > 100.0f && BoltLongest <= GetDefault<ASenniteRifleBullet>()->BoltLength + 0.5f);
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK bolt: seen=%d sent=%d started %.0f from the muzzle, seen %.0f out, %.1f off its line, bolt up to %.0f long"),
+				bBoltSeen ? 1 : 0, bBulletSent ? 1 : 0, BulletFromMuzzle, BulletFar, BulletOffLine, BoltLongest);
 			Test->TestTrue(TEXT("The shot spends one round"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->CurrentBulletCount == RoundsBefore - 1);
-			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK fire: bullets=%d rounds %d -> %d animation=%d"), BulletsSpawned, RoundsBefore,
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK fire: bullets=%d rounds %d -> %d kick=%d"), BulletsSpawned, RoundsBefore,
 				Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1, bSawFireAnimation ? 1 : 0);
+			// then the button held down: the rifle goes on firing until it is let go
+			RoundsBefore = Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : 0;
+			bTriggerPulled = false;
+			GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Pressed);
+			Enter(EPhase::HoldFire, World);
+			return false;
+
+		case EPhase::HoldFire:
+			if (Elapsed(World) < 1.0) {
+				return false;
+			}
+			if (!bTriggerPulled) {
+				bTriggerPulled = true;
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
+				RoundsWhenLetGo = Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1;
+				Test->TestTrue(TEXT("Held down for a second, the rifle fires four times or more"), RoundsWhenLetGo >= 0 && RoundsBefore - RoundsWhenLetGo >= 4);
+				return false;
+			}
+			if (Elapsed(World) < 2.0) {
+				return false;
+			}
+			Test->TestTrue(TEXT("Let go, the rifle stops: no more than the shot already asked for"), Hero->CurrentWeapon != nullptr && RoundsWhenLetGo - Hero->CurrentWeapon->CurrentBulletCount <= 1);
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK held fire: rounds %d -> %d in a second held, %d a second after letting go"), RoundsBefore, RoundsWhenLetGo,
+				Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1);
+			// Her wallet now owns both guns sold in the store: set as the server sets it once the publisher's
+			// server says so of a pass she showed. The crate beside her, full again, gives them when opened.
+			State->GunsOwned = (1 << 3) | (1 << 4);
+			Enter(EPhase::BoughtGuns, World);
+			Step = 0;
+			return false;
+
+		case EPhase::BoughtGuns: {
+			const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
+			const ASenniteCrate* Beside = ASenniteCrate::Nearest(World, Hero->GetActorLocation(), Rules->Reach + Rules->Across, false);
+			if (Beside == nullptr) {
+				return Fail(TEXT("She is no longer beside the crate"));
+			}
+			if (Step == 0) {
+				if (Beside->bOpen) {
+					return Elapsed(World) > Rules->RestockSeconds + 20.0 ? Fail(TEXT("The crate was not full again in time")) : false;
+				}
+				Step = 1;
+				GameCheck::Key(Controller, EKeys::E, IE_Pressed);
+				GameCheck::Key(Controller, EKeys::E, IE_Released);
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (!State->EquippedWeapons.Contains(3) || !State->EquippedWeapons.Contains(4)) {
+				return Elapsed(World) > 8.0 ? Fail(TEXT("The crate did not give the guns her wallet owns")) : false;
+			}
+			Test->TestEqual(TEXT("With the bought guns hers, the crate gives rounds for each"), State->EquippedWeaponsAmmunition[3], GetDefault<ASenniteEnergyRifle>()->CrateRounds);
+			Test->TestEqual(TEXT("and for the sniper"), State->EquippedWeaponsAmmunition[4], GetDefault<ASenniteSniper>()->CrateRounds);
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK bought guns: none from the first crate; owned, the crate gave both, %d and %d rounds"),
+				State->EquippedWeaponsAmmunition[3], State->EquippedWeaponsAmmunition[4]);
+			OtherGun = 0;
+			Enter(EPhase::OtherGuns, World);
+			Step = 0;
+			return false;
+		}
+
+		case EPhase::OtherGuns: {
+			// the energy rifle (6) and the sniper (7): each comes to both hands, and a pull of the trigger sends its own bolt
+			struct FOther { FKey Key; UClass* Gun; UClass* Shot; const TCHAR* Name; };
+			const FOther Others[] = { { EKeys::Six, ASenniteEnergyRifle::StaticClass(), ASenniteEnergyBolt::StaticClass(), TEXT("energy rifle") },
+				{ EKeys::Seven, ASenniteSniper::StaticClass(), ASenniteSniperBullet::StaticClass(), TEXT("sniper") } };
+			const FOther& One = Others[OtherGun];
+			if (Step == 0) {
+				Step = 1;
+				GameCheck::Key(Controller, One.Key, IE_Pressed);
+				GameCheck::Key(Controller, One.Key, IE_Released);
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (Step == 1) {
+				if (Elapsed(World) < 1.2) {
+					return false;
+				}
+				Step = 2;
+				CheckHeld(Hero, One.Gun, One.Name);
+				Test->TestTrue(FString::Printf(TEXT("The %s is held in both hands"), One.Name), Body != nullptr && Body->bHolding && Body->GripGap < 2.0 && Body->OffHandGap < 3.0);
+				Test->TestTrue(FString::Printf(TEXT("The %s starts with a full magazine"), One.Name), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->CurrentBulletCount == Hero->CurrentWeapon->MagazineSize);
+				Onlooker.Look(World, Controller, Hero);
+				GameCheck::Shot(TEXT("Weapons"), *FString::Printf(TEXT("%s.png"), *FString(One.Name).Replace(TEXT(" "), TEXT("_"))));
+				BulletsSpawned = 0;
+				BulletClass = nullptr;
+				RoundsBefore = Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->CurrentBulletCount : 0;
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (Step == 2) {
+				if (Elapsed(World) < 0.4) {
+					return false;
+				}
+				Step = 3;
+				Onlooker.Back(Controller, Hero);
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Pressed);
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (Elapsed(World) < 0.8) {
+				return false;
+			}
+			Test->TestEqual(FString::Printf(TEXT("One pull of the %s's trigger sends one bolt out"), One.Name), BulletsSpawned, 1);
+			Test->TestTrue(FString::Printf(TEXT("The %s fires its own bolt"), One.Name), BulletClass == One.Shot);
+			Test->TestTrue(FString::Printf(TEXT("The %s's shot spends one round"), One.Name), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->CurrentBulletCount == RoundsBefore - 1);
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK %s: bolts=%d of %s, rounds %d -> %d"), One.Name, BulletsSpawned, *GetNameSafe(BulletClass), RoundsBefore,
+				Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1);
+			if (++OtherGun < UE_ARRAY_COUNT(Others)) {
+				Step = 0;
+				return false;
+			}
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK finished"));
 			Phase = EPhase::Done;
 			return true;
+		}
 
 		default:
 			return true;
@@ -211,7 +476,7 @@ namespace
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSenniteWeaponsTest, "Sennite.Weapons.PickUpHoldAndFire",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSenniteWeaponsTest, "Sennite.Weapons.OpenHoldAndFire",
 	EAutomationTestFlags::ClientContext | EAutomationTestFlags::ProductFilter)
 
 bool FSenniteWeaponsTest::RunTest(const FString& Parameters)

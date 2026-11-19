@@ -10,3 +10,7 @@ DerivedDataCache/
 .DS_Store
 # Fab hero packs: copied in by Tools/fetch_heroes.sh
 Content/Paragon*/
+# What packaging for Android writes: generated Java sources and the cook's file-open order
+Build/Android/
+Build/Android_ASTC/
+Content/SciFITrooper_Man_03/

@@ -1,0 +1,28 @@
+{
+  "name": "sennite-publisher-server",
+  "version": "0.1.0",
+  "description": "Sennite: Factions, the publisher's server: the faction state machine, contributions and the publisher's DSM account",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:dsm": "vitest run --config vitest.dsm.config.ts",
+    "test:game": "vitest run --config vitest.game.config.ts",
+    "test:seats": "vitest run --config vitest.seats.config.ts",
+    "check:formal": "formal/check.sh",
+    "start": "node dist/publisher/main.js"
+  },
+  "dependencies": {
+    "dsm-app-client": "file:vendor/dsm-app-client-0.1.1-beta.4.tgz"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "typescript": "~5.6.3",
+    "vitest": "^3.2.4"
+  }
+}

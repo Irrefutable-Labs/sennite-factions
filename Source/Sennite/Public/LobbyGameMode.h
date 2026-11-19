@@ -1,14 +1,15 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "LobbyGameMode.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogMyServerLobby, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogSenniteLobby, Log, All);
+
 /**
- * 
+ * The lobby: the Menu map hosted with ?listen?game=lobby. Players join it by address and stand on the
+ * stage as the hero each chose; the host starts, and the server travels everyone to the test range
+ * together, each keeping their hero (ASennitePlayerState::CopyProperties).
  */
 UCLASS()
 class SENNITE_API ALobbyGameMode : public AGameModeBase
@@ -18,35 +19,22 @@ class SENNITE_API ALobbyGameMode : public AGameModeBase
 public:
 	ALobbyGameMode();
 
-	/** The map the lobby travels to when the match starts. */
+	/** The map, and its options, the lobby travels to when the host starts. */
 	UPROPERTY(EditDefaultsOnly, Category = "Sennite|Lobby")
-	FString MatchMap = TEXT("/Game/Maps/Island");
+	FString MatchMap = TEXT("/Game/Maps/TestRange?listen");
 
-	bool GameReady;
+	/** Nobody is given a body in the lobby: their hero stands on the stage. */
+	virtual bool PlayerCanRestart_Implementation(APlayerController* Player) override { return false; }
 
-	bool GameEndedDueToInactivity;
-
-	virtual void BeginPlay() override;
-
-	virtual void StartPlay() override;
+	/** The hero the player's game logged in as (Hero=), claimed as any choice is: a hero bought in the shop is claimed once in, with a hero pass. */
+	virtual FString InitNewPlayer(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId, const FString& Options, const FString& Portal = TEXT("")) override;
 
 	virtual void PostLogin(APlayerController* NewPlayer) override;
-
-	virtual void PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage) override;
-
-	virtual FString InitNewPlayer(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId, const FString& Options, const FString& Portal) override;
-
 	virtual void Logout(AController* Exiting) override;
 
-	UFUNCTION(Server, Reliable, WithValidation)
-	void ServerCheckInactivity();
-
-	UFUNCTION(Server, Reliable, WithValidation)
-	void ServerStartGame();
+	/** The host starts: everyone in the lobby travels to the match map together. Once. */
+	void StartMatch();
 
 private:
-	int TimePassed;
-
-	bool SomeoneJoined;
+	bool bStarted = false;
 };
-

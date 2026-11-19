@@ -7,9 +7,17 @@
 #include "CanvasItem.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
+#include "SenniteBaseEditor.h"
 #include "SenniteCharacter.h"
+#include "SenniteCrate.h"
+#include "SenniteMatch.h"
 #include "SennitePlayerState.h"
+#include "SennitePlayerController.h"
+#include "SenniteTouch.h"
+#include "SenniteGameMenu.h"
+#include "SenniteUi.h"
 #include "Engine/Font.h"
+#include "BuildingActor.h"
 #include "HealingActor.h"
 #include "StormActor.h"
 #include "WeaponActor.h"
@@ -21,8 +29,28 @@ ASenniteHUD::ASenniteHUD()
 void ASenniteHUD::DrawHUD()
 {
 	Super::DrawHUD();
-	DrawCrosshair();
-	DrawStatus();
+	// the planning view has its own panel: the fight's crosshair and status are not drawn over it
+	if (!ASenniteBaseEditor::IsPlanning(GetWorld())) {
+		DrawCrosshair();
+		DrawStatus();
+		DrawMatch();
+	}
+	ASennitePlayerController* Player = Cast<ASennitePlayerController>(PlayerOwner);
+	USenniteGameMenu* Menu = Player != nullptr ? Player->GetGameMenu() : nullptr;
+	// the base editor's panel is where the in-game menu's buttons are: it is not drawn under them
+	if (Menu == nullptr || !Menu->IsOpen()) {
+		ASenniteBaseEditor::DrawOn(this, Canvas);
+	}
+	if (Player != nullptr) {
+		if (Menu != nullptr && Menu->IsOpen()) {
+			// the in-game menu, over the game: its own buttons are what is tapped
+			Menu->Draw(Canvas);
+		}
+		else if (USenniteTouchControls* Touch = Player->GetTouchControls()) {
+			// on a device played by touch, the stick and buttons over the rest; in the planning view, the editor's buttons
+			Touch->Draw(Canvas);
+		}
+	}
 }
 
 FSenniteHudReadout ASenniteHUD::ReadState() const
@@ -67,29 +95,48 @@ FSenniteHudReadout ASenniteHUD::ReadState() const
 		Readout.bInStorm = Hero->InStorm;
 		Readout.StormDamage = Storm->Damage;
 	}
+	Readout.bEditing = Hero->GetEditingPiece() != nullptr;
+	if (const ABuildingActor* Piece = Hero->PieceInSight()) {
+		Readout.PieceName = Piece->Describe();
+		Readout.PieceHealth = Piece->Health;
+		Readout.PieceMax = Piece->MaxHealth();
+	}
 	return Readout;
 }
 
 void ASenniteHUD::Label(const TCHAR* Name, const FString& Text, float X, float Y, int32 Points, const FLinearColor& Colour)
 {
-	// the engine's own font, scaled to the height asked for on a 720-line screen
-	UFont* Font = GEngine->GetLargeFont();
-	if (Font == nullptr) {
-		return;
-	}
-	const float Scale = Canvas->ClipY / 720.0f;
-	const float Height = Points * 1.4f * Scale;
-	FCanvasTextItem Item(FVector2D(X, Y), FText::FromString(Text), Font, Colour);
-	Item.Scale = FVector2D(Height / FMath::Max(1.0f, Font->GetMaxCharHeight()));
-	Item.EnableShadow(FLinearColor(0.0f, 0.0f, 0.0f, 0.8f));
-	Canvas->DrawItem(Item);
+	// set crisp at the height asked for on a 720-line screen, as the menus' text is (SenniteUi)
+	SenniteUi::Text(Canvas, Text, X, Y, Points, Canvas->ClipY / 720.0f, Colour);
 	Drawing.Add(FString::Printf(TEXT("%s=%s"), Name, *Text));
 }
 
 void ASenniteHUD::Bar(float X, float Y, float Width, float Height, float Fraction, const FLinearColor& Colour)
 {
-	DrawRect(FLinearColor(0.0f, 0.0f, 0.0f, 0.5f), X, Y, Width, Height);
-	DrawRect(Colour, X, Y, Width * FMath::Clamp(Fraction, 0.0f, 1.0f), Height);
+	// a dark track with a faint edge, filled from the left in the bar's colour, lighter along its top
+	const float S = Canvas->ClipY / 720.0f;
+	const FBox2D Track(FVector2D(X, Y), FVector2D(X + Width, Y + Height));
+	SenniteUi::Plate(Canvas, Track, 3.0f * S, FLinearColor(0.0f, 0.0f, 0.0f, 0.6f), FLinearColor(0.0f, 0.0f, 0.0f, 0.6f));
+	const float Filled = Width * FMath::Clamp(Fraction, 0.0f, 1.0f);
+	if (Filled > 0.5f) {
+		const FLinearColor Light = FMath::Lerp(Colour, FLinearColor::White, 0.35f).CopyWithNewOpacity(Colour.A);
+		SenniteUi::Plate(Canvas, FBox2D(FVector2D(X, Y), FVector2D(X + Filled, Y + Height)), 3.0f * S, Light, Colour);
+	}
+	SenniteUi::Outline(Canvas, Track, 3.0f * S, SenniteUi::Edge, FMath::Max(1.0f, S));
+}
+
+namespace
+{
+	/** A HUD plate: the menus' dark plate with two cut corners and a faint edge, or tinted (the storm's warning). */
+	void HudPlate(UCanvas* Canvas, float X, float Y, float Width, float Height, const FLinearColor* Tint = nullptr)
+	{
+		const float S = Canvas->ClipY / 720.0f;
+		const FBox2D Box(FVector2D(X, Y), FVector2D(X + Width, Y + Height));
+		const FLinearColor Top = Tint != nullptr ? *Tint : FLinearColor(0.045f, 0.058f, 0.090f, 0.66f);
+		const FLinearColor Bottom = Tint != nullptr ? (*Tint * 0.6f).CopyWithNewOpacity(Tint->A) : FLinearColor(0.012f, 0.016f, 0.028f, 0.66f);
+		SenniteUi::Plate(Canvas, Box, 8.0f * S, Top, Bottom);
+		SenniteUi::Outline(Canvas, Box, 8.0f * S, SenniteUi::Edge, FMath::Max(1.0f, S));
+	}
 }
 
 void ASenniteHUD::DrawStatus()
@@ -107,9 +154,9 @@ void ASenniteHUD::DrawStatus()
 	if (!Now.bValid) {
 		// no hero: a player who has fallen and is watching still sees who is left
 		if (Now.bSpectating) {
-			DrawRect(FLinearColor(0.0f, 0.0f, 0.0f, 0.35f), W * 0.5f - 130.0f * S, 16.0f * S, 260.0f * S, 34.0f * S);
+			HudPlate(Canvas, W * 0.5f - 130.0f * S, 16.0f * S, 260.0f * S, 34.0f * S);
 			Label(TEXT("spectating"), TEXT("SPECTATING"), W * 0.5f - 52.0f * S, 24.0f * S, 14, White);
-			DrawRect(FLinearColor(0.0f, 0.0f, 0.0f, 0.35f), W - 222.0f * S, 16.0f * S, 198.0f * S, 34.0f * S);
+			HudPlate(Canvas, W - 222.0f * S, 16.0f * S, 198.0f * S, 34.0f * S);
 			Label(TEXT("alive"), FString::Printf(TEXT("%d ALIVE"), Now.Alive), W - 210.0f * S, 24.0f * S, 14, White);
 			Label(TEXT("kills"), FString::Printf(TEXT("%d KILLS"), Now.Kills), W - 110.0f * S, 24.0f * S, 14, White);
 		}
@@ -138,6 +185,25 @@ void ASenniteHUD::DrawStatus()
 		}
 		Drawing.Add(TEXT("hitmarker=1"));
 	}
+	// just hit a built piece: what it took, by the aim
+	if (Clock < PieceHitUntil) {
+		Label(TEXT("piecehit"), FString::FromInt(FMath::RoundToInt(PieceHitDamage)), W * 0.5f + 14.0f * S, H * 0.5f - 30.0f * S, 14, FLinearColor(0.55f, 0.8f, 1.0f));
+	}
+	// a built piece in sight: what it is and what it has left
+	if (!Now.PieceName.IsEmpty()) {
+		const float PieceW = 120.0f * S;
+		const float PieceX = W * 0.5f - PieceW * 0.5f;
+		const float PieceY = H * 0.5f + 26.0f * S;
+		const float Left = Now.PieceMax > 0.0f ? Now.PieceHealth / Now.PieceMax : 0.0f;
+		Bar(PieceX, PieceY, PieceW, 5.0f * S, Left, Left > 0.5f ? FLinearColor(0.55f, 0.8f, 1.0f) : Left > 0.25f ? FLinearColor(1.0f, 0.7f, 0.1f) : FLinearColor(0.9f, 0.15f, 0.1f));
+		Label(TEXT("pieceaim"), FString::Printf(TEXT("%s %d/%d"), *Now.PieceName, FMath::RoundToInt(Now.PieceHealth), FMath::RoundToInt(Now.PieceMax)),
+			PieceX, PieceY + 8.0f * S, 10, FLinearColor(1.0f, 1.0f, 1.0f, 0.85f));
+	}
+	// editing a piece: what the buttons do
+	if (Now.bEditing) {
+		HudPlate(Canvas, W * 0.5f - 200.0f * S, H * 0.70f, 400.0f * S, 34.0f * S);
+		Label(TEXT("edit"), TEXT("EDITING   FIRE: CUT OR PUT BACK A TILE   AIM: RESET   G: DONE"), W * 0.5f - 188.0f * S, H * 0.70f + 9.0f * S, 11, FLinearColor::White);
+	}
 
 	const FLinearColor Plate(0.0f, 0.0f, 0.0f, 0.35f);
 
@@ -145,7 +211,7 @@ void ASenniteHUD::DrawStatus()
 	const float BarX = 28.0f * S;
 	const float BarW = 260.0f * S;
 	const float BarH = 14.0f * S;
-	DrawRect(Plate, BarX - 10.0f * S, H - 88.0f * S, BarW + 70.0f * S, 64.0f * S);
+	HudPlate(Canvas, BarX - 10.0f * S, H - 88.0f * S, BarW + 70.0f * S, 64.0f * S);
 	Bar(BarX, H - 76.0f * S, BarW, BarH, Now.Shield / 100.0f, FLinearColor(0.04f, 0.18f, 0.85f));
 	Label(TEXT("shield"), FString::FromInt(FMath::RoundToInt(Now.Shield)), BarX + BarW + 10.0f * S, H - 80.0f * S, 14, White);
 	Bar(BarX, H - 50.0f * S, BarW, BarH, Now.Health / 100.0f, FLinearColor(0.08f, 0.5f, 0.08f));
@@ -153,10 +219,13 @@ void ASenniteHUD::DrawStatus()
 
 	// bottom right: the weapon in hand, the rounds in it, and the rounds carried for it
 	if (Now.bHoldingWeapon) {
-		const TCHAR* Names[] = { TEXT("PICKAXE"), TEXT("RIFLE"), TEXT("SHOTGUN") };
+		// a gun by its own name (AWeaponActor::DisplayName)
+		const ASenniteCharacter* Armed = Cast<ASenniteCharacter>(GetOwningPawn());
+		const FString Named = Now.WeaponType == 0 ? FString(TEXT("OWN WEAPON"))
+			: Armed != nullptr && Armed->CurrentWeapon != nullptr ? GetDefault<AWeaponActor>(Armed->CurrentWeapon->GetClass())->DisplayName : FString(TEXT("WEAPON"));
 		const float AmmoX = W - 210.0f * S;
-		DrawRect(Plate, AmmoX - 12.0f * S, H - 110.0f * S, 150.0f * S, 86.0f * S);
-		Label(TEXT("weapon"), Now.WeaponType >= 0 && Now.WeaponType < 3 ? Names[Now.WeaponType] : TEXT("WEAPON"), AmmoX, H - 104.0f * S, 12, Dim);
+		HudPlate(Canvas, AmmoX - 12.0f * S, H - 110.0f * S, 150.0f * S, 86.0f * S);
+		Label(TEXT("weapon"), Named, AmmoX, H - 104.0f * S, 12, Dim);
 		if (Now.WeaponType > 0) {
 			Label(TEXT("ammo"), FString::FromInt(Now.Clip), AmmoX, H - 86.0f * S, 34, White);
 			Label(TEXT("reserve"), FString::FromInt(Now.Reserve), AmmoX + 84.0f * S, H - 66.0f * S, 16, Dim);
@@ -167,7 +236,7 @@ void ASenniteHUD::DrawStatus()
 	if (Now.bHoldingItem) {
 		const TCHAR* Names[] = { TEXT("BANDAGE"), TEXT("POTION") };
 		const float ItemX = W - 210.0f * S;
-		DrawRect(Plate, ItemX - 12.0f * S, H - 110.0f * S, 150.0f * S, 86.0f * S);
+		HudPlate(Canvas, ItemX - 12.0f * S, H - 110.0f * S, 150.0f * S, 86.0f * S);
 		Label(TEXT("item"), Now.ItemType >= 0 && Now.ItemType < 2 ? Names[Now.ItemType] : TEXT("ITEM"), ItemX, H - 104.0f * S, 12, Dim);
 		Label(TEXT("itemcount"), FString::FromInt(Now.ItemCount), ItemX, H - 86.0f * S, 34, White);
 	}
@@ -176,7 +245,7 @@ void ASenniteHUD::DrawStatus()
 	const FLinearColor Tiers[] = { FLinearColor(0.45f, 0.5f, 0.55f), FLinearColor(0.03f, 0.1f, 0.05f), FLinearColor(0.16f, 0.17f, 0.19f) };
 	const float MatX = W - 130.0f * S;
 	const float MatY = H * 0.42f;
-	DrawRect(Plate, MatX - 16.0f * S, MatY - (Now.bBuildMode ? 38.0f : 8.0f) * S, 112.0f * S, (Now.bBuildMode ? 126.0f : 96.0f) * S);
+	HudPlate(Canvas, MatX - 16.0f * S, MatY - (Now.bBuildMode ? 38.0f : 8.0f) * S, 112.0f * S, (Now.bBuildMode ? 126.0f : 96.0f) * S);
 	if (Now.bBuildMode) {
 		Label(TEXT("mode"), Now.BuildMode.ToUpper(), MatX, MatY - 32.0f * S, 14, White);
 	}
@@ -192,16 +261,85 @@ void ASenniteHUD::DrawStatus()
 	}
 
 	// top right: players left and this player's kills
-	DrawRect(Plate, W - 222.0f * S, 16.0f * S, 198.0f * S, 34.0f * S);
+	HudPlate(Canvas, W - 222.0f * S, 16.0f * S, 198.0f * S, 34.0f * S);
 	Label(TEXT("alive"), FString::Printf(TEXT("%d ALIVE"), Now.Alive), W - 210.0f * S, 24.0f * S, 14, White);
 	Label(TEXT("kills"), FString::Printf(TEXT("%d KILLS"), Now.Kills), W - 110.0f * S, 24.0f * S, 14, White);
 
 	// top centre: a warning while the player is outside the safe circle
 	if (Now.bInStorm) {
-		DrawRect(FLinearColor(0.25f, 0.02f, 0.4f, 0.6f), W * 0.5f - 130.0f * S, 16.0f * S, 260.0f * S, 34.0f * S);
+		const FLinearColor StormTint(0.25f, 0.02f, 0.4f, 0.7f);
+		HudPlate(Canvas, W * 0.5f - 130.0f * S, 16.0f * S, 260.0f * S, 34.0f * S, &StormTint);
 		Label(TEXT("storm"), TEXT("IN THE STORM"), W * 0.5f - 62.0f * S, 24.0f * S, 14, White);
 	}
 
+	LastDrawn = Drawing;
+}
+
+void ASenniteHUD::DrawMatch()
+{
+	const float S = Canvas->ClipY / 720.0f;
+	const float W = Canvas->ClipX;
+	const float H = Canvas->ClipY;
+	const FLinearColor White = FLinearColor::White;
+	const FLinearColor Shade(0.0f, 0.0f, 0.0f, 0.35f);
+	// beside a closed weapon crate: how to open it
+	if (const ASenniteCharacter* Hero = Cast<ASenniteCharacter>(GetOwningPawn())) {
+		const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
+		if (ASenniteCrate::Nearest(GetWorld(), Hero->GetActorLocation(), Rules->Reach + Rules->Across, true) != nullptr) {
+			HudPlate(Canvas, W * 0.5f - 110.0f * S, H * 0.62f, 220.0f * S, 34.0f * S);
+			Label(TEXT("crate"), TEXT("E   OPEN THE CRATE"), W * 0.5f - 92.0f * S, H * 0.62f + 8.0f * S, 14, White);
+		}
+	}
+	// just opened a crate: what it gave
+	if (GetWorld()->GetTimeSeconds() < CrateGaveUntil && !CrateGave.IsEmpty()) {
+		const float GaveW = SenniteUi::Measure(CrateGave, 12, S).X + 36.0f * S;
+		HudPlate(Canvas, W * 0.5f - GaveW * 0.5f, H * 0.62f + 42.0f * S, GaveW, 30.0f * S);
+		Label(TEXT("crategave"), CrateGave, W * 0.5f - GaveW * 0.5f + 18.0f * S, H * 0.62f + 49.0f * S, 12, White);
+	}
+	const ASenniteMatch* Match = ASenniteMatch::Find(GetWorld());
+	if (Match == nullptr) {
+		LastDrawn = Drawing;
+		return;
+	}
+	const ASennitePlayerState* State = PlayerOwner ? Cast<ASennitePlayerState>(PlayerOwner->PlayerState) : nullptr;
+	const FString Mine = State != nullptr ? State->FactionId : FString();
+	const FSenniteMatchFaction* Own = Match->FactionOf(Mine);
+	// the player's own faction first, then the others by the start of their names
+	FString Score = Own != nullptr ? FString::Printf(TEXT("YOUR FACTION %d"), Own->Kills) : FString();
+	for (const FSenniteMatchFaction& Faction : Match->Factions) {
+		if (&Faction != Own) {
+			Score += FString::Printf(TEXT("%s%s %d%s"), Score.IsEmpty() ? TEXT("") : TEXT("    "), *Faction.FactionId.Left(6).ToUpper(), Faction.Kills, Faction.bOut ? TEXT(" OUT") : TEXT(""));
+		}
+	}
+	FString Line;
+	FString Under;
+	if (Match->State == EMatchState::Failed) {
+		Line = TEXT("THIS MATCH CANNOT BE PLAYED");
+		Under = Match->Why;
+	}
+	else if (Mine.IsEmpty()) {
+		Line = TEXT("ENTERING THE MATCH");
+		Under = Match->Said;
+	}
+	else if (Match->State == EMatchState::Waiting) {
+		Line = TEXT("WAITING FOR ANOTHER FACTION'S PLAYERS");
+		Under = Score;
+	}
+	else if (Match->State == EMatchState::Playing) {
+		const int32 Left = FMath::CeilToInt32(Match->SecondsLeft());
+		Line = Match->Length > 0.0f ? FString::Printf(TEXT("%02d:%02d    %s"), Left / 60, Left % 60, *Score) : Score;
+		Under = Own != nullptr && Own->bOut ? FString(TEXT("YOUR BASE IS WIPED. YOUR FACTION IS OUT."))
+			: Match->Target > 0 ? FString::Printf(TEXT("FIRST TO %d KILLS, OR THE LAST BASE STANDING"), Match->Target) : FString(TEXT("THE LAST BASE STANDING"));
+	}
+	else {
+		Line = Match->Outcome == ASenniteMatch::Void() ? TEXT("NOBODY WON") : Match->Outcome == Mine ? TEXT("YOUR FACTION WON") : TEXT("YOUR FACTION LOST");
+		Under = FString::Printf(TEXT("%s    %s"), *Match->Why.ToUpper(), *Score);
+	}
+	HudPlate(Canvas, W * 0.5f - 270.0f * S, 58.0f * S, 540.0f * S, Under.IsEmpty() ? 32.0f * S : 54.0f * S);
+	Label(TEXT("match"), Line, W * 0.5f - 258.0f * S, 64.0f * S, 14, White);
+	if (!Under.IsEmpty()) {
+		Label(TEXT("matchnote"), Under, W * 0.5f - 258.0f * S, 88.0f * S, 10, FLinearColor(1.0f, 1.0f, 1.0f, 0.8f));
+	}
 	LastDrawn = Drawing;
 }
 
@@ -255,6 +393,18 @@ void ASenniteHUD::DrawHitMarker() {
 			// TODO for later: Implement your own UUserWidget class to retrieve animation from a blueprint and play the animation here
 		}
 	}
+}
+
+void ASenniteHUD::DrawPieceHit(float Damage) {
+	// drawn on the canvas for a little under half a second (DrawStatus)
+	PieceHitUntil = GetWorld()->GetTimeSeconds() + 0.45;
+	PieceHitDamage = Damage;
+}
+
+void ASenniteHUD::DrawCrateGave(const FString& Gave) {
+	// said where the crate's prompt was, for three seconds (DrawMatch)
+	CrateGaveUntil = GetWorld()->GetTimeSeconds() + 3.0;
+	CrateGave = Gave;
 }
 
 void ASenniteHUD::DrawBloodSplash() {
@@ -333,34 +483,3 @@ void ASenniteHUD::DrawGameUI() {
 	}
 }
 
-void ASenniteHUD::DrawSettingsMenu() {
-	APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
-	if (PlayerController) {
-		// change the flags back to their default values after going from settings menu to fortnite clone
-		// or change the flags to ui mode if going from fortnite clone to settings menu
-		if (PlayerController->bShowMouseCursor) {
-			PlayerController->bShowMouseCursor = false;
-			PlayerController->bEnableClickEvents = false;
-			PlayerController->bEnableMouseOverEvents = false; 
-			PlayerController->SetInputMode(FInputModeGameOnly());
-			if (SettingsMenuWidget) {
-				SettingsMenuWidget->RemoveFromParent();
-			}
-		}
-		else {
-			PlayerController->bShowMouseCursor = true;
-			PlayerController->bEnableClickEvents = true;
-			PlayerController->bEnableMouseOverEvents = true;
-			PlayerController->SetInputMode(FInputModeGameAndUI());
-			if (SettingsMenuWidgetClass != nullptr)
-			{
-				SettingsMenuWidget = CreateWidget<UUserWidget>(GetWorld(), SettingsMenuWidgetClass);
-
-				if (SettingsMenuWidget)
-				{
-					SettingsMenuWidget->AddToViewport();
-				}
-			}
-		}
-	}
-}

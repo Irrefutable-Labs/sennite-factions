@@ -1,0 +1,8 @@
+{
+  "resources": [
+    { "symbol": "WOOD", "name": "Wood", "supply": "1000000" },
+    { "symbol": "STONE", "name": "Stone", "supply": "1000000" },
+    { "symbol": "STEEL", "name": "Steel", "supply": "1000000" }
+  ],
+  "grant": { "perRequest": "1000", "total": "100000" }
+}

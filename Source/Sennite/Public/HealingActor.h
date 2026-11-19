@@ -30,7 +30,7 @@ public:
 	UPROPERTY(Replicated)
 	ASenniteCharacter* Holder;
 
-	/** The item's body: what a player walks over to pick it up, and what sits in the holder's hand. */
+	/** The item's body: what sits in the holder's hand. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh")
 	UStaticMeshComponent* ItemMesh;
 
@@ -38,7 +38,7 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Mesh")
 	FSoftObjectPath MeshAsset;
 
-	/** The mesh's size as it lies in the world; it is half this in the hand. Set per item class in DefaultGame.ini. */
+	/** The mesh's full size; it is half this in the hand. Set per item class in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Mesh")
 	FVector MeshScale = FVector::OneVector;
 

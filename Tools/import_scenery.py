@@ -7,7 +7,11 @@ Each piece comes in as one static mesh with no collision (the arena's blocks are
 on; scenery is only seen), with its colour, normal and roughness textures at 1024, a phone's size.
   Cliff        Desert Western Cliff Layered XXL 02   the canyon's walls
   RockyGround  Forest Rocky Ground                   scattered on floors
-What each measures is written to Saved/import_scenery.txt. The library folder is SCENERY_SOURCE."""
+  Tundra       Tundra Rocky Ground                   patches of stony ground on the plots
+These are Megascans scans, whose normal maps point green up (the OpenGL way, measured against each
+set's own height map); Unreal wants green down, so each normal map is imported with its green flipped.
+What each measures is written to Saved/import_scenery.txt. The library folder is SCENERY_SOURCE;
+SCENERY names the pieces to bring in ("Tundra", "Cliff RockyGround"), left out, all of them."""
 import glob
 import os
 import subprocess
@@ -22,7 +26,9 @@ SIZE = 1024
 PIECES = {
     "Cliff": "Desert_Western_Cliff_Layered_XXL_02-*/fbx/mid/*/",
     "RockyGround": "Forest_Rocky_Ground-*/fbx/mid/*/",
+    "Tundra": "Tundra_Rocky_Ground-*/fbx/mid/*/",
 }
+WANTED = os.environ.get("SCENERY", " ".join(PIECES)).split()
 
 eal = unreal.EditorAssetLibrary
 mel = unreal.MaterialEditingLibrary
@@ -58,6 +64,8 @@ def texture(piece, folder, kind):
     if kind == "Normal":
         tex.set_editor_property("srgb", False)
         tex.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_NORMALMAP)
+        # green up in the file; Unreal reads green down
+        tex.set_editor_property("flip_green_channel", True)
     elif kind == "Roughness":
         tex.set_editor_property("srgb", False)
         tex.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_MASKS)
@@ -66,7 +74,9 @@ def texture(piece, folder, kind):
 
 
 os.makedirs(SMALL, exist_ok=True)
-for piece in PIECES:
+for piece in WANTED:
+    if piece not in PIECES:
+        raise RuntimeError("no piece " + piece + ": " + ", ".join(PIECES))
     folder = "%s/%s" % (DEST, piece)
     maps = {kind: texture(piece, folder, kind) for kind in ("BaseColor", "Normal", "Roughness")}
 

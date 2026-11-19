@@ -1,11 +1,12 @@
-// Healing check. Run in the game on the test range, which has a pack of bandages and potions lying
-// behind the start and a storm whose wall crosses the range farther back: the hero turns round with
-// the mouse and runs out through the wall, picking both items up on the way; outside she loses
-// health; she runs back in, and with the real keys drinks a potion, which adds shield, and uses a
-// bandage, which gives back health. Each takes one from its count, the item sits in her hand, and the
-// HUD shows the item, its count, and the health and shield as they change.
+// Healing check. Run in the game on the test range, which has a crate by the start and a storm whose
+// wall crosses the range behind it: the hero opens the crate and has its pack of bandages and of
+// potions; she turns round with the mouse and runs out through the wall; outside she loses health;
+// she runs back in, and with the real keys drinks a potion, which adds shield, and uses a bandage,
+// which gives back health. Each takes one from its count, the item sits in her hand, and the HUD
+// shows the item, its count, and the health and shield as they change.
 //
-// Tools/check_healing.sh runs this and reads the result.
+// The game has no storm for now; Tools/check_healing.sh turns it on for this run, for something to
+// be hurt by, and reads the result.
 
 #include "Misc/AutomationTest.h"
 
@@ -34,7 +35,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, TurnRound, RunOut, Outside, RunBack, Potion, Bandage, Done };
+		enum class EPhase { WaitForPawn, NoItem, OpenCrate, TurnRound, RunOut, Outside, RunBack, Potion, Bandage, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; Turn.Reset(); }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -66,8 +67,7 @@ namespace
 		float HealthMark = 0.0f;
 		float ShieldMark = 0.0f;
 		int32 CountMark = 0;
-		double NearestBandage = 1.0e9;
-		double NearestPotion = 1.0e9;
+		GameCheck::FCrateRun Crate;
 	};
 
 	bool FHealingRun::Update()
@@ -91,7 +91,7 @@ namespace
 			Test->TestTrue(TEXT("The hero starts with no healing items"), State->HealingItemCounts[0] == 0 && State->HealingItemCounts[1] == 0);
 			// with none to hold, the bandage key does nothing
 			Tap(Controller, EKeys::Four);
-			Enter(EPhase::TurnRound, World);
+			Enter(EPhase::NoItem, World);
 			return false;
 		}
 		if (Hero == nullptr || State == nullptr || Hud == nullptr || Hero->CurrentStorm == nullptr) {
@@ -101,46 +101,50 @@ namespace
 		const double FromCentre = FVector::Dist2D(Hero->GetActorLocation(), Storm->GetActorLocation());
 
 		switch (Phase) {
+		case EPhase::NoItem:
+			if (Elapsed(World) < 0.8) {
+				return false;
+			}
+			Test->TestTrue(TEXT("With none to hold, the bandage key puts nothing in her hand"), Hero->CurrentHealingItem == nullptr);
+			Test->TestEqual(TEXT("No healing item lies about on the range: they are in the crate"), GameCheck::LyingAbout(World), 0);
+			Enter(EPhase::OpenCrate, World);
+			return false;
+
+		case EPhase::OpenCrate:
+			// D walks her to the crate to the right of the start; E opens it
+			if (!Crate.Step(World, Controller, Hero, EKeys::D)) {
+				return false;
+			}
+			if (!Crate.Failure.IsEmpty()) {
+				return Fail(Crate.Failure);
+			}
+			Test->TestEqual(TEXT("The crate gave her its pack of bandages"), State->HealingItemCounts[0], GetDefault<ASenniteBandage>()->Count);
+			Test->TestEqual(TEXT("The crate gave her its potions"), State->HealingItemCounts[1], GetDefault<ASennitePotion>()->Count);
+			Test->TestEqual(TEXT("The opened crate laid nothing on the ground"), GameCheck::LyingAbout(World), 0);
+			UE_LOG(LogHealingCheck, Display, TEXT("GAMECHECK crate: gave %d bandages and %d potions"), State->HealingItemCounts[0], State->HealingItemCounts[1]);
+			Enter(EPhase::TurnRound, World);
+			return false;
+
 		case EPhase::TurnRound:
-			// half a turn with the mouse, to face the items and the wall behind her
+			// half a turn with the mouse, to face the wall behind her
 			if (!Turn.Step(Controller, 180.0)) {
 				return false;
 			}
 			if (Elapsed(World) < 0.8) {
 				return false;
 			}
-			Test->TestTrue(TEXT("With none to hold, the bandage key puts nothing in her hand"), Hero->CurrentHealingItem == nullptr);
 			GameCheck::Key(Controller, EKeys::W, IE_Pressed);
 			GameCheck::Key(Controller, EKeys::LeftShift, IE_Pressed);
 			Enter(EPhase::RunOut, World);
 			return false;
 
 		case EPhase::RunOut:
-			// how close she passes to each item still on the ground
-			for (TActorIterator<AHealingActor> It(World); It; ++It) {
-				if (It->Holder == nullptr) {
-					double& Nearest = It->HealingType == 0 ? NearestBandage : NearestPotion;
-					Nearest = FMath::Min(Nearest, FVector::Dist2D(It->GetActorLocation(), Hero->GetActorLocation()));
-				}
-			}
 			if (!(Hero->InStorm && FromCentre > Storm->GetRadius() + 150.0)) {
 				return Elapsed(World) > 15.0 ? Fail(TEXT("The hero never left the storm's circle")) : false;
 			}
 			GameCheck::Key(Controller, EKeys::LeftShift, IE_Released);
 			GameCheck::Key(Controller, EKeys::W, IE_Released);
-			{
-				const ASenniteBandage* Bandages = GetDefault<ASenniteBandage>();
-				const ASennitePotion* Potions = GetDefault<ASennitePotion>();
-				Test->TestEqual(TEXT("Running over the bandages picks up the pack"), State->HealingItemCounts[0], Bandages->Count);
-				Test->TestEqual(TEXT("Running over the potions picks them up"), State->HealingItemCounts[1], Potions->Count);
-				int32 Left = 0;
-				for (TActorIterator<AHealingActor> It(World); It; ++It) {
-					Left += It->Holder == nullptr ? 1 : 0;
-				}
-				Test->TestEqual(TEXT("Both pickups are gone from the ground"), Left, 0);
-				UE_LOG(LogHealingCheck, Display, TEXT("GAMECHECK run out: passed within %.0f of the bandages and %.0f of the potions; ended at %s facing %.1f"),
-					NearestBandage, NearestPotion, *Hero->GetActorLocation().ToCompactString(), Controller->GetControlRotation().Yaw);
-			}
+			UE_LOG(LogHealingCheck, Display, TEXT("GAMECHECK run out: ended at %s facing %.1f"), *Hero->GetActorLocation().ToCompactString(), Controller->GetControlRotation().Yaw);
 			Enter(EPhase::Outside, World);
 			return false;
 
@@ -168,11 +172,13 @@ namespace
 			}
 			GameCheck::Key(Controller, EKeys::LeftShift, IE_Released);
 			GameCheck::Key(Controller, EKeys::W, IE_Released);
+			// what the crate gave went into what she carries, not into her hand: key 5 holds a potion
+			Tap(Controller, EKeys::Five);
 			Enter(EPhase::Potion, World);
 			return false;
 
 		case EPhase::Potion:
-			// the potions were picked up last, so one is in her hand
+			// key 5 has put a potion in her hand
 			if (Elapsed(World) < 1.0) {
 				return false;
 			}

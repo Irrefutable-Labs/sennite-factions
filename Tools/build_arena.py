@@ -1,11 +1,13 @@
-"""Build the arena map: sky, light, and one ASenniteArena, which lays out the bases and the connectors
-between them from a seed when a match starts. Nothing else is placed: the arena is all there is to
-stand on, and below it is the drop.
+"""Build the arena map: sky, light, haze, and one ASenniteArena, which makes the match's land (the
+plots, the connectors between them, the ground under both) from a seed when a match starts. Nothing
+else is placed: the arena's land is all there is to stand on, and round it is the water.
 
   UnrealEditor-Cmd Sennite.uproject -run=pythonscript -script=Tools/build_arena.py -unattended -nullrhi
 
-Phone-level lighting only: one shadowed sun, an unshadowed sky fill, no ray tracing, no Lumen.
+Phone-level lighting only: one shadowed sun, an unshadowed fill from a fixed daylight sky, no ray tracing, no Lumen.
 Writes /Game/Maps/Arena and the arena's block material /Game/Arena/M_ArenaBlock."""
+import os
+
 import unreal
 
 MAP = "/Game/Maps/Arena"
@@ -81,15 +83,46 @@ for key, value in (("intensity", 6.0), ("atmosphere_sun_light", True), ("dynamic
                    ("dynamic_shadow_cascades", 3), ("cast_shadows", True)):
     sc.set_editor_property(key, value)
 
+# The sky fill is the engine's daylight sky, as a fixed texture: it lights the shaded side of a hero from
+# the first frame, on a phone as on a desktop (a sky captured live is black until it is captured, and a
+# phone may not capture one at all), and from below as well as above, so nothing in shade is black.
+daylight = unreal.load_asset("/Engine/MapTemplates/Sky/DaylightAmbientCubemap")  # by its path: the registry has not scanned the engine's templates
+if daylight is None:
+    raise RuntimeError("the engine's daylight sky did not load")
 sky = spawn(unreal.SkyLight, "sky_fill", unreal.Vector(0, 0, 3200), folder="lights")
 kc = sky.light_component
 kc.set_mobility(unreal.ComponentMobility.MOVABLE)
-for key, value in (("real_time_capture", True), ("cast_shadows", False), ("intensity", 1.0)):
+for key, value in (("source_type", unreal.SkyLightSourceType.SLS_SPECIFIED_CUBEMAP), ("cubemap", daylight),
+                   ("real_time_capture", False), ("lower_hemisphere_is_black", False), ("cast_shadows", False), ("intensity", 1.8)):
     kc.set_editor_property(key, value)
 
-spawn(unreal.SkyAtmosphere, "atmosphere", folder="lights")
-fog = spawn(unreal.ExponentialHeightFog, "haze", unreal.Vector(0, 0, -2000), folder="lights")
-fog.component.set_editor_property("fog_density", 0.004)
+atmosphere = spawn(unreal.SkyAtmosphere, "atmosphere", folder="lights")
+# a daytime sky: the sun here is weak (phone-level lighting), so the sky it lights is brightened on its own
+SKY_BRIGHTNESS = float(os.environ.get("SKY_BRIGHTNESS", "6.0"))
+atmosphere.get_component_by_class(unreal.SkyAtmosphereComponent).set_editor_property(
+    "sky_luminance_factor", unreal.LinearColor(SKY_BRIGHTNESS, SKY_BRIGHTNESS, SKY_BRIGHTNESS, 1.0))
+# A phone draws the SkyAtmosphere only on a mesh whose material is marked as sky: the engine's own sky
+# dome and its sky material, 20 km out, seen and nothing else.
+dome = spawn(unreal.StaticMeshActor, "sky_dome", folder="lights")
+dome_mesh = dome.static_mesh_component
+dome_mesh.set_static_mesh(unreal.load_asset("/Engine/EngineSky/SM_SkySphere"))
+dome_mesh.set_material(0, unreal.load_asset("/Engine/EngineSky/SkyAtmosphere/SkyAtmosphere_MaterialSkyDome"))
+dome_mesh.set_collision_enabled(unreal.CollisionEnabled.NO_COLLISION)
+dome_mesh.set_editor_property("cast_shadow", False)
+dome.set_actor_scale3d(unreal.Vector(500.0, 500.0, 500.0))
+if dome_mesh.static_mesh is None or not dome_mesh.get_material(0).get_editor_property("is_sky"):
+    raise RuntimeError("the sky dome did not get its mesh and sky material")
+# Haze. The arena's land rises out of a lake, WaterDepth below its plots' level ground. With the
+# country round it (the arena's Land setting, Tools/import_land.py), a thin haze lies on the lake
+# and thins slowly upward: the arena is clear, the mountains pale with distance, and the country's
+# far edge is lost in it. With no country, a dense layer on the water: round the arena is haze.
+rules = unreal.SenniteArena.get_default_object()
+has_land = rules.get_editor_property("land").export_text() not in ("", "None")
+water_depth = rules.get_editor_property("water_depth")
+fog = spawn(unreal.ExponentialHeightFog, "haze", unreal.Vector(0, 0, -water_depth), folder="lights")
+fog.component.set_editor_property("fog_density", 0.0015 if has_land else 0.02)
+if has_land:
+    fog.component.set_editor_property("fog_height_falloff", 0.05)
 
 ppv = spawn(unreal.PostProcessVolume, "exposure", folder="lights")
 ppv.set_editor_property("unbound", True)
@@ -101,8 +134,8 @@ for key, value in (("override_auto_exposure_method", True), ("auto_exposure_meth
 ppv.set_editor_property("settings", s)
 
 world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
-# below this a player has fallen out of the arena
+# nobody comes back from the water: a hero whose middle is this far under its surface is out
 settings = world.get_world_settings()
-settings.set_editor_property("kill_z", -3000.0)
+settings.set_editor_property("kill_z", -water_depth - 150.0)
 if not unreal.EditorLoadingAndSavingUtils.save_map(world, MAP):
     raise RuntimeError("map did not save")

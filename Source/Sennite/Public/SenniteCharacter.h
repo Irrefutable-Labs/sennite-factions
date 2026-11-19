@@ -8,6 +8,7 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogSenniteCharacter, Log, All);
 
+class AProjectileActor;
 class USpringArmComponent;
 class UCameraComponent;
 class UCapsuleComponent;
@@ -36,7 +37,7 @@ class ASenniteCharacter : public ACharacter
 	UCapsuleComponent* TriggerCapsule;
 
 public:
-	ASenniteCharacter();
+	ASenniteCharacter(const FObjectInitializer& ObjectInitializer);
 
 	/** Base turn rate, in deg/sec. Other scaling may affect final turn rate. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=Camera)
@@ -77,43 +78,88 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
 	TSubclassOf<UThirdPersonAnimInstance> AnimInstanceClass;
 
-	/** The hero this character is: the skeletal mesh, with the materials it ships with. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** Which hero this character is (USenniteHeroes, DefaultGame.ini). The server sets it from the player's choice; every machine dresses the character from it. */
+	UPROPERTY(ReplicatedUsing = OnRep_HeroId)
+	FName HeroId;
+
+	/** On the server: be this hero. Its body, animation, size and hands; a weapon or item in hand is held anew. */
+	void SetHero(FName Id);
+
+	UFUNCTION()
+	void OnRep_HeroId();
+
+	/** The hero this character is now: the skeletal mesh, with the materials it ships with. From the hero's entry in the list. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FSoftObjectPath HeroMesh;
 
-	/** The hero's animation Blueprint class. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** The hero's animation Blueprint class. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FSoftClassPath HeroAnimClass;
 
-	/** The bone of the hero's skeleton a held weapon is fixed to. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** The bone of the hero's skeleton a held weapon is fixed to. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FName HeroWeaponBone;
 
-	/** How a held weapon is turned against that bone: its muzzle end (+X) and its top (+Z), in the bone's space. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** How a held weapon is turned against that bone: its muzzle end (+X) and its top (+Z), in the bone's space. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FRotator HeroGripRotation;
 
-	/** Where the hero's palm is from that bone, in the bone's space; a weapon's grip point sits here. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** Where the hero's palm is from that bone, in the bone's space; a weapon's grip point sits here. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FVector HeroPalmOffset;
 
-	/** The bones of the weapon that is part of the hero's own mesh; hidden while the hero holds a game weapon. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** The bones of the weapon that is part of the hero's own mesh; hidden while the hero holds a game weapon. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	TArray<FName> HeroBuiltInWeaponBones;
 
-	/** The bone a held healing item is fixed to, and where the palm is from it, in the bone's space. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	/** The bone a held healing item is fixed to, and where the palm is from it, in the bone's space. */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FName HeroItemBone;
 
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FVector HeroItemPalmOffset;
 
-	/** The hero's own firing animation, played for every shot. Set in DefaultGame.ini. */
-	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
-	FSoftObjectPath HeroFireMontage;
+	/** The hero's own attack and the bone its own weapon's bolt leaves from (FSenniteHero::AttackMontage, CastBone). */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
+	FSoftObjectPath HeroAttackMontage;
+
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
+	FName HeroCastBone;
+
+	/** The hero's own attack, loaded. */
+	UPROPERTY()
+	TObjectPtr<UAnimMontage> OwnAttack;
+
+	/** How long after an attack with the hero's own weapon before the next. */
+	UPROPERTY(EditDefaultsOnly, Category = "Hero")
+	float OwnAttackSeconds = 0.5f;
+
+	/** What the hero's own weapon sends out. */
+	UPROPERTY(EditDefaultsOnly, Category = "Hero")
+	TSubclassOf<AProjectileActor> OwnBoltClass;
+
+	/** Where the hero's own weapon's bolt leaves from, in the world: its cast bone, or the hand that holds a weapon. */
+	FVector OwnWeaponTip() const;
 
 	/** Fix a weapon to the hero's weapon bone, at the weapon's own grip. */
 	void AttachWeaponToHand(AWeaponActor* Weapon);
+
+	/** With a gun in hand, how far the player's camera moves from straight behind the hero: to the right and up, to look over its shoulder. */
+	UPROPERTY(EditDefaultsOnly, Category = "Camera")
+	FVector ShoulderView = FVector(0.0f, 60.0f, 35.0f);
+
+	/** How much larger than its model a gun is in this hero's hands: the hero's arm against GunArm, between GunSizeLeast and GunSizeMost. */
+	float GunSize() const;
+
+	/** The arm, shoulder to wrist in cm, the guns' models are the right size for; and how small and how large a gun is made for a hero. */
+	UPROPERTY(EditDefaultsOnly, Category = "Hero")
+	float GunArm = 55.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Hero")
+	float GunSizeLeast = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Hero")
+	float GunSizeMost = 2.2f;
 
 	/** What this player last told the server about moving and running: -1, 0 or 1 once told. */
 	int32 LastForwardSent = MAX_int32;
@@ -135,18 +181,6 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Skin")
 	TArray<UMaterialInstance*> SkinMaterialInstances;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Shooting")
-	UAnimMontage* RifleHipShootingAnimation;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Shooting")
-	UAnimMontage* RifleIronsightsShootingAnimation;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Shooting")
-	UAnimMontage* ShotgunHipShootingAnimation;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Shooting")
-	UAnimMontage* ShotgunIronsightsShootingAnimation;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Pickaxe")
 	UAnimMontage* PickaxeSwingingAnimation;
@@ -190,6 +224,65 @@ public:
 	/** The building material in use: 0, 1 or 2, weakest first. */
 	int GetCurrentBuildingMaterial() const { return CurrentBuildingMaterial; }
 
+	/**
+	 * Editing a built piece (G). G on a piece of the player's own side, aimed at and within reach,
+	 * starts editing it; while editing, the fire button marks the tile under the aim to be cut out or
+	 * put back (dragging across tiles marks them alike), the aim button puts every tile back and
+	 * finishes, and G again finishes. The server makes the change for everyone, or refuses it.
+	 */
+	UFUNCTION()
+	void EditPiece();
+
+	/** The piece this player is editing on this machine, or null. */
+	ABuildingActor* GetEditingPiece() const { return EditingPiece.Get(); }
+
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	/** The tiles marked to be cut in the piece being edited. */
+	int32 GetEditCut() const { return EditCut; }
+
+	/** The built piece of this player's side the aim falls on within reach, and the tile it falls on; null if none. */
+	ABuildingActor* EditablePieceUnderAim(int32& OutTile) const;
+
+	/** The built piece the camera looks at within sight, for the HUD; null if none. */
+	ABuildingActor* PieceInSight() const;
+
+	/** On the server: change a piece's cut tiles, if this player may and nothing is in the way. */
+	UFUNCTION(Server, Reliable, WithValidation)
+	void ServerEditPiece(ABuildingActor* Piece, int32 NewCut);
+
+	/** On the server: whether this player's edit of a piece would be made. */
+	bool MayEditPiece(const ABuildingActor* Piece, int32 NewCut) const;
+
+	/** The server refused an edit: show the piece as it is. */
+	UFUNCTION(Client, Reliable)
+	void ClientEditRefused(ABuildingActor* Piece);
+
+	/**
+	 * What a crate held goes to the hero, on the server: each of its guns the hero does not have yet
+	 * (Guns has a bit for each weapon slot), with a full magazine; with bRounds, each of those guns'
+	 * rounds (AWeaponActor::CrateRounds); the bandages and the potions. The first new gun comes to
+	 * hand. False, and nothing is given, while the hero is busy (building, firing, reloading, healing).
+	 */
+	bool TakeFromCrate(int32 Guns, bool bRounds, int32 Bandages, int32 Potions);
+
+	/** A bit for each gun the hero has (bit n for weapon slot n). */
+	int32 GunsHeld() const;
+
+	/** A bit for each gun bought in the store whose ShopId is among these: what a wallet's owned list makes its player's. */
+	static int32 BoughtGunsAmong(const TArray<FString>& Owned);
+
+	/** A shot left the gun in hand: it kicks. */
+	void KickGun();
+
+	/** A shot of this player's took damage off a built piece. */
+	UFUNCTION(Client, Reliable)
+	void ClientDrawPieceHit(float Damage);
+
+	/** How far from the camera a piece is named on the HUD. */
+	UPROPERTY(EditDefaultsOnly, Category = "Building")
+	float PieceSightReach = 3000.0f;
+
 	UFUNCTION(BlueprintPure, Category = "Material")
 	int GetWoodMaterialCount();
 
@@ -220,8 +313,8 @@ public:
 	UPROPERTY(Replicated)
 	AStormActor* CurrentStorm;
 
-	/* Current preview of wall to be built in build mode */
-	UPROPERTY(Replicated)
+	/** Where the next piece would go, drawn on this player's own machine only while they are in build mode. */
+	UPROPERTY(Transient)
 	ABuildingActor* BuildingPreview;
 
 	/* Anim instance properties */
@@ -325,6 +418,11 @@ protected:
 	/* Set the animation variable as well as shoot a very small projectile from the gun or pickaxe*/
 	UFUNCTION()
 	void ShootGun();
+	/** The fire button let go: the rifle stops. */
+	void StopShooting();
+	/** The fire button still held with the rifle in hand: another shot. */
+	void FireWhileHeld();
+	FTimerHandle HeldFireTimer;
 
 	/* Set the animation variable as well as shoot a very small projectile from the gun*/
 	UFUNCTION()
@@ -364,13 +462,30 @@ protected:
 	void HoldShotgun();
 
 	UFUNCTION()
+	void HoldEnergyRifle();
+
+	UFUNCTION()
+	void HoldSniper();
+
+	/** Whether a weapon slot holds a gun: every slot but the pickaxe's that has a weapon class. */
+	bool IsGun(int32 Type) const;
+
+	UFUNCTION()
 	void HoldBandage();
 
 	UFUNCTION()
 	void HoldPotion();
 
+	/** Open the weapon crate the hero is beside. */
 	UFUNCTION()
-	void OpenSettingsMenu();
+	void OpenCrate();
+
+	UFUNCTION(Server, Reliable)
+	void ServerOpenCrate();
+
+	/** What a crate this player opened gave, for the HUD to say. */
+	UFUNCTION(Client, Reliable)
+	void ClientCrateGave(int32 NewGuns, int32 InStore, bool bRounds, int32 Bandages, int32 Potions);
 
 
 	/*UFUNCTION(Server, WithValidation)
@@ -398,11 +513,8 @@ protected:
 	 */
 	void LookUpAtRate(float Rate);
 
-	/** Handler for when a touch input begins. */
-	void TouchStarted(ETouchIndex::Type FingerIndex, FVector Location);
-
-	/** Handler for when a touch input stops. */
-	void TouchStopped(ETouchIndex::Type FingerIndex, FVector Location);
+	/** The touch controls walk the hero as the walking keys do, with StartWalking and StopWalking. */
+	friend class USenniteTouchControls;
 
 protected:
 	// APawn interface
@@ -417,6 +529,7 @@ public:
 	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 	// Tick function is called every frame
 	virtual void Tick(float DeltaTime) override;
+
 	// Override playanimmontage to use pawn mesh
 	virtual float PlayAnimMontage(class UAnimMontage* AnimMontage, float InPlayRate = 1.f, FName StartSectionName = NAME_None) override;
 
@@ -424,6 +537,9 @@ public:
 	virtual void PreInitializeComponents() override;
 
 	virtual void PostInitializeComponents() override;
+
+	/** On the server: a player takes this character over, and it becomes the hero they chose. */
+	virtual void PossessedBy(AController* NewController) override;
 
 	virtual bool ReplicateSubobjects(class UActorChannel *Channel, class FOutBunch *Bunch, FReplicationFlags *RepFlags) override;
 
@@ -509,11 +625,9 @@ public:
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerSwitchToPickaxe();
 
-	UFUNCTION(Server, Reliable, WithValidation)
-	void ServerSwitchToRifle();
-
-	UFUNCTION(Server, Reliable, WithValidation)
-	void ServerSwitchToShotgun();
+	/** Take a gun the hero has into its hands: 1 the rifle, 2 the shotgun, 3 the energy rifle, 4 the sniper. */
+	UFUNCTION(Server, Reliable)
+	void ServerHoldGun(int32 Type);
 
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerSwitchToHealingItem(int HealingItemType);
@@ -570,6 +684,22 @@ public:
 	/** The piece classes of a kind: built pieces, or their previews. Null for a kind there is none of. */
 	const TArray<TSubclassOf<ABuildingActor>>* BuildingClassesOf(const FString& PieceKind, bool bPreview) const;
 
+	/** Editing on this machine: the piece, the tiles marked to cut, and a drag across tiles that marks them alike. */
+	TWeakObjectPtr<ABuildingActor> EditingPiece;
+	int32 EditCut = 0;
+	bool bEditDragging = false;
+	bool bEditDragCuts = false;
+	int32 EditDragLast = INDEX_NONE;
+
+	/** Mark a tile of the piece being edited, keeping at least one tile. */
+	void MarkEditTile(int32 Tile, bool bCut);
+
+	/** Send the edit to the server and stop editing. */
+	void FinishEdit();
+
+	/** Stop editing without a change. */
+	void CancelEdit();
+
 	/** The last build this player asked for, so holding the button does not ask for the same piece every frame. */
 	FVector LastBuildLocation = FVector(TNumericLimits<double>::Max());
 	FString LastBuildKind;
@@ -585,8 +715,31 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Building")
 	float BuildGridCell = 480.0f;
 
-	/** Set by the server when it accepts a trigger pull; the one projectile of that shot clears it. Server only. */
-	bool bShotAuthorized = false;
+	/**
+	 * The shot the server last let out and that has not left yet: its bullet, the gun it was let out
+	 * of (none for the hero's own weapon) and when. The one projectile of that shot is this bullet, from
+	 * this gun, and takes it away; a shot not taken within ShotKeptSeconds is gone. Server only: a
+	 * player's game can ask for the projectile, but not choose what it is.
+	 */
+	UPROPERTY()
+	TSubclassOf<AProjectileActor> ShotBullet;
+
+	TWeakObjectPtr<AWeaponActor> ShotGun;
+	double ShotAt = -1000.0;
+
+	/** How long a shot the server let out waits for its projectile. */
+	static constexpr double ShotKeptSeconds = 0.5;
+
+	/**
+	 * When the server will next let a shot out, and when the reload under way is over, by the server's
+	 * own clock. The marks on the player state (JustShotRifle and the rest) say the same for the HUD
+	 * and are cleared by calls a player's game can make; these are not.
+	 */
+	double NextShotAt = 0.0;
+	double ReloadOverAt = 0.0;
+
+	/** How much sooner than NextShotAt a shot asked for is still let out: a held trigger asks on its own clock. */
+	static constexpr double ShotEarly = 0.02;
 
 	/** What one piece costs of its material. */
 	UPROPERTY(EditDefaultsOnly, Category = "Building")
@@ -609,17 +762,13 @@ public:
 	UFUNCTION(NetMulticast, Unreliable)
 	void NetMulticastPlayPickaxeSwingAnimation();
 
+	/** The hero attacked with its own weapon: on every machine it plays the hero's own attack. */
 	UFUNCTION(NetMulticast, Unreliable)
-	void NetMulticastPlayShootRifleAnimation();
+	void NetMulticastOwnAttack();
 
+	/** The gun in hand fired: on every machine it kicks and is heard. */
 	UFUNCTION(NetMulticast, Unreliable)
-	void NetMulticastPlayShootShotgunAnimation();
-
-	UFUNCTION(NetMulticast, Unreliable)
-	void NetMulticastPlayShootRifleIronsightsAnimation();
-
-	UFUNCTION(NetMulticast, Unreliable)
-	void NetMulticastPlayShootShotgunIronsightsAnimation();
+	void NetMulticastGunFired();
 
 	UFUNCTION(NetMulticast, Unreliable)
 	void NetMulticastPlayUseHealingItemAnimation();
@@ -658,6 +807,12 @@ public:
 	void OnRepSetSkin();
 
 private:
+	/** Dress the character as HeroId's hero: the mesh, its animation Blueprint, its capsule and its hands. */
+	void ApplyHero();
+
+	/** The hero the character was last dressed as. */
+	FName DressedHero;
+
 	// Object creation can only happen after the character has finished being constructed
 	virtual void BeginPlay() override;
 };
