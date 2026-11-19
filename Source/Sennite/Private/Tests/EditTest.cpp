@@ -21,6 +21,7 @@
 #include "SenniteGameMode.h"
 #include "SenniteHUD.h"
 #include "SennitePlayerState.h"
+#include "SenniteSounds.h"
 #include "WeaponActor.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -315,6 +316,8 @@ namespace
 			Test->TestTrue(TEXT("G again ends the edit"), Hero->GetEditingPiece() == nullptr);
 			Test->TestEqual(TEXT("The server cut the two tiles: a door"), Wall->Cut, (1 << 4) | (1 << 1));
 			Test->TestEqual(TEXT("The door shows"), Wall->PieceMesh->GetInstanceCount(), 7);
+			// the edit is heard: as it begins and at each of the two tiles marked
+			Test->TestTrue(FString::Printf(TEXT("The edit and its two tiles are heard (%d)"), USenniteSounds::Heard(World, TEXT("piece.edit"))), USenniteSounds::Heard(World, TEXT("piece.edit")) >= 3);
 			Test->TestEqual(TEXT("No see-through tiles after the edit"), Wall->GhostTiles->GetInstanceCount(), 0);
 			Test->TestEqual(TEXT("Editing costs nothing"), State->MaterialCounts[0], WoodBefore);
 			Test->TestEqual(TEXT("Editing does not mend the wall"), Wall->Health, Wall->MaxHealth() - 50.0f);

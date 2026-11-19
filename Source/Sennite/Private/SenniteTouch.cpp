@@ -19,6 +19,7 @@
 #include "SenniteCrate.h"
 #include "SennitePlayerState.h"
 #include "SennitePublisher.h"
+#include "SenniteSounds.h"
 #include "WeaponActor.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
@@ -494,6 +495,21 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 		}
 		if (New.Use == EUse::Button) {
 			const bool bAlreadyDown = Fingers.ContainsByPredicate([&New](const FFinger& Each) { return Each.Use == EUse::Button && Each.Button == New.Button; });
+			if (!bAlreadyDown) {
+				// Every tap of a button is heard: a slot as one of a row, or as refused where the player has not got
+				// what it names; any other button as a press. FIRE is heard as its shot, MENU as the menu opening.
+				const FButton& Tapped = All[New.Button];
+				const ASennitePlayerState* Has = Controller->GetPlayerState<ASennitePlayerState>();
+				if (Tapped.bSlot) {
+					const int32 Gun = GunOfSlot(Tapped.Key);
+					const int32 Heal = Tapped.Key == EKeys::Four ? 0 : 1;
+					const bool bHas = Has != nullptr && (Gun != 0 ? Has->EquippedWeapons.Contains(Gun) : Has->HealingItemCounts.IsValidIndex(Heal) && Has->HealingItemCounts[Heal] > 0);
+					USenniteSounds::Play(Controller, bHas ? TEXT("ui.pick") : TEXT("ui.denied"));
+				}
+				else if (Tapped.Key != EKeys::LeftMouseButton && Tapped.Key != EKeys::Escape) {
+					USenniteSounds::Play(Controller, TEXT("ui.press"));
+				}
+			}
 			if (AimLatches(All[New.Button])) {
 				// a thumb cannot hold AIM and fire too: one tap aims, the next lets go
 				const ASenniteCharacter* Hero = Cast<ASenniteCharacter>(Controller->GetPawn());
