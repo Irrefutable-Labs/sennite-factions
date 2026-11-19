@@ -46,6 +46,8 @@
 #include "SenniteMenu.generated.h"
 
 class ACameraActor;
+class UAudioComponent;
+class USoundBase;
 class ASkeletalMeshActor;
 class AStaticMeshActor;
 class ASennitePlayerState;
@@ -154,6 +156,23 @@ public:
 	/** The local addresses others on this network can join this machine at (host only). */
 	TArray<FString> LocalAddresses() const;
 
+	/** The songs the menu plays, one after the other and round again (Tools/import_music.py). */
+	UPROPERTY(Config)
+	TArray<FSoftObjectPath> Songs;
+
+	/** How loud the menu's songs are, of the game's own loudness. */
+	UPROPERTY(Config)
+	float SongVolume = 1.0f;
+
+	/** The song the menu is playing now, or none where it has no songs. */
+	const USoundBase* SongNow() const { return Song; }
+
+	/** Whether the song is heard: a game run without sound plays to nobody. */
+	bool SongIsHeard() const;
+
+	/** The next song begins, as it does when one ends. */
+	void PlayNextSong();
+
 private:
 	/** The button a press began on, by tap or click; it acts when the press ends on the same button. */
 	FName Pressed;
@@ -192,6 +211,16 @@ private:
 	void StandGun(const FString& WeaponId);
 
 	TArray<FName> FigureHeroes;
+
+	/** The song playing, and what plays it. */
+	UPROPERTY()
+	TObjectPtr<USoundBase> Song;
+
+	UPROPERTY()
+	TObjectPtr<UAudioComponent> Music;
+
+	bool bSongChanging = false;
+	void SongEnded(UAudioComponent* Played);
 };
 
 /** The menu's pages, drawn on the canvas. */

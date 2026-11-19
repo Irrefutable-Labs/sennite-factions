@@ -4,6 +4,7 @@
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "CanvasItem.h"
+#include "Components/AudioComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
@@ -18,12 +19,16 @@
 #include "SenniteBaseEditor.h"
 #include "SenniteCharacter.h"
 #include "SenniteGameInstance.h"
+#include "SenniteGameMenu.h"
 #include "SenniteHeroes.h"
 #include "SennitePlayerState.h"
 #include "SennitePublisher.h"
 #include "SenniteUi.h"
 #include "SenniteWeapons.h"
 #include "SocketSubsystem.h"
+#include "Sound/SoundBase.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogSenniteMenu, Log, All);
 
 namespace
 {
@@ -54,6 +59,9 @@ namespace
 		const float Middle = Wide * 0.67f;
 		return FMath::Clamp(FMath::Min(Middle - ArrowWide - 527.0f, Wide - 100.0f - Middle), 254.0f, 344.0f);
 	}
+
+	/** Which of the menu's songs is next. It outlasts a menu: back from a match, the menu goes on to the song after the one it last began. */
+	int32 NextSong = 0;
 
 	int32 IndexOf(FName Id)
 	{
@@ -166,6 +174,55 @@ void ASenniteMenuController::BeginPlay()
 		StageCamera->GetCameraComponent()->bConstrainAspectRatio = false;
 		SetViewTarget(StageCamera);
 	}
+	// the player's own loudness, then the menu's songs
+	USenniteGameMenu::ApplySettings(GetWorld());
+	PlayNextSong();
+}
+
+void ASenniteMenuController::PlayNextSong()
+{
+	if (Songs.Num() == 0) {
+		return;
+	}
+	const int32 Which = NextSong % Songs.Num();
+	NextSong = (Which + 1) % Songs.Num();
+	Song = Cast<USoundBase>(Songs[Which].TryLoad());
+	if (Song == nullptr) {
+		UE_LOG(LogSenniteMenu, Warning, TEXT("The menu's song %s is not a sound"), *Songs[Which].ToString());
+		return;
+	}
+	// the song before this one is stopped where it has not ended: that end is not a call for the next
+	bSongChanging = true;
+	if (Music == nullptr) {
+		// no sound device, no player: a game run without sound has chosen its song and plays it to nobody
+		Music = UGameplayStatics::CreateSound2D(this, Song, SongVolume, 1.0f, 0.0f, nullptr, false, false);
+		if (Music != nullptr) {
+			Music->OnAudioFinishedNative.AddUObject(this, &ASenniteMenuController::SongEnded);
+		}
+	}
+	else {
+		Music->SetSound(Song);
+	}
+	if (Music != nullptr) {
+		Music->Play();
+	}
+	bSongChanging = false;
+	UE_LOG(LogSenniteMenu, Display, TEXT("The menu plays %s (%s)"), *Song->GetName(), Music != nullptr ? TEXT("heard") : TEXT("no sound device"));
+}
+
+bool ASenniteMenuController::SongIsHeard() const
+{
+	return Music != nullptr && Music->IsPlaying();
+}
+
+void ASenniteMenuController::SongEnded(UAudioComponent* Played)
+{
+	// a song that ends because the menu is going away is not followed by another
+	const UWorld* World = GetWorld();
+	if (IsActorBeingDestroyed() || World == nullptr || World->bIsTearingDown || Played != Music || bSongChanging || SongIsHeard()) {
+		return;
+	}
+	PlayNextSong();
 }
 
 bool ASenniteMenuController::InLobby() const

@@ -1,6 +1,7 @@
 // Menu check. Run in the game on the Menu map, with a profile of its own (-ProfileSlot=), by taps on
 // the screen as a phone gives them:
 // - the menu is the first thing shown: no hero to play, the player's hero turning on the stage;
+// - the menu has its songs: a game just started is on the first, and after each comes the next, round again;
 // - STORE opens the store on its heroes, with SKINS and SWAP beside them: on a game with no shop
 //   neither sells anything, and says so; BASE EDITOR is dimmed there too, and says why;
 // - in the heroes the arrows go through the heroes, each one standing and turning on the stage as itself;
@@ -27,6 +28,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "Sound/SoundBase.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogMenuCheck, Log, All);
 
@@ -103,6 +105,25 @@ namespace
 			Test->TestEqual(TEXT("A new profile's hero is the default hero"), USenniteProfile::Get().PlayingHero(Menu), Default);
 			Test->TestEqual(TEXT("The menu names the player's hero"), MenuCheck::Line(Menu, TEXT("hero")), USenniteHeroes::FindOrDefault(Default).Name);
 			Test->TestEqual(TEXT("The player's hero stands on the stage"), StageMesh(World), USenniteHeroes::FindOrDefault(Default).Mesh.ToString());
+			// the menu's songs: a game just started is on the first, and when one ends the next begins, round again
+			{
+				const TArray<FSoftObjectPath>& Songs = GetDefault<ASenniteMenuController>()->Songs;
+				Test->TestTrue(TEXT("The menu has songs to go round"), Songs.Num() >= 2);
+				for (const FSoftObjectPath& Each : Songs) {
+					const USoundBase* Sound = Cast<USoundBase>(Each.TryLoad());
+					Test->TestTrue(FString::Printf(TEXT("%s is a song, a minute long or more"), *Each.ToString()), Sound != nullptr && Sound->GetDuration() > 60.0f);
+				}
+				const auto Playing = [&]() { return Songs.IndexOfByKey(FSoftObjectPath(Menu->SongNow())); };
+				Test->TestEqual(TEXT("A game just started opens on the first song"), Playing(), 0);
+				const bool bHeard = Menu->SongIsHeard();
+				for (int32 Next = 1; Next <= Songs.Num(); ++Next) {
+					Menu->PlayNextSong();
+					Test->TestEqual(TEXT("After a song comes the one after it, and after the last the first"), Playing(), Next % Songs.Num());
+					Test->TestEqual(TEXT("It is heard where the first was"), Menu->SongIsHeard(), bHeard);
+				}
+				UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK songs: %d, on %s; %s"), Songs.Num(), Menu->SongNow() != nullptr ? *Menu->SongNow()->GetName() : TEXT("none"),
+					bHeard ? TEXT("heard") : TEXT("this run has no sound device"));
+			}
 			for (const TCHAR* Action : { TEXT("play"), TEXT("store"), TEXT("base"), TEXT("host"), TEXT("join"), TEXT("quit") }) {
 				Test->TestTrue(FString::Printf(TEXT("The menu has %s"), Action), MenuCheck::Has(Menu, Action));
 			}
