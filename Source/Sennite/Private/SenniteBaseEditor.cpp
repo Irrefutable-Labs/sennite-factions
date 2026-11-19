@@ -480,7 +480,8 @@ void ASenniteBaseEditor::ReplaceSelected()
 
 void ASenniteBaseEditor::Dismantle()
 {
-	USenniteSounds::Play(this, TEXT("ui.click"));
+	// a building taken down is heard as a piece taken away; the same key on the people page, or with none chosen, as a click
+	USenniteSounds::Play(this, !bPeople && Selected() != nullptr ? TEXT("piece.remove") : TEXT("ui.click"));
 	USennitePublisher* Server = Publisher();
 	if (bPeople) {
 		// on the people page the same key withdraws an invitation

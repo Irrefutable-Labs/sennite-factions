@@ -2527,7 +2527,8 @@ void ASenniteCharacter::MarkEditTile(int32 Tile, bool bCut) {
 		return;
 	}
 	if (Next != EditCut) {
-		USenniteSounds::Play(this, TEXT("piece.edit"));
+		// a tile taken out is heard as a piece taken away, one put back as the edit
+		USenniteSounds::Play(this, bCut ? TEXT("piece.remove") : TEXT("piece.edit"));
 	}
 	EditCut = Next;
 	Piece->ShowCut(EditCut, EditCut);

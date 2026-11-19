@@ -140,7 +140,10 @@ namespace
 						Heard.Add(Takes[0].ToString());
 					}
 				}
-				Test->TestEqual(TEXT("A menu button, a section, an arrow, one of a row, back, a thing done, a digit and a setting each sound their own"), Heard.Num(), 8);
+				// a button pressed and a thing done are the owner's one recording; the other six kinds each have their own
+				Test->TestTrue(TEXT("A menu button and a thing done sound alike"), USenniteSounds::Takes(USenniteSounds::ButtonSound(TEXT("play"))) == USenniteSounds::Takes(USenniteSounds::ButtonSound(TEXT("choose"))));
+				Test->TestEqual(TEXT("A menu button, a section, an arrow, one of a row, back, a digit and a setting each sound their own"), Heard.Num(), 7);
+				Test->TestTrue(TEXT("Back does not sound like a button pressed"), USenniteSounds::Takes(USenniteSounds::ButtonSound(TEXT("back"))) != USenniteSounds::Takes(USenniteSounds::ButtonSound(TEXT("play"))));
 				Test->TestEqual(TEXT("The two arrows sound alike"), USenniteSounds::ButtonSound(TEXT("prev")), USenniteSounds::ButtonSound(TEXT("next")));
 			}
 			for (const TCHAR* Action : { TEXT("play"), TEXT("store"), TEXT("base"), TEXT("host"), TEXT("join"), TEXT("settings"), TEXT("quit") }) {

@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
-"""Cut the game's sounds out of the owner's two sound packs, ready for Tools/import_sounds.py.
+"""Cut the game's sounds out of the owner's two sound packs and his own recordings, ready for
+Tools/import_sounds.py.
 
   python3 Tools/cut_sounds.py [folder with the packs' files ...]
+  SOUND_ONLY=SW_UiPress,SW_UiBack python3 Tools/cut_sounds.py [folder ...]   cuts those alone, and
+      leaves the rest of the list (sounds.json) as it was
 
 The packs are "Sonniss.com-GDC2024-GameAudioBundle1of9" (royalty-free for games, no attribution: its
 "License - GDC Game Audio.pdf") and "Essentials_Series_NOX_SOUND" (CC0: its README). They are looked
 for in ~/Downloads, or in the folders named; a file is found by its name, wherever it lies under them.
+
+Four are the owner's own recordings (2026-11-19), which lie loose in ~/Downloads or in a folder named:
+menu-button-push.m4a, "the main button press sound in the menus and just throughout the game ... for
+approving or going through"; menu-button-press-2.m4a, "more of a lower register ... For canceling";
+placing-build-piece.m4a, "for placing build pieces"; and Removing-build-piece.m4a, the "removing one".
 
 Every sound is named for what it is in the packs, so which file is which sound was chosen from the
 names and each file's length; nobody listened to them when this was written. To change a sound, change
@@ -30,9 +38,15 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(HERE, "Saved", "SoundSource", "cut")
 ROOTS = sys.argv[1:] or [os.path.expanduser("~/Downloads/Sonniss.com-GDC2024-GameAudioBundle1of9"),
                          os.path.expanduser("~/Downloads/Essentials_Series_NOX_SOUND")]
+# where the owner's own recordings lie loose: found there by name, not looked for under it
+LOOSE = sys.argv[1:] or [os.path.expanduser("~/Downloads")]
+ONLY = [each for each in os.environ.get("SOUND_ONLY", "").split(",") if each]
 
 # (asset, file, at, keep)
 ONE_SHOTS = [
+    # the menus: the owner's own two, a button pressed or a thing approved, and one that cancels or goes back
+    ("SW_UiPress", "menu-button-push.m4a", "start", None),
+    ("SW_UiBack", "menu-button-press-2.m4a", "start", None),
     # the menus
     ("SW_UiClick", "UIClick_UI Click 33_CB Sounddesign_ACTIVATION2.wav", "start", None),
     ("SW_UiSelect", "Bluezone_BC0303_futuristic_user_interface_high_tech_beep_038.wav", "start", None),
@@ -70,7 +84,9 @@ ONE_SHOTS = [
     ("SW_PieceBreakWood", "WOODCrsh_Designed Wood Crash And Debris 13_DDUMAIS_NONE.wav", "start", None),
     ("SW_PieceBreakStone", "Bluezone_BC0292_alien_tripod_debris_rock_collapse_earthquake_rumble_large_005.wav", "start", 2.0),
     ("SW_PieceBreakSteel", "DESTRCrsh_Designed Car Explosion With Metal Breaking And Glass Shattering  06_DDUMAIS_NONE.wav", "start", 2.0),
-    ("SW_PiecePlace", "Bluezone_BC0305_steampunk_machine_mechanical_texture_heavy_impact_011.wav", "start", None),
+    # the owner's own two: a piece placed, and a piece or a tile of one taken away
+    ("SW_PiecePlace", "placing-build-piece.m4a", "start", None),
+    ("SW_PieceRemove", "Removing-build-piece.m4a", "start", None),
     ("SW_PieceEdit", "Bluezone_BC0296_steampunk_weapon_mechanism_texture_007.wav", "start", None),
     ("SW_Harvest", "Bluezone_BC0297_stone_impact_041.wav", "start", 0.6),
     # what is picked up and used
@@ -111,6 +127,9 @@ LOOPS = [
 
 
 def find(name):
+    for folder in LOOSE:
+        if os.path.isfile(os.path.join(folder, name)):
+            return os.path.join(folder, name)
     for root in ROOTS:
         for folder, _, files in os.walk(root):
             if name in files:
@@ -152,7 +171,8 @@ def peak_db(path, filters):
 
 def cut(asset, source, at, keep):
     path = find(source)
-    chain = []
+    # mono first: a recording whose two sides differ comes out quieter once they are added, and the level is measured after
+    chain = ["aformat=channel_layouts=mono"]
     if at == "start":
         chain.append("silenceremove=start_periods=1:start_threshold=-40dB:start_silence=0.005")
     elif at == "peak":
@@ -180,6 +200,22 @@ def cut(asset, source, at, keep):
 
 os.makedirs(OUT, exist_ok=True)
 made = []
+if ONLY:
+    unknown = [each for each in ONLY if each not in [row[0] for row in ONE_SHOTS]]
+    if unknown:
+        raise SystemExit("SOUND_ONLY names %s, which is no one-shot above" % ", ".join(unknown))
+    kept = []
+    if os.path.isfile(os.path.join(OUT, "sounds.json")):
+        with open(os.path.join(OUT, "sounds.json")) as listing:
+            kept = [each for each in json.load(listing) if each["asset"] not in ONLY]
+    for asset, source, at, keep in ONE_SHOTS:
+        if asset in ONLY:
+            made.append(cut(asset, source, at, keep))
+    with open(os.path.join(OUT, "sounds.json"), "w") as listing:
+        json.dump(kept + made, listing, indent=1)
+    for each in made:
+        print("%-22s %6.2f s  %s" % (each["asset"], each["seconds"], each["from"]))
+    raise SystemExit("%d sounds cut into %s; %d others left as they were" % (len(made), OUT, len(kept)))
 for asset, source, at, keep in ONE_SHOTS:
     made.append(cut(asset, source, at, keep))
 for asset, pattern, count in TAKES:
