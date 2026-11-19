@@ -53,10 +53,23 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Mesh")
 	FLinearColor BoltColour = FLinearColor(1.0f, 0.5f, 0.1f);
 
+	/** What this bullet is seen as instead of a bolt, set per bullet class: one of the owner's ammo models
+	 * (Tools/import_ammo.py), drawn as it is, its point the way it flies. The owner, 2026-11-19: "I got bullet models";
+	 * asked which gun fires which, the owner chose the rifle, shotgun and sniper firing the ammo models. None set: the bolt. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Mesh")
+	FSoftObjectPath Round;
+
 	/** How far the bullet has flown, on this machine. */
 	float Flown = 0.0f;
 
 	virtual void PreInitializeComponents() override;
+
+	/** Every bullet's round, loaded before the first shot: loaded at the shot, the first one waits
+	 * on them and is spent before it has flown. Kept loaded by what is passed in. */
+	static void Preload(TArray<TObjectPtr<UObject>>& Into);
+
+	/** Seen as one of the ammo models, drawn as it is rather than stretched as a bolt. */
+	bool bRound = false;
 
 	/** Sphere collision component */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")

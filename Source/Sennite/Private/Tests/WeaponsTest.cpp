@@ -92,6 +92,8 @@ namespace
 		double BulletOffLine = 0.0;
 		double BulletFromMuzzle = 0.0;
 		bool bBoltSeen = false;
+		/** What the last bullet was seen as: "round <its model>" or "bolt". */
+		FString SeenAs;
 		bool bBulletSent = false;
 		float BoltLongest = 0.0f;
 		int32 BulletsSpawned = 0;
@@ -159,7 +161,9 @@ namespace
 				BulletFar = 0.0;
 				BulletOffLine = 0.0;
 				BoltLongest = 0.0f;
-				bBoltSeen = Flying->Bolt != nullptr && Flying->Bolt->GetStaticMesh() != nullptr && Flying->Bolt->GetMaterial(0) != nullptr && Flying->Bolt->IsVisible() && !Flying->IsHidden();
+				// seen: a round or a bolt with a shape and a material, showing
+				bBoltSeen = !Flying->IsHidden() && Flying->Bolt != nullptr && Flying->Bolt->GetStaticMesh() != nullptr && Flying->Bolt->GetMaterial(0) != nullptr && Flying->Bolt->IsVisible();
+				SeenAs = Flying->bRound ? FString::Printf(TEXT("round %s"), *Flying->Bolt->GetStaticMesh()->GetPathName()) : FString(TEXT("bolt"));
 				bBulletSent = Flying->GetIsReplicated() && Flying->IsReplicatingMovement();
 				if (BulletsSpawned == 4) {
 					// a bolt of the held burst, on its way
@@ -216,6 +220,7 @@ namespace
 			Test->TestTrue(TEXT("The bolt is her own weapon's"), BulletClass == ASenniteOwnBolt::StaticClass());
 			Test->TestTrue(TEXT("The bolt starts at the top of her staff"), FVector::Dist(BulletFrom, OwnTip) < 40.0);
 			Test->TestTrue(TEXT("The bolt is seen and sent to every machine"), bBoltSeen && bBulletSent);
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK own shot seen as %s"), *SeenAs);
 			Test->TestTrue(TEXT("The bolt travels: seen more than 10 m out, straight"), BulletFar > 1000.0 && BulletOffLine < 5.0);
 			Test->TestTrue(TEXT("She still holds no game weapon"), Hero->CurrentWeapon == nullptr);
 			{
@@ -347,7 +352,8 @@ namespace
 			Test->TestTrue(TEXT("The bullet starts at the rifle's muzzle"), BulletFromMuzzle >= 0.0 && BulletFromMuzzle < 60.0);
 			Test->TestTrue(TEXT("The bullet travels: seen more than 10 m out from where it started"), BulletFar > 1000.0);
 			Test->TestTrue(TEXT("The bullet flies straight, the way it was fired"), BulletOffLine < 5.0);
-			Test->TestTrue(TEXT("The bolt grows behind the bullet to its length and no longer"), BoltLongest > 100.0f && BoltLongest <= GetDefault<ASenniteRifleBullet>()->BoltLength + 0.5f);
+			Test->TestEqual(TEXT("The rifle's bullet is seen as the owner's round"), SeenAs, FString::Printf(TEXT("round %s"), *GetDefault<ASenniteRifleBullet>()->Round.GetAssetPathString()));
+			Test->TestTrue(TEXT("drawn as it is, not stretched as a bolt"), FMath::IsNearlyEqual(BoltLongest, 100.0f, 0.5f));
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK bolt: seen=%d sent=%d started %.0f from the muzzle, seen %.0f out, %.1f off its line, bolt up to %.0f long"),
 				bBoltSeen ? 1 : 0, bBulletSent ? 1 : 0, BulletFromMuzzle, BulletFar, BulletOffLine, BoltLongest);
 			Test->TestTrue(TEXT("The shot spends one round"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->CurrentBulletCount == RoundsBefore - 1);
@@ -458,6 +464,13 @@ namespace
 			}
 			Test->TestEqual(FString::Printf(TEXT("One pull of the %s's trigger sends one bolt out"), One.Name), BulletsSpawned, 1);
 			Test->TestTrue(FString::Printf(TEXT("The %s fires its own bolt"), One.Name), BulletClass == One.Shot);
+			{
+				const AProjectileActor* Made = One.Shot != nullptr ? GetDefault<AProjectileActor>(One.Shot) : nullptr;
+				const FString Want = Made == nullptr ? FString() : Made->Round.IsNull() ? FString(TEXT("bolt")) : FString::Printf(TEXT("round %s"), *Made->Round.GetAssetPathString());
+				Test->TestEqual(FString::Printf(TEXT("The %s's shot is seen as the owner's round, or a bolt"), One.Name), SeenAs, Want);
+				Test->TestTrue(FString::Printf(TEXT("The %s's shot is seen"), One.Name), bBoltSeen);
+				UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK %s shot seen as %s"), One.Name, *SeenAs);
+			}
 			Test->TestTrue(FString::Printf(TEXT("The %s's shot spends one round"), One.Name), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->CurrentBulletCount == RoundsBefore - 1);
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK %s: bolts=%d of %s, rounds %d -> %d"), One.Name, BulletsSpawned, *GetNameSafe(BulletClass), RoundsBefore,
 				Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1);

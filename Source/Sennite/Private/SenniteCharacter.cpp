@@ -418,6 +418,8 @@ void ASenniteCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerI
 
 void ASenniteCharacter::BeginPlay() {
 	Super::BeginPlay();
+	// every bullet's round is loaded before the first shot (AProjectileActor::Preload)
+	AProjectileActor::Preload(BulletLooks);
 	//GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
 	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString("Client ")  + FString::FromInt(ENetMode::NM_Client) + FString(" server ") + FString::FromInt(ENetMode::NM_DedicatedServer));
 	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString::FromInt(GetNetMode()));

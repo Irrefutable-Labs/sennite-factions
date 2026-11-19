@@ -19,6 +19,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "UObject/UObjectIterator.h"
 
 // Sets default values
 AProjectileActor::AProjectileActor()
@@ -55,6 +56,17 @@ AProjectileActor::AProjectileActor()
 void AProjectileActor::PreInitializeComponents()
 {
 	Super::PreInitializeComponents();
+	// a bullet seen as one of the ammo models: the model as it is, its middle on the bullet, its point the way it flies
+	if (!Round.IsNull()) {
+		if (UStaticMesh* Model = Cast<UStaticMesh>(Round.TryLoad())) {
+			Bolt->SetStaticMesh(Model);
+			Bolt->SetRelativeLocation(FVector::ZeroVector);
+			Bolt->SetRelativeScale3D(FVector::OneVector);
+			bRound = true;
+			return;
+		}
+		UE_LOG(LogTemp, Error, TEXT("Round '%s' did not load: the bullet is seen as a bolt"), *Round.ToString());
+	}
 	// what a bolt is made of is one setting, held by the base class
 	const AProjectileActor* Shared = GetDefault<AProjectileActor>();
 	if (UStaticMesh* Shape = Cast<UStaticMesh>(Shared->BoltShape.TryLoad())) {
@@ -76,6 +88,9 @@ void AProjectileActor::PreInitializeComponents()
 
 void AProjectileActor::LayBolt()
 {
+	if (bRound) {
+		return;
+	}
 	// a streak behind the bullet, no longer than the bullet has flown: it never reaches back through the gun
 	const float Length = FMath::Clamp(Flown, BoltWidth, BoltLength);
 	Bolt->SetRelativeLocation(FVector(-Length * 0.5f, 0.0f, 0.0f));
@@ -169,6 +184,23 @@ bool AProjectileActor::Land(AActor* OtherActor, float Damage, int32 Kind, ASenni
 	}
 	// anything else stops the bullet
 	return true;
+}
+
+void AProjectileActor::Preload(TArray<TObjectPtr<UObject>>& Into)
+{
+	for (TObjectIterator<UClass> It; It; ++It) {
+		if (!It->IsChildOf(AProjectileActor::StaticClass()) || It->HasAnyClassFlags(CLASS_Abstract)) {
+			continue;
+		}
+		const AProjectileActor* Made = GetDefault<AProjectileActor>(*It);
+		for (const FSoftObjectPath* Each : { &Made->Round }) {
+			if (!Each->IsNull()) {
+				if (UObject* Loaded = Each->TryLoad()) {
+					Into.AddUnique(Loaded);
+				}
+			}
+		}
+	}
 }
 
 void AProjectileActor::SelfDestruct() {

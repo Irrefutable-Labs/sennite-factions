@@ -151,6 +151,10 @@ public:
 	/** The server: the blow lands on the first thing ahead within reach, as a bolt of the hero's own weapon would. */
 	void LandBlow();
 
+	/** Every bullet's round, held loaded while the hero is in play. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UObject>> BulletLooks;
+
 	/** The mesh on the body now: the hero's own, or the skin's the player wears. */
 	FSoftObjectPath WornMesh;
 
