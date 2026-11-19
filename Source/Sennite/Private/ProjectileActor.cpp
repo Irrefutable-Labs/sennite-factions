@@ -113,49 +113,50 @@ void AProjectileActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActo
 		|| OtherActor->IsA(AProjectileActor::StaticClass()) || OtherActor->IsA(AStormActor::StaticClass())) {
 		return;
 	}
-	ASenniteCharacter* Shooter = Cast<ASenniteCharacter>(WeaponHolder);
+	if (Land(OtherActor, Damage, ProjectileType, Cast<ASenniteCharacter>(WeaponHolder))) {
+		bSpent = true;
+		Destroy();
+	}
+}
+
+bool AProjectileActor::Land(AActor* OtherActor, float Damage, int32 Kind, ASenniteCharacter* Shooter) {
 	ASenniteCharacter* Victim = Cast<ASenniteCharacter>(OtherActor);
 	if (AWeaponActor* HitWeapon = Cast<AWeaponActor>(OtherActor)) {
 		// a weapon on the ground lets the bullet by; one in a player's hands is a hit on that player
 		if (HitWeapon->Holder == nullptr) {
-			return;
+			return false;
 		}
 		Victim = HitWeapon->Holder;
 	}
 	else if (AHealingActor* HitItem = Cast<AHealingActor>(OtherActor)) {
 		if (HitItem->Holder == nullptr) {
-			return;
+			return false;
 		}
 		Victim = HitItem->Holder;
 	}
 	if (Victim != nullptr) {
 		if (Victim == Shooter) {
-			return;
+			return false;
 		}
-		bSpent = true;
 		Victim->TakeHit(Damage, Shooter);
-		Destroy();
-		return;
+		return true;
 	}
 	if (ABuildingActor* Piece = Cast<ABuildingActor>(OtherActor)) {
 		// a preview is not there to be hit
 		if (Piece->IsPreview) {
-			return;
+			return false;
 		}
-		bSpent = true;
 		// the piece stops the bullet whether the shot counts on it or not (ABuildingActor::TakeHit)
 		Piece->TakeHit(Damage, Shooter);
-		Destroy();
-		return;
+		return true;
 	}
-	bSpent = true;
 	if (ASenniteStructure* Structure = Cast<ASenniteStructure>(OtherActor)) {
 		// a faction's built structure: in a match it comes down when it has taken enough
 		Structure->TakeHit(Damage, Shooter);
 	}
 	if (AMaterialActor* Node = Cast<AMaterialActor>(OtherActor)) {
 		Node->Health -= Damage;
-		if (ProjectileType == 0 && Shooter != nullptr && Shooter->GetController() != nullptr) {
+		if (Kind == 0 && Shooter != nullptr && Shooter->GetController() != nullptr) {
 			// the pickaxe harvests: its holder gains the node's material
 			ASennitePlayerState* State = Cast<ASennitePlayerState>(Shooter->GetController()->PlayerState);
 			if (State != nullptr && State->MaterialCounts.IsValidIndex(Node->MaterialType)) {
@@ -167,7 +168,7 @@ void AProjectileActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActo
 		}
 	}
 	// anything else stops the bullet
-	Destroy();
+	return true;
 }
 
 void AProjectileActor::SelfDestruct() {

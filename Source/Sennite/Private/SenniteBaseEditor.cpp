@@ -619,47 +619,6 @@ void ASenniteBaseEditor::ShopAct()
 	Server->BuySkin(Server->ShopSkins[ShopIndex - 1].Id);
 }
 
-void ASenniteBaseEditor::DressHero()
-{
-	// each frame, not at a press: it has no sound of its own (wearing a skin is heard at InventoryAct)
-	const USennitePublisher* Server = Publisher();
-	const APlayerController* Controller = GetWorld()->GetFirstPlayerController();
-	ASenniteCharacter* Hero = Controller != nullptr ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
-	if (Server == nullptr || Hero == nullptr) {
-		return;
-	}
-	if (DressedPawn.Get() != Hero || DressedHero != Hero->HeroMesh) {
-		// a new pawn, or a pawn that became another hero, starts in the hero's own mesh
-		DressedPawn = Hero;
-		DressedHero = Hero->HeroMesh;
-		Dressed = Hero->HeroMesh;
-	}
-	// the skin the player chose, only while the wallet's proof says it owns it and only on the hero it is a
-	// skin of (the same skeleton); otherwise the hero as it ships
-	FSoftObjectPath Want = Hero->HeroMesh;
-	if (Server->bMaterialsKnown && !Server->Wearing.IsEmpty() && Server->Owns(Server->Wearing)) {
-		const ASenniteBaseEditor* Shared = GetDefault<ASenniteBaseEditor>();
-		if (const FSenniteSkinMesh* Skin = Shared->Skins.FindByPredicate([Server](const FSenniteSkinMesh& S) { return S.Id == Server->Wearing; })) {
-			const USkeletalMesh* SkinMesh = Cast<USkeletalMesh>(Skin->Mesh.TryLoad());
-			const USkeletalMesh* Own = Cast<USkeletalMesh>(Hero->HeroMesh.TryLoad());
-			if (SkinMesh != nullptr && Own != nullptr && SkinMesh->GetSkeleton() == Own->GetSkeleton()) {
-				Want = Skin->Mesh;
-			}
-		}
-	}
-	if (Want == Dressed) {
-		return;
-	}
-	if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(Want.TryLoad())) {
-		Hero->WearMesh(Mesh);
-		Dressed = Want;
-	}
-	else {
-		UE_LOG(LogTemp, Error, TEXT("Skin mesh '%s' did not load ([/Script/Sennite.SenniteBaseEditor] in DefaultGame.ini)"), *Want.ToString());
-		Dressed = Want;
-	}
-}
-
 void ASenniteBaseEditor::Join()
 {
 	USenniteSounds::Play(this, TEXT("ui.click"));
@@ -870,7 +829,6 @@ void ASenniteBaseEditor::Tick(float DeltaTime)
 	SyncStructures();
 	UpdateGhost();
 	UpdateCursorTile();
-	DressHero();
 }
 
 void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)

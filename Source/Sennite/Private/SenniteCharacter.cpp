@@ -17,6 +17,8 @@
 #include "SenniteGameInstance.h"
 #include "SenniteHeroes.h"
 #include "SenniteMatch.h"
+#include "SennitePublisher.h"
+#include "SenniteBaseEditor.h"
 #include "Animation/AnimMontage.h"
 #include "EngineUtils.h"
 #include "BuildingActor.h"
@@ -323,6 +325,8 @@ void ASenniteCharacter::ApplyHero()
 	HeroItemPalmOffset = Hero.ItemPalmOffset;
 	HeroAttackMontage = Hero.AttackMontage;
 	HeroCastBone = Hero.CastBone;
+	bHeroMelee = Hero.bMelee;
+	bHeroFloats = Hero.bFloats;
 	// the hero's own attack, for when it has no gun in hand
 	OwnAttack = HeroAttackMontage.IsNull() ? nullptr : Cast<UAnimMontage>(HeroAttackMontage.TryLoad());
 	if (!HeroAttackMontage.IsNull() && OwnAttack == nullptr) {
@@ -331,6 +335,7 @@ void ASenniteCharacter::ApplyHero()
 
 	if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(HeroMesh.TryLoad())) {
 		WearMesh(Mesh);
+		WornMesh = HeroMesh;
 	}
 	else {
 		UE_LOG(LogSenniteCharacter, Error, TEXT("Hero mesh '%s' did not load; the character has no body"), *HeroMesh.ToString());
@@ -546,6 +551,11 @@ namespace
 
 void ASenniteCharacter::Tick(float DeltaTime) {
 	Super::Tick(DeltaTime);
+	// The skin the player wears is on the hero in every world it plays in: the arena and a match as much as the
+	// faction's land. The owner, 2026-11-19: "It doesn't actually play as that skin in the demo, in the gameplay".
+	if (const APlayerController* Mine = Cast<APlayerController>(GetController()); Mine != nullptr && Mine->IsLocalController()) {
+		WearChosenSkin();
+	}
 	// Editing a piece, on this player's own machine: a drag with the fire button held marks each tile
 	// the aim crosses alike; walking out of reach of the piece, or its fall, ends the edit unmade.
 	if (ABuildingActor* Editing = EditingPiece.Get()) {
@@ -1714,6 +1724,12 @@ void ASenniteCharacter::ServerFireWeapon_Implementation() {
 		NextShotAt = Now + FMath::Max(0.05f, OwnAttackSeconds);
 		FTimerHandle Again;
 		GetWorldTimerManager().SetTimer(Again, this, &ASenniteCharacter::ServerPickaxeTimeOut, FMath::Max(0.05f, OwnAttackSeconds), false);
+		if (bHeroMelee) {
+			// fists, or what the hero swings: no bolt leaves it. The blow lands up close, a moment into the swing.
+			FTimerHandle Lands;
+			GetWorldTimerManager().SetTimer(Lands, this, &ASenniteCharacter::LandBlow, FMath::Max(0.01f, MeleeLandsAfter), false);
+			return;
+		}
 		ShotBullet = OwnBoltClass;
 		ShotGun = nullptr;
 		ShotAt = Now;
@@ -1993,8 +2009,9 @@ void ASenniteCharacter::ServerAimDownSights_Implementation() {
 			//ServerSetAimedInSpeed();
 			State->AimedIn = true;
 		}
-		else if (State && State->CurrentWeapon == 0 && !State->InBuildMode && CurrentHealingItem == nullptr) {
-			// the hero's own weapon is aimed as a gun is: the view closes in on where its bolt will go
+		else if (State && State->CurrentWeapon == 0 && !State->InBuildMode && CurrentHealingItem == nullptr && !bHeroMelee) {
+			// the hero's own weapon is aimed as a gun is: the view closes in on where its bolt will go. Fists and what
+			// a hero swings are not aimed: there is no bolt to send anywhere.
 			AimedIn = true;
 			ClientCameraAimIn();
 			State->AimedIn = true;
@@ -2380,7 +2397,72 @@ void ASenniteCharacter::NetMulticastOwnAttack_Implementation() {
 	if (OwnAttack != nullptr) {
 		PlayAnimMontage(OwnAttack);
 	}
-	USenniteSounds::PlayAt(this, TEXT("attack.own"), OwnWeaponTip());
+	// a blow is heard as a swing, never as a shot
+	USenniteSounds::PlayAt(this, bHeroMelee ? TEXT("swing") : TEXT("attack.own"), OwnWeaponTip());
+}
+
+void ASenniteCharacter::LandBlow() {
+	if (!HasAuthority()) {
+		return;
+	}
+	// ahead of the chest, the way the player looks, as far as the blow reaches: the nearest thing in the way takes it
+	const FVector From = GetActorLocation() + FVector(0.0, 0.0, BaseEyeHeight * 0.5);
+	const FVector Ahead = GetControlRotation().Vector();
+	FCollisionQueryParams Skip(SCENE_QUERY_STAT(SenniteBlow), false, this);
+	if (CurrentWeapon != nullptr) {
+		Skip.AddIgnoredActor(CurrentWeapon);
+	}
+	FCollisionObjectQueryParams Kinds;
+	Kinds.AddObjectTypesToQuery(ECC_Pawn);
+	Kinds.AddObjectTypesToQuery(ECC_WorldStatic);
+	Kinds.AddObjectTypesToQuery(ECC_WorldDynamic);
+	Kinds.AddObjectTypesToQuery(ECC_PhysicsBody);
+	TArray<FHitResult> InTheWay;
+	GetWorld()->SweepMultiByObjectType(InTheWay, From, From + Ahead * MeleeReach, FQuat::Identity, Kinds, FCollisionShape::MakeSphere(MeleeAcross), Skip);
+	InTheWay.Sort([](const FHitResult& A, const FHitResult& B) { return A.Distance < B.Distance; });
+	for (const FHitResult& Each : InTheWay) {
+		AActor* Other = Each.GetActor();
+		if (Other == nullptr || Other->IsA(AProjectileActor::StaticClass()) || Other->IsA(AStormActor::StaticClass())) {
+			continue;
+		}
+		// kind 0, the pickaxe's: it takes materials from what it harvests, as the own weapon's bolt does
+		if (AProjectileActor::Land(Other, MeleeDamage, 0, this)) {
+			USenniteSounds::PlayAt(this, TEXT("bolt.hit"), Each.ImpactPoint);
+			return;
+		}
+	}
+}
+
+void ASenniteCharacter::WearChosenSkin() {
+	const UGameInstance* Game = GetGameInstance();
+	const USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+	if (Server == nullptr || !Server->IsOn() || HeroMesh.IsNull()) {
+		return;
+	}
+	FSoftObjectPath Want = HeroMesh;
+	if (Server->bMaterialsKnown && !Server->Wearing.IsEmpty() && Server->Owns(Server->Wearing)) {
+		const ASenniteBaseEditor* Shared = GetDefault<ASenniteBaseEditor>();
+		if (const FSenniteSkinMesh* Skin = Shared->Skins.FindByPredicate([Server](const FSenniteSkinMesh& S) { return S.Id == Server->Wearing; })) {
+			if (Skin->Mesh == WornMesh) {
+				return; // on already
+			}
+			const USkeletalMesh* SkinMesh = Cast<USkeletalMesh>(Skin->Mesh.TryLoad());
+			const USkeletalMesh* Own = Cast<USkeletalMesh>(HeroMesh.TryLoad());
+			if (SkinMesh != nullptr && Own != nullptr && SkinMesh->GetSkeleton() == Own->GetSkeleton()) {
+				Want = Skin->Mesh;
+			}
+		}
+	}
+	if (Want == WornMesh) {
+		return;
+	}
+	if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(Want.TryLoad())) {
+		WearMesh(Mesh);
+	}
+	else {
+		UE_LOG(LogSenniteCharacter, Error, TEXT("Skin mesh '%s' did not load ([/Script/Sennite.SenniteBaseEditor] in DefaultGame.ini)"), *Want.ToString());
+	}
+	WornMesh = Want;
 }
 
 FVector ASenniteCharacter::OwnWeaponTip() const {

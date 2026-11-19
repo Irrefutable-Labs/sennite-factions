@@ -417,7 +417,9 @@ void USenniteSounds::HearHero(ASenniteCharacter* Hero, FSeen& Seen, float DeltaT
 	// a step each stride walked on the ground (a hero moved a long way in one frame was put there, not walking)
 	const float Speed = Going.Size2D();
 	const float Went = FVector::Dist2D(At, Seen.At);
-	if (bOnGround && Speed > StandingSpeed && Went < 300.0f) {
+	// A hero that floats over the ground has no steps to hear. The owner, 2026-11-19: "He's floating, so he shouldn't
+	// make footstep noises."
+	if (bOnGround && Speed > StandingSpeed && Went < 300.0f && !Hero->bHeroFloats) {
 		const bool bRunning = Speed > RunningSpeed;
 		const float Stride = bRunning ? RunStride : WalkStride;
 		Seen.Walked += Went;

@@ -126,6 +126,38 @@ public:
 	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FName HeroCastBone;
 
+	/** The hero's own weapon is a blow up close, with no bolt and no aiming; and the hero floats, unheard as steps
+	 * (FSenniteHero::bMelee, bFloats). */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
+	bool bHeroMelee = false;
+
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
+	bool bHeroFloats = false;
+
+	/** A blow of the hero's own weapon: what it takes off what it lands on, how far ahead it reaches, how wide it is,
+	 * and how long after the swing starts it lands. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	float MeleeDamage = 40.0f;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	float MeleeReach = 260.0f;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	float MeleeAcross = 45.0f;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	float MeleeLandsAfter = 0.25f;
+
+	/** The server: the blow lands on the first thing ahead within reach, as a bolt of the hero's own weapon would. */
+	void LandBlow();
+
+	/** The mesh on the body now: the hero's own, or the skin's the player wears. */
+	FSoftObjectPath WornMesh;
+
+	/** The player's own machine: the skin the player chose in the store is on the hero wherever it plays, only while the
+	 * wallet's proof says it owns it and only on the hero it is a skin of; otherwise the hero as it ships. */
+	void WearChosenSkin();
+
 	/** The hero's own attack, loaded. */
 	UPROPERTY()
 	TObjectPtr<UAnimMontage> OwnAttack;

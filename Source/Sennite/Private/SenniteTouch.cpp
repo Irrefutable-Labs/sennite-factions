@@ -199,6 +199,11 @@ bool USenniteTouchControls::Shows(const FButton& Button) const
 		// only a gun reloads: the hero's own weapon, a bandage or a potion has nothing to load
 		return Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType > 0;
 	}
+	if (Button.Key == EKeys::RightMouseButton && Hero->bHeroMelee && Hero->CurrentWeapon == nullptr && LabelOf(Button) == TEXT("AIM")) {
+		// fists and what a hero swings are not aimed: there is no AIM until a gun is in hand. The owner, 2026-11-19, of a
+		// melee weapon: "aim (which should be disabled when it's a melee weapon)".
+		return false;
+	}
 	if (Button.Key == EKeys::G) {
 		// what G would start editing, or the edit G would finish
 		int32 Tile = INDEX_NONE;

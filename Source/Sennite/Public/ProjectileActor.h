@@ -85,6 +85,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Damage")
 	int ProjectileType; // the kind of weapon that fired it: 0 for pickaxe, 1 rifle, 2 shotgun, 3 energy rifle, 4 sniper
 
+	/** The server: what a bullet, or a blow of a hero's own weapon, does to what it meets. It takes Damage off a player
+	 * (one hit through what they hold), a build piece, a faction's structure or a material node, and a blow of kind 0 (the
+	 * pickaxe's) harvests the node. Answers whether it landed: false for what lets it by (the one who dealt it, a weapon
+	 * or an item lying on the ground, a preview), true for everything else, which stops it. */
+	static bool Land(AActor* OtherActor, float Damage, int32 Kind, ASenniteCharacter* Shooter);
+
 	/** Set once the bullet has landed on something; it lands only once. */
 	bool bSpent = false;
 
