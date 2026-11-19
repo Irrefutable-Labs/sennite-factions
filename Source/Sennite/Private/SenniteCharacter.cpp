@@ -2756,7 +2756,8 @@ void ASenniteCharacter::ServerRemovePiece_Implementation(ABuildingActor* Piece) 
 		return;
 	}
 	// What the piece cost goes back to whoever built it, in its material; a piece nobody paid for gives
-	// nothing back.
+	// nothing back. Once only: the piece is marked taken away below, on this machine at once, and
+	// MayRemovePiece refuses a piece so marked.
 	if (ASennitePlayerState* Paid = Cast<ASennitePlayerState>(Piece->Builder)) {
 		if (Paid->MaterialCounts.IsValidIndex(Piece->MaterialType)) {
 			Paid->MaterialCounts[Piece->MaterialType] += BuildingPieceCost;
