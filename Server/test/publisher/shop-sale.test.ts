@@ -53,6 +53,13 @@ class Account {
     this.issued.push(info);
     return info;
   }
+  /** What the account holds: here, what it issued. */
+  async owned(): Promise<{ object: ObjectInfo; amount: bigint }[]> {
+    return this.issued.map((object) => ({ object, amount: 1n }));
+  }
+  async connections(): Promise<Connection[]> {
+    return [connection];
+  }
   async object(id: string): Promise<ObjectInfo> {
     const found = this.issued.find((o) => o.id === id);
     if (found === undefined) throw new Error("no such object");
@@ -129,6 +136,31 @@ describe("a sale", () => {
     await anew.sweep();
     expect(account.given).toEqual(["OBJ1"]);
     expect(store.data.shop.skins).toEqual({ OBJ1: { skinId: "magma", serial: 1, symbol: "SK000001" } });
+  });
+
+  it("does not issue an item twice when the shop stopped between issuing it and writing that down", async () => {
+    const { account, store, shop } = stand(40);
+    await shop.buyHero(connection, "rampage");
+    account.answer("carried_out", true);
+    // as a server that stopped there: the sale is pending with its symbol, the object is issued, and the record does not say so
+    store.data.shop.asked = {};
+    store.data.shop.serial = 1;
+    store.data.shop.paid["0909"] = "";
+    store.data.shop.pending["0909"] = { kind: "hero", itemId: "rampage", serial: 1, symbol: "HR000001", buyer: "070707", object: "" };
+    await account.issue({ symbol: "HR000001", name: "Rampage #1" });
+    await shop.sweep();
+    expect(account.issued).toHaveLength(1);
+    expect(account.given).toEqual(["OBJ1"]);
+    expect(store.data.shop.pending).toEqual({});
+  });
+
+  it("asks one wallet for only a few payments at once", async () => {
+    const { account, store, shop } = stand(10);
+    for (let i = 0; i < 3; i += 1) await shop.buyHero(connection, "rampage");
+    expect(Object.keys(store.data.shop.asked)).toHaveLength(3);
+    const fourth = await shop.buyHero(connection, "rampage");
+    expect(fourth).toMatchObject({ ok: false });
+    expect(account.asks).toHaveLength(3);
   });
 
   it("buys nothing when the player declines, and is forgotten", async () => {

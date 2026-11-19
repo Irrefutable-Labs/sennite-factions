@@ -61,12 +61,16 @@ export interface Purse {
 /** What a sale is waiting on, said for the game to tell the player: `onWallet` when it is the player's approval in the wallet. */
 export type Say = (stage: string, onWallet: boolean) => void;
 
+/** How many payments the shop may have open in one wallet, waiting for the player, at once. */
+const MAX_OPEN_PER_WALLET = 3;
+
 /** The first letters of the symbol an item sold is issued under, by its kind. */
 const PREFIX = { skin: "SK", hero: "HR", weapon: "WP" } as const;
 
 export class Shop {
   /** The payments whose sale is being finished now, so that two looks at one sale do not both issue it. */
   readonly #finishing = new Set<string>();
+  #sweeping = false;
 
   /**
    * `timing`: how long a sale's own request to the server goes on waiting for the wallet before it answers the
@@ -218,9 +222,15 @@ export class Shop {
     say: Say = () => {},
   ): Promise<{ ok: true; object: string; serial: number } | { ok: false; why: string }> {
     await this.settle(connection);
+    // What is asked stays open until the player answers it, so a wallet may have only a few open at once: what it
+    // is asked for cannot be piled up without end by a game asking again and again.
+    const buyer = hex(connection.opponent.signingKey);
+    if (Object.values(this.store.data.shop.asked).filter((a) => a.buyer === buyer).length >= MAX_OPEN_PER_WALLET) {
+      return { ok: false, why: "payments already wait in your DSM wallet: approve or decline them there first" };
+    }
     const ref = await this.app.request(connection, ask.send(this.symbol, item.price, `${kind}: ${item.name}`));
     const key = `${ref.connection}:${ref.seq}`;
-    this.store.data.shop.asked[key] = { connection: ref.connection, seq: String(ref.seq), kind, itemId: item.id, buyer: hex(connection.opponent.signingKey) };
+    this.store.data.shop.asked[key] = { connection: ref.connection, seq: String(ref.seq), kind, itemId: item.id, buyer };
     this.store.save();
 
     const deadline = Date.now() + this.timing.waitMs;
@@ -259,6 +269,8 @@ export class Shop {
       this.store.save();
       return undefined;
     }
+    // the item goes to the wallet that was asked and paid: never to another, whatever connection is in hand
+    if (hex(connection.opponent.signingKey) !== asked.buyer) throw new Error("the connection is not the wallet that was asked to pay");
     // The asking is closed, the serial taken, the payment marked used and the sale recorded as pending, before anything is awaited.
     delete record.asked[key];
     const serial = (record.serial += 1);
@@ -275,13 +287,17 @@ export class Shop {
     const record = this.store.data.shop;
     const sale = record.pending[payment];
     if (sale === undefined) throw new Error(`no pending sale for payment ${payment}`);
+    if (hex(connection.opponent.signingKey) !== sale.buyer) throw new Error("the connection is not the wallet that paid for the sale");
     if (this.#finishing.has(payment)) throw new Refused("that sale is being finished now");
     this.#finishing.add(payment);
     try {
       const item = sale.kind === "skin" ? this.skin(sale.itemId) : sale.kind === "hero" ? this.hero(sale.itemId) : this.weapon(sale.itemId);
       let info: ObjectInfo;
       if (sale.object === "") {
-        info = await this.app.issue({ symbol: sale.symbol, name: `${item.name} #${sale.serial}`, supply: "1", description: `Sennite: Factions ${sale.kind} ${item.id}` });
+        // The symbol is the sale's own, taken with its serial. If the server stopped after the object was issued and
+        // before that was written down, the account holds it already: it is that object, and none is issued again.
+        const issued = (await this.app.owned()).find((o) => o.object.symbol === sale.symbol)?.object;
+        info = issued ?? (await this.app.issue({ symbol: sale.symbol, name: `${item.name} #${sale.serial}`, supply: "1", description: `Sennite: Factions ${sale.kind} ${item.id}` }));
         sale.object = info.id;
         if (sale.kind === "skin") record.skins[info.id] = { skinId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
         else if (sale.kind === "hero") record.heroes[info.id] = { heroId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
@@ -316,29 +332,37 @@ export class Shop {
    * approved at any time buys what it was for.
    */
   async sweep(): Promise<void> {
-    const record = this.store.data.shop;
-    for (const [key, asked] of Object.entries(record.asked)) {
-      try {
-        const result = await this.app.result({ connection: asked.connection, seq: BigInt(asked.seq) });
-        if (result.fact === "received" && result.received !== undefined) {
-          await this.paid(await this.app.connection(asked.connection), key, hex(result.received));
-        } else if (result.outcome === "declined" || result.outcome === "failed" || !(await this.app.connection(asked.connection)).connected) {
-          delete record.asked[key];
-          this.store.save();
+    // one look at a time: a look that takes longer than the time between looks is not joined by another
+    if (this.#sweeping) return;
+    this.#sweeping = true;
+    try {
+      const record = this.store.data.shop;
+      for (const [key, asked] of Object.entries(record.asked)) {
+        try {
+          const result = await this.app.result({ connection: asked.connection, seq: BigInt(asked.seq) });
+          const connection = await this.app.connection(asked.connection);
+          if (result.fact === "received" && result.received !== undefined) {
+            await this.paid(connection, key, hex(result.received));
+          } else if (result.outcome === "declined" || result.outcome === "failed" || !connection.connected) {
+            delete record.asked[key];
+            this.store.save();
+          }
+        } catch (e) {
+          console.error(`[publisher] the shop's look at what it asked (${asked.kind} ${asked.itemId}): ${e instanceof Error ? e.message : String(e)}`);
         }
-      } catch (e) {
-        console.error(`[publisher] the shop's look at what it asked (${asked.kind} ${asked.itemId}): ${e instanceof Error ? e.message : String(e)}`);
       }
-    }
-    const connections = Object.keys(record.pending).length > 0 ? await this.app.connections() : [];
-    for (const [payment, sale] of Object.entries(record.pending)) {
-      const connection = connections.find((c) => c.connected && hex(c.opponent.signingKey) === sale.buyer);
-      if (connection === undefined || this.#finishing.has(payment)) continue;
-      try {
-        await this.finish(connection, payment);
-      } catch (e) {
-        console.error(`[publisher] finishing a ${sale.kind} paid for (${sale.itemId}): ${e instanceof Error ? e.message : String(e)}`);
+      const connections = Object.keys(record.pending).length > 0 ? await this.app.connections() : [];
+      for (const [payment, sale] of Object.entries(record.pending)) {
+        const connection = connections.find((c) => c.connected && hex(c.opponent.signingKey) === sale.buyer);
+        if (connection === undefined || this.#finishing.has(payment)) continue;
+        try {
+          await this.finish(connection, payment);
+        } catch (e) {
+          console.error(`[publisher] finishing a ${sale.kind} paid for (${sale.itemId}): ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
+    } finally {
+      this.#sweeping = false;
     }
   }
 
