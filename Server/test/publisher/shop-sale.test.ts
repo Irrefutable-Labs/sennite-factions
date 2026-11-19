@@ -163,6 +163,33 @@ describe("a sale", () => {
     expect(account.asks).toHaveLength(3);
   });
 
+  it("keeps what it asked when the account cannot be asked about its connection", async () => {
+    const { account, store, shop } = stand(10);
+    await shop.buyHero(connection, "rampage");
+    const real = account.connection.bind(account);
+    account.connection = async () => {
+      throw new Error("the account did not answer");
+    };
+    await shop.sweep();
+    expect(Object.keys(store.data.shop.asked)).toHaveLength(1);
+    // and a payment that landed is carried out even if the wallet's answer calls it failed
+    account.connection = real;
+    account.answer("failed", true);
+    await shop.sweep();
+    expect(account.given).toEqual(["OBJ1"]);
+  });
+
+  it("keeps an asking written before its time was kept", async () => {
+    const { account, store, shop } = stand(10);
+    await shop.buyHero(connection, "rampage");
+    for (const asked of Object.values(store.data.shop.asked)) delete asked.at;
+    await shop.sweep();
+    expect(Object.keys(store.data.shop.asked)).toHaveLength(1);
+    account.answer("carried_out", true);
+    await shop.sweep();
+    expect(account.given).toEqual(["OBJ1"]);
+  });
+
   it("buys nothing when the player declines, and is forgotten", async () => {
     const { account, store, shop } = stand(2_000);
     const selling = shop.buyWeapon(connection, "sniper");

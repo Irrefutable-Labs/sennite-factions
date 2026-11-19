@@ -64,6 +64,8 @@ export type Say = (stage: string, onWallet: boolean) => void;
 /** How many payments the shop may have open in one wallet, waiting for the player, at once: those asked within COUNTED_FOR_MS. */
 const MAX_OPEN_PER_WALLET = 3;
 const COUNTED_FOR_MS = 60 * 60_000;
+/** And how many it may have open in all, however long ago they were asked. */
+const MAX_OPEN_IN_ALL_PER_WALLET = 12;
 /** An asking nobody answered in this long is forgotten: thirty days. One approved after that buys nothing. */
 const FORGOTTEN_AFTER_MS = 30 * 24 * 60 * 60_000;
 
@@ -234,8 +236,10 @@ export class Shop {
     // cannot both take the last one.
     const buyer = hex(connection.opponent.signingKey);
     const lately = Date.now() - COUNTED_FOR_MS;
-    const open = Object.values(this.store.data.shop.asked).filter((a) => a.buyer === buyer && (a.at ?? 0) > lately).length;
-    if (open + (this.#asking.get(buyer) ?? 0) >= MAX_OPEN_PER_WALLET) {
+    const theirs = Object.values(this.store.data.shop.asked).filter((a) => a.buyer === buyer);
+    const open = theirs.filter((a) => (a.at ?? Date.now()) > lately).length;
+    // and, however old they are, a wallet has only so many open in all: they do not pile up over the days
+    if (open + (this.#asking.get(buyer) ?? 0) >= MAX_OPEN_PER_WALLET || theirs.length >= MAX_OPEN_IN_ALL_PER_WALLET) {
       return { ok: false, why: "payments already wait in your DSM wallet: approve or decline them there first" };
     }
     this.#asking.set(buyer, (this.#asking.get(buyer) ?? 0) + 1);
@@ -365,21 +369,25 @@ export class Shop {
             delete record.asked[key];
             this.store.save();
           };
-          if (result.outcome === "declined" || result.outcome === "failed") {
-            ended();
-            continue;
-          }
+          // A payment that landed is carried out whatever else the wallet said of it: that is looked at first.
           if (result.fact === "received" && result.received !== undefined) {
             await this.paid(await this.app.connection(asked.connection), key, hex(result.received));
             continue;
           }
-          // Not answered. It is over if its wallet ended the connection, or the account no longer knows the
-          // connection, or it is older than a wallet can be thought to still show its player.
-          const connected = await this.app.connection(asked.connection).then(
-            (c) => c.connected,
-            () => false,
-          );
-          if (!connected || Date.now() - (asked.at ?? 0) > FORGOTTEN_AFTER_MS) ended();
+          if (result.outcome === "declined" || result.outcome === "failed") {
+            ended();
+            continue;
+          }
+          // Not answered. An asking written before its time was kept is as old as this look at it.
+          if (asked.at === undefined) {
+            asked.at = Date.now();
+            this.store.save();
+          }
+          // It is over when the account says its wallet ended the connection, or it is older than a wallet can be
+          // thought to still show its player. An account that could not be asked says neither: the asking stays,
+          // and the next look asks again (the error is written by the catch below).
+          const connection = await this.app.connection(asked.connection);
+          if (!connection.connected || Date.now() - asked.at > FORGOTTEN_AFTER_MS) ended();
         } catch (e) {
           console.error(`[publisher] the shop's look at what it asked (${asked.kind} ${asked.itemId}): ${e instanceof Error ? e.message : String(e)}`);
         }
