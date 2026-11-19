@@ -73,7 +73,7 @@ namespace
 				TEXT("ui.click"), TEXT("ui.select"), TEXT("ui.page"), TEXT("ui.open"), TEXT("ui.denied"),
 				TEXT("ui.bought"), TEXT("ui.coins"), TEXT("ui.tick"), TEXT("wallet.connected"), TEXT("hit.marker"), TEXT("attack.own"), TEXT("swing"),
 				TEXT("reload.rifle"), TEXT("reload.shotgun"), TEXT("weapon.switch"), TEXT("bolt.hit"), TEXT("body.hit"), TEXT("fell"), TEXT("harvest"),
-				TEXT("piece.place"), TEXT("piece.hit.wood"), TEXT("piece.hit.stone"), TEXT("piece.hit.steel"), TEXT("piece.break.wood"), TEXT("piece.break.stone"),
+				TEXT("piece.place"), TEXT("piece.remove"), TEXT("piece.edit"), TEXT("piece.hit.wood"), TEXT("piece.hit.stone"), TEXT("piece.hit.steel"), TEXT("piece.break.wood"), TEXT("piece.break.stone"),
 				TEXT("piece.break.steel"), TEXT("pickup.item"), TEXT("pickup.weapon"), TEXT("pickup.rounds"), TEXT("heal.bandage"), TEXT("heal.potion"),
 				TEXT("match.start"), TEXT("match.won"), TEXT("match.lost"), TEXT("storm.alarm"), TEXT("air.menu"), TEXT("air.field"), TEXT("air.storm"),
 				TEXT("step.grass.walk"), TEXT("step.grass.run"), TEXT("jump.grass"), TEXT("land.grass"), TEXT("step.wood.walk"), TEXT("step.rock.walk"),
