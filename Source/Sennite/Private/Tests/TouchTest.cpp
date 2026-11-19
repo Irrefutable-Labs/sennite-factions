@@ -148,6 +148,7 @@ namespace
 		int32 ClipMark = 0;
 		int32 CountMark = 0;
 		int32 JumpMark = 0;
+		int32 PressMark = 0;
 		double BehindMark = 0.0;
 		float ShieldMark = 0.0f;
 		bool bSawWalking = false;
@@ -273,7 +274,7 @@ namespace
 
 		case EPhase::Slots:
 			// SHOTGUN, then RIFLE, each a tap
-			if (Step == 0) { Step = 1; Press(TEXT("SHOTGUN")); return false; }
+			if (Step == 0) { Step = 1; PressMark = USenniteSounds::Heard(World, TEXT("ui.press")); Press(TEXT("SHOTGUN")); return false; }
 			if (Step == 1 && Elapsed(World) > 0.15) { Step = 2; Lift(TEXT("SHOTGUN")); return false; }
 			if (Step == 2 && Elapsed(World) > 1.0) {
 				Step = 3;
@@ -324,10 +325,11 @@ namespace
 			Test->TestTrue(TEXT("JUMP lifts the hero off the ground"), TopZ > Mark.Z + 40.0);
 			Test->TestTrue(TEXT("She is back on the ground"), Hero->GetCharacterMovement()->IsMovingOnGround());
 			Test->TestEqual(TEXT("A touch on JUMP fires no shot"), Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->CurrentBulletCount : -1, ClipMark);
-			// in play a button is heard as what it does, never as a menu's button: JUMP as the jump, and of all the taps above
-			// (the slots, OPEN, JUMP) not one as a press or as one of a row
+			// in play a button is heard as the owner's press recording, the one the menus' buttons play, and never as the
+			// small tick of a row: the five slots tapped above, once each. JUMP alone is heard only as the jump.
 			Test->TestEqual(TEXT("The tap of JUMP is heard as the jump"), USenniteSounds::HeardBeginning(World, TEXT("jump.")) - JumpMark, 1);
-			Test->TestEqual(TEXT("No tap in play is heard as a menu's press"), USenniteSounds::Heard(World, TEXT("ui.press")), 0);
+			Test->TestEqual(TEXT("Each slot tapped is heard as a press, and JUMP is not"), USenniteSounds::Heard(World, TEXT("ui.press")) - PressMark, 5);
+			Test->TestEqual(TEXT("No tap in play is heard as a tick"), USenniteSounds::Heard(World, TEXT("ui.tick")), 0);
 			Test->TestEqual(TEXT("nor as one of a menu's row"), USenniteSounds::Heard(World, TEXT("ui.pick")), 0);
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK jump: rose %.0f cm"), TopZ - Mark.Z);
 			Press(TEXT("FIRE"));
@@ -376,11 +378,12 @@ namespace
 			const FVector Eyes = Hero->GetActorLocation() + FVector(0.0, 0.0, Hero->BaseEyeHeight);
 			const double CameraOff = FVector::Dist(Controller->PlayerCameraManager->GetCameraLocation(), Eyes);
 			switch (Step) {
-			case 0: if (Elapsed(World) > 0.5) { Step = 1; BehindMark = CameraOff; Press(TEXT("AIM")); } return false;
+			case 0: if (Elapsed(World) > 0.5) { Step = 1; BehindMark = CameraOff; PressMark = USenniteSounds::Heard(World, TEXT("ui.press")); Press(TEXT("AIM")); } return false;
 			case 1: if (Elapsed(World) > 0.65) { Step = 2; Lift(TEXT("AIM")); } return false;
 			case 2:
 				if (Elapsed(World) < 1.9) { return false; }
 				Test->TestTrue(TEXT("A tap of AIM aims"), Hero->AimedIn);
+				Test->TestEqual(TEXT("and is heard as a press"), USenniteSounds::Heard(World, TEXT("ui.press")) - PressMark, 1);
 				Test->TestTrue(FString::Printf(TEXT("Aiming, the camera is at her eyes (%.0f cm from them; it follows %.0f cm off)"), CameraOff, BehindMark), CameraOff < 45.0);
 				Test->TestTrue(TEXT("and she is not drawn for her own player"), Hero->GetMesh()->bOwnerNoSee);
 				Test->TestTrue(TEXT("nor is the gun in her hand"), Hero->CurrentWeapon == nullptr || !Hero->CurrentWeapon->WeaponMesh->IsVisible());
