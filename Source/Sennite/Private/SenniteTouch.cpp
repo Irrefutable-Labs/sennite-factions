@@ -182,10 +182,6 @@ bool USenniteTouchControls::Shows(const FButton& Button) const
 	if (Hero == nullptr) {
 		return false;
 	}
-	if (Button.Key == EKeys::R && Hero->GetEditingPiece() != nullptr) {
-		// while editing a piece it reads REMOVE and takes the whole piece away, gun in hand or not
-		return true;
-	}
 	if (Button.Key == EKeys::E) {
 		// the same test the HUD makes before it says how to open a crate
 		const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
@@ -194,10 +190,6 @@ bool USenniteTouchControls::Shows(const FButton& Button) const
 	if (Button.Key == EKeys::B) {
 		// the base editor is in a world only when a publisher's server is set
 		return ASenniteBaseEditor::Find(Hero->GetWorld()) != nullptr;
-	}
-	if (Button.Key == EKeys::R) {
-		// only a gun reloads: the hero's own weapon, a bandage or a potion has nothing to load
-		return Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType > 0;
 	}
 	if (Button.Key == EKeys::RightMouseButton && Hero->bHeroMelee && Hero->CurrentWeapon == nullptr && LabelOf(Button) == TEXT("AIM")) {
 		// fists and what a hero swings are not aimed: there is no AIM until a gun is in hand. The owner, 2026-11-19, of a
@@ -210,6 +202,14 @@ bool USenniteTouchControls::Shows(const FButton& Button) const
 		return Hero->GetEditingPiece() != nullptr || Hero->EditablePieceUnderAim(Tile) != nullptr;
 	}
 	return true;
+}
+
+bool USenniteTouchControls::Loads() const
+{
+	// only a gun reloads: the hero's own weapon, a bandage or a potion has nothing to load. While a piece is being
+	// edited the button is REMOVE, which takes the piece away whatever is in hand.
+	const ASenniteCharacter* Hero = Controller ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
+	return Hero != nullptr && (Hero->GetEditingPiece() != nullptr || (Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType > 0));
 }
 
 int32 USenniteTouchControls::GunOfSlot(const FKey& InKey)
@@ -513,7 +513,8 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 				// it: "It should play, not those checks, but the bigger sounds for the menu buttons, the AIM, and shoot
 				// and all that, and RAMP." JUMP alone is heard only as the jump (the same day: "The jump button makes an
 				// awful sound. It doesn't sound like a jump." and, once it was the jump alone, "The jump sounds good
-				// now."). A slot that names what the player has not got does nothing, so that tap is heard as refused.
+				// now."). A slot that names what the player has not got does nothing, and neither does RELOAD with no gun in hand
+				// and no piece being edited, so those taps are heard as refused.
 				const FButton& Tapped = All[New.Button];
 				const ASennitePlayerState* Has = Controller->GetPlayerState<ASennitePlayerState>();
 				bool bRefused = false;
@@ -522,6 +523,9 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 					const int32 Heal = Tapped.Key == EKeys::Four ? 0 : 1;
 					const bool bHas = Has != nullptr && (Gun != 0 ? Has->EquippedWeapons.Contains(Gun) : Has->HealingItemCounts.IsValidIndex(Heal) && Has->HealingItemCounts[Heal] > 0);
 					bRefused = !bHas;
+				}
+				else if (Tapped.Key == EKeys::R) {
+					bRefused = !Loads();
 				}
 				if (bRefused) {
 					USenniteSounds::Play(Controller, TEXT("ui.denied"));
@@ -750,6 +754,10 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 		else if (Button.Key == EKeys::G) {
 			bInHand = Hero->GetEditingPiece() != nullptr;
 		}
+		else if (Button.Key == EKeys::R) {
+			// RELOAD stays where it is with no gun in hand, dimmed: there is nothing to load
+			bHave = Loads();
+		}
 		else if (AimLatches(Button)) {
 			// AIM stays lit while the hero is aiming: a tap aims, the next tap lets go
 			bInHand = Hero->AimedIn;
@@ -770,10 +778,10 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 		}
 		else {
 			Disc(At, Button.Radius * S, Fill);
-			Ring(At, Button.Radius * S, Edge);
-			Text(At, Label, Button.Radius >= 40.0f ? 13 : 9, FLinearColor::White);
+			Ring(At, Button.Radius * S, bHave ? Edge : Dim);
+			Text(At, Label, Button.Radius >= 40.0f ? 13 : 9, bHave ? FLinearColor::White : Dim);
 		}
-		LastDrawn.Add(FString::Printf(TEXT("%s=%s"), Button.Name, *Label));
+		LastDrawn.Add(FString::Printf(TEXT("%s=%s"), Button.Name, bHave || Button.bSlot ? *Label : TEXT("dimmed")));
 	}
 }
 
