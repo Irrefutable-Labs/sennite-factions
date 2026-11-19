@@ -24,6 +24,9 @@
 #include "SenniteTouch.h"
 #include "SenniteWeapons.h"
 #include "WeaponActor.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/GameViewportClient.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -60,7 +63,7 @@ namespace
 
 	private:
 		enum class EPhase {
-			WaitForPawn, FaceWeapons, WalkOver, Stop, OpenCrate, Slots, Jump, HoldFire, Reload, Build, Edit, FaceBack, Run, Drink, Bandage, Done
+			WaitForPawn, FaceWeapons, WalkOver, Stop, OpenCrate, Slots, Jump, HoldFire, Reload, Aim, Build, Edit, FaceBack, Run, Drink, Bandage, Done
 		};
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; }
@@ -144,6 +147,9 @@ namespace
 		FVector Mark = FVector::ZeroVector;
 		int32 ClipMark = 0;
 		int32 CountMark = 0;
+		int32 PressMark = 0;
+		int32 JumpMark = 0;
+		double BehindMark = 0.0;
 		float ShieldMark = 0.0f;
 		bool bSawWalking = false;
 		bool bSawRunning = false;
@@ -304,6 +310,8 @@ namespace
 				ClipMark = Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->CurrentBulletCount : 0;
 				TopZ = Hero->GetActorLocation().Z;
 				Mark = Hero->GetActorLocation();
+				PressMark = USenniteSounds::Heard(World, TEXT("ui.press"));
+				JumpMark = USenniteSounds::HeardBeginning(World, TEXT("jump."));
 				Press(TEXT("JUMP"));
 				Enter(EPhase::Jump, World);
 			}
@@ -318,9 +326,10 @@ namespace
 			Test->TestTrue(TEXT("JUMP lifts the hero off the ground"), TopZ > Mark.Z + 40.0);
 			Test->TestTrue(TEXT("She is back on the ground"), Hero->GetCharacterMovement()->IsMovingOnGround());
 			Test->TestEqual(TEXT("A touch on JUMP fires no shot"), Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->CurrentBulletCount : -1, ClipMark);
-			// every tap of a button is heard: the slots tapped above as one of a row, OPEN and JUMP as a press
+			// every tap of a button is heard: the slots tapped above as one of a row; JUMP as the jump, with no button's press over it
 			Test->TestTrue(FString::Printf(TEXT("The taps of the slots are heard (%d)"), USenniteSounds::Heard(World, TEXT("ui.pick"))), USenniteSounds::Heard(World, TEXT("ui.pick")) >= 5);
-			Test->TestTrue(FString::Printf(TEXT("The taps of OPEN and JUMP are heard (%d)"), USenniteSounds::Heard(World, TEXT("ui.press"))), USenniteSounds::Heard(World, TEXT("ui.press")) >= 2);
+			Test->TestEqual(TEXT("The tap of JUMP is heard as the jump"), USenniteSounds::HeardBeginning(World, TEXT("jump.")) - JumpMark, 1);
+			Test->TestEqual(TEXT("and not as a button's press"), USenniteSounds::Heard(World, TEXT("ui.press")) - PressMark, 0);
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK jump: rose %.0f cm"), TopZ - Mark.Z);
 			Press(TEXT("FIRE"));
 			Enter(EPhase::HoldFire, World);
@@ -359,9 +368,40 @@ namespace
 				GetDefault<ASenniteRifle>()->CrateRounds - (Hero->CurrentWeapon->MagazineSize - CountMark));
 			Test->TestTrue(TEXT("The reload is heard"), USenniteSounds::HeardBeginning(World, TEXT("reload.")) >= 1);
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK reload: clip %d -> %d, %d to spare"), CountMark, Hero->CurrentWeapon->CurrentBulletCount, State->EquippedWeaponsAmmunition[1]);
-			CountMark = Built(World);
-			Enter(EPhase::Build, World);
+			Enter(EPhase::Aim, World);
 			return false;
+
+		case EPhase::Aim: {
+			// AIM, tapped, looks through the hero's own eyes: the camera is where her eyes are, not behind her, and she is not
+			// drawn for her own player, so nothing of her is under the crosshair; tapped again, the camera is behind her again
+			const FVector Eyes = Hero->GetActorLocation() + FVector(0.0, 0.0, Hero->BaseEyeHeight);
+			const double CameraOff = FVector::Dist(Controller->PlayerCameraManager->GetCameraLocation(), Eyes);
+			switch (Step) {
+			case 0: if (Elapsed(World) > 0.5) { Step = 1; BehindMark = CameraOff; Press(TEXT("AIM")); } return false;
+			case 1: if (Elapsed(World) > 0.65) { Step = 2; Lift(TEXT("AIM")); } return false;
+			case 2:
+				if (Elapsed(World) < 1.9) { return false; }
+				Test->TestTrue(TEXT("A tap of AIM aims"), Hero->AimedIn);
+				Test->TestTrue(FString::Printf(TEXT("Aiming, the camera is at her eyes (%.0f cm from them; it follows %.0f cm off)"), CameraOff, BehindMark), CameraOff < 45.0);
+				Test->TestTrue(TEXT("and she is not drawn for her own player"), Hero->GetMesh()->bOwnerNoSee);
+				Test->TestTrue(TEXT("nor is the gun in her hand"), Hero->CurrentWeapon == nullptr || !Hero->CurrentWeapon->WeaponMesh->IsVisible());
+				UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK aim: the camera %.0f cm from her eyes aiming, %.0f cm following"), CameraOff, BehindMark);
+				GameCheck::Shot(TEXT("Touch"), TEXT("aim.png"));
+				Step = 3;
+				return false;
+			case 3: if (Elapsed(World) > 2.2) { Step = 4; Press(TEXT("AIM")); } return false;
+			case 4: if (Elapsed(World) > 2.35) { Step = 5; Lift(TEXT("AIM")); } return false;
+			default:
+				if (Elapsed(World) < 3.6) { return false; }
+				Test->TestFalse(TEXT("A second tap of AIM lets go"), Hero->AimedIn);
+				Test->TestTrue(FString::Printf(TEXT("Let go, the camera is behind her again (%.0f cm from her eyes)"), CameraOff), CameraOff > 200.0);
+				Test->TestFalse(TEXT("and she is drawn again"), Hero->GetMesh()->bOwnerNoSee);
+				Test->TestTrue(TEXT("and so is the gun in her hand"), Hero->CurrentWeapon == nullptr || Hero->CurrentWeapon->WeaponMesh->IsVisible());
+				CountMark = Built(World);
+				Enter(EPhase::Build, World);
+				return false;
+			}
+		}
 
 		case EPhase::Build:
 			// WALL, MAT, then FIRE (now BUILD) builds it; RAMP and FLOOR change the piece

@@ -148,6 +148,29 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Camera")
 	FVector ShoulderView = FVector(0.0f, 60.0f, 35.0f);
 
+	/**
+	 * Aiming, the player looks through the hero's own eyes: the camera comes in from behind the hero to its eye height and
+	 * this far ahead of its middle, and the hero and what it holds are not drawn for its own player, so nothing of the hero
+	 * is under the crosshair. Everyone else sees the hero as before. The owner, 2026-11-19, of aiming from behind the hero:
+	 * "When it zooms in, it's still behind him. It should go into first person or something, I guess. Right now, the
+	 * crosshairs are on his butt."
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "Camera")
+	float AimEyesAhead = 18.0f;
+
+	/** How wide the player's view is, in degrees: following the hero, and aiming. */
+	UPROPERTY(EditDefaultsOnly, Category = "Camera")
+	float FollowFieldOfView = 90.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Camera")
+	float AimFieldOfView = 45.0f;
+
+	/** On the player's own machine: stop drawing the hero and the gun in its hand for its own player, or draw them again. */
+	void SeeThroughOwnEyes(bool bEyes);
+
+	/** The player's own machine: the camera is close enough to the hero's eyes that the hero is not drawn for its player. */
+	bool IsSeenThroughOwnEyes() const { return bThroughOwnEyes; }
+
 	/** How much larger than its model a gun is in this hero's hands: the hero's arm against GunArm, between GunSizeLeast and GunSizeMost. */
 	float GunSize() const;
 
@@ -168,6 +191,12 @@ public:
 
 	/** Whether the hero's built-in weapon is hidden right now. */
 	bool bBuiltInWeaponHidden = false;
+	/** The player's own machine: the hero is not drawn for its own player, who is looking through its eyes. */
+	bool bThroughOwnEyes = false;
+	/** How the hero's bones were kept up to date while it was drawn, to go back to. */
+	EVisibilityBasedAnimTickOption SeenAnimTick = EVisibilityBasedAnimTickOption::AlwaysTickPose;
+	/** How far behind the hero the camera follows when not aiming: the boom's length as the hero was made. */
+	float FollowDistance = 300.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "State")
 	TSubclassOf<ASennitePlayerState> PlayerStateClass;

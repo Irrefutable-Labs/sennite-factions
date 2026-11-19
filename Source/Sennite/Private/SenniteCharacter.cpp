@@ -81,6 +81,7 @@ ASenniteCharacter::ASenniteCharacter(const FObjectInitializer& ObjectInitializer
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
 	CameraBoom->TargetArmLength = 300.0f; // The camera follows at this distance behind the character	
+	FollowDistance = CameraBoom->TargetArmLength;
 	CameraBoom->bUsePawnControlRotation = true; // Rotate the arm based on the controller
 
 	// Create a follow camera
@@ -557,8 +558,20 @@ void ASenniteCharacter::Tick(float DeltaTime) {
 		}
 		// and the player's camera looks over the hero's shoulder, so the gun and its bolts are seen past
 		// the hero, not hidden behind it
-		if (IsLocallyControlled() && CameraBoom != nullptr) {
-			CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, bFaceAim ? ShoulderView : FVector::ZeroVector, DeltaTime, 8.0f);
+		// Aiming, it comes in from behind the hero to the hero's own eyes: the hero's back is not under the
+		// crosshair, the player sees what the hero sees. Whether the hero is aiming is the one thing asked: the
+		// view closes in and opens out with it, however the aiming ended.
+		if (IsLocallyControlled() && CameraBoom != nullptr && FollowCamera != nullptr) {
+			const bool bEyes = AimedIn;
+			const FVector Beside = bEyes ? FVector(AimEyesAhead, 0.0f, 0.0f) : bFaceAim ? ShoulderView : FVector::ZeroVector;
+			CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, Beside, DeltaTime, bEyes ? 14.0f : 8.0f);
+			// up to the eyes whichever way the player looks: an offset in the world, not one that tips with the view
+			CameraBoom->TargetOffset = FMath::VInterpTo(CameraBoom->TargetOffset, FVector(0.0f, 0.0f, bEyes ? BaseEyeHeight : 0.0f), DeltaTime, 14.0f);
+			CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, bEyes ? 0.0f : FollowDistance, DeltaTime, 14.0f);
+			FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, bEyes ? AimFieldOfView : FollowFieldOfView, DeltaTime, 14.0f));
+			// Close enough to be inside the hero, the hero is not drawn for its own player (it still casts its shadow, and
+			// everyone else sees it), and its bones are kept up to date unseen: a shot leaves the gun where the gun is.
+			SeeThroughOwnEyes(CameraBoom->TargetArmLength < 0.4f * FollowDistance);
 		}
 	}
 	const bool bHideBuiltIn = CurrentWeapon != nullptr;
@@ -2278,12 +2291,29 @@ bool ASenniteCharacter::ServerSpawnAndAttachHealingItem_Validate(int HealingItem
 	return true;
 }
 
+// The view closes in and opens out in Tick, with AimedIn: what these two once set at a stroke.
 void ASenniteCharacter::ClientCameraAimIn_Implementation() {
-	FollowCamera->FieldOfView = 45;
 }
 
 void ASenniteCharacter::ClientCameraAimOut_Implementation() {
-	FollowCamera->FieldOfView = 90;
+}
+
+void ASenniteCharacter::SeeThroughOwnEyes(bool bEyes)
+{
+	USkeletalMeshComponent* Body = GetMesh();
+	if (Body != nullptr && bEyes != bThroughOwnEyes) {
+		bThroughOwnEyes = bEyes;
+		Body->bCastHiddenShadow = bEyes;
+		Body->SetOwnerNoSee(bEyes);
+		if (bEyes) {
+			SeenAnimTick = Body->VisibilityBasedAnimTickOption;
+		}
+		Body->VisibilityBasedAnimTickOption = bEyes ? EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones : SeenAnimTick;
+	}
+	// the gun in the hand is its own actor, and may be put in the hand or changed while aiming: on this machine, the player's own
+	if (CurrentWeapon != nullptr && CurrentWeapon->WeaponMesh != nullptr && CurrentWeapon->WeaponMesh->IsVisible() == bThroughOwnEyes) {
+		CurrentWeapon->WeaponMesh->SetVisibility(!bThroughOwnEyes);
+	}
 }
 
 void ASenniteCharacter::ClientGetBulletTransform_Implementation() {

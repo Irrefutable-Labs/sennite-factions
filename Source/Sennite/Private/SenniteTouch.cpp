@@ -497,8 +497,13 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 			const bool bAlreadyDown = Fingers.ContainsByPredicate([&New](const FFinger& Each) { return Each.Use == EUse::Button && Each.Button == New.Button; });
 			if (!bAlreadyDown) {
 				// Every tap of a button is heard: a slot as one of a row, or as refused where the player has not got
-				// what it names; any other button as a press. FIRE is heard as its shot, MENU as the menu opening.
+				// what it names; any other button as a press. A button whose own doing is heard has no press over
+				// it: FIRE is heard as its shot, MENU as the menu opening, JUMP as the jump, RELOAD as the reload
+				// and OPEN as the crate. The owner, 2026-11-19, of the press on JUMP: "The jump button makes an
+				// awful sound. It doesn't sound like a jump."
 				const FButton& Tapped = All[New.Button];
+				const bool bHeardAsWhatItDoes = !Tapped.bCell && (Tapped.Key == EKeys::LeftMouseButton || Tapped.Key == EKeys::Escape || Tapped.Key == EKeys::SpaceBar
+					|| Tapped.Key == EKeys::R || Tapped.Key == EKeys::E);
 				const ASennitePlayerState* Has = Controller->GetPlayerState<ASennitePlayerState>();
 				if (Tapped.bSlot) {
 					const int32 Gun = GunOfSlot(Tapped.Key);
@@ -506,7 +511,7 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 					const bool bHas = Has != nullptr && (Gun != 0 ? Has->EquippedWeapons.Contains(Gun) : Has->HealingItemCounts.IsValidIndex(Heal) && Has->HealingItemCounts[Heal] > 0);
 					USenniteSounds::Play(Controller, bHas ? TEXT("ui.pick") : TEXT("ui.denied"));
 				}
-				else if (Tapped.Key != EKeys::LeftMouseButton && Tapped.Key != EKeys::Escape) {
+				else if (!bHeardAsWhatItDoes) {
 					USenniteSounds::Play(Controller, TEXT("ui.press"));
 				}
 			}
