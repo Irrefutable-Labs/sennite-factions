@@ -7,7 +7,7 @@ public class Sennite : ModuleRules
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "UMG", "ProceduralMeshComponent", "AnimationCore" });
-		PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore", "ApplicationCore", "HTTP", "Json", "Sockets" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore", "ApplicationCore", "HTTP", "Json", "Sockets", "Niagara" });
 
 		if (Target.Platform == UnrealTargetPlatform.Android)
 		{

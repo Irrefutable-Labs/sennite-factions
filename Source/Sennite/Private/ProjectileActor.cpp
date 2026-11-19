@@ -19,6 +19,10 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
+#include "TimerManager.h"
 #include "UObject/UObjectIterator.h"
 
 // Sets default values
@@ -88,7 +92,7 @@ void AProjectileActor::PreInitializeComponents()
 
 void AProjectileActor::LayBolt()
 {
-	if (bRound) {
+	if (bRound || Beam != nullptr) {
 		return;
 	}
 	// a streak behind the bullet, no longer than the bullet has flown: it never reaches back through the gun
@@ -101,6 +105,22 @@ void AProjectileActor::LayBolt()
 void AProjectileActor::BeginPlay()
 {
 	Super::BeginPlay();
+	// a laser: carried along with the bullet, and flashing where it leaves, on every machine that draws it
+	if (!Laser.IsNull() && GetNetMode() != NM_DedicatedServer) {
+		if (UNiagaraSystem* System = Cast<UNiagaraSystem>(Laser.TryLoad())) {
+			Beam = UNiagaraFunctionLibrary::SpawnSystemAttached(System, CollisionComp, NAME_None, FVector::ZeroVector, FRotator::ZeroRotator,
+				EAttachLocation::KeepRelativeOffset, true, false, ENCPoolMethod::None, true);
+			if (Beam != nullptr) {
+				Bolt->SetVisibility(false);
+				LayLaser();
+				Beam->Activate(true);
+			}
+		}
+		else {
+			UE_LOG(LogTemp, Error, TEXT("Laser '%s' did not load: the bullet is seen as a bolt"), *Laser.ToString());
+		}
+		PlayFor(this, LaserFlash, GetActorLocation(), GetActorRotation(), LaserFlashSeconds);
+	}
 	if (HasAuthority()) {
 		//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, "projectile beginplay");
 		CollisionComp->OnComponentBeginOverlap.AddDynamic(this, &AProjectileActor::OnOverlapBegin);	// set up a notification for when this component hits something blocking
@@ -115,6 +135,7 @@ void AProjectileActor::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 	Flown += ProjectileMovementComponent->Velocity.Size() * DeltaTime;
 	LayBolt();
+	LayLaser();
 }
 
 void AProjectileActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult) {
@@ -193,7 +214,7 @@ void AProjectileActor::Preload(TArray<TObjectPtr<UObject>>& Into)
 			continue;
 		}
 		const AProjectileActor* Made = GetDefault<AProjectileActor>(*It);
-		for (const FSoftObjectPath* Each : { &Made->Round }) {
+		for (const FSoftObjectPath* Each : { &Made->Round, &Made->Laser, &Made->LaserFlash, &Made->LaserHit }) {
 			if (!Each->IsNull()) {
 				if (UObject* Loaded = Each->TryLoad()) {
 					Into.AddUnique(Loaded);
@@ -201,6 +222,38 @@ void AProjectileActor::Preload(TArray<TObjectPtr<UObject>>& Into)
 			}
 		}
 	}
+}
+
+void AProjectileActor::LayLaser()
+{
+	if (Beam != nullptr) {
+		Beam->SetVariablePosition(TEXT("LaserEnd"), GetActorLocation() - GetActorForwardVector() * FMath::Clamp(Flown, 1.0f, LaserTrail));
+	}
+}
+
+void AProjectileActor::PlayFor(UObject* WorldContext, const FSoftObjectPath& Effect, const FVector& Where, const FRotator& Facing, float Seconds)
+{
+	UWorld* World = WorldContext != nullptr ? WorldContext->GetWorld() : nullptr;
+	UNiagaraSystem* System = Effect.IsNull() || World == nullptr ? nullptr : Cast<UNiagaraSystem>(Effect.TryLoad());
+	if (System == nullptr) {
+		return;
+	}
+	UNiagaraComponent* Playing = UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, System, Where, Facing);
+	if (Playing == nullptr) {
+		return;
+	}
+	// stopped, what it has let out fades as it would, and then it is gone
+	FTimerHandle Stop;
+	World->GetTimerManager().SetTimer(Stop, FTimerDelegate::CreateWeakLambda(Playing, [Playing]() { Playing->Deactivate(); }), FMath::Max(0.01f, Seconds), false);
+}
+
+void AProjectileActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// a laser that landed on something before its time ran out is seen hitting it there
+	if (EndPlayReason == EEndPlayReason::Destroyed && Beam != nullptr && GetWorld() != nullptr && GetWorld()->GetTimeSeconds() - CreationTime < Lifespan - 0.05f) {
+		PlayFor(this, LaserHit, GetActorLocation(), GetActorRotation(), LaserHitSeconds);
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
 void AProjectileActor::SelfDestruct() {
