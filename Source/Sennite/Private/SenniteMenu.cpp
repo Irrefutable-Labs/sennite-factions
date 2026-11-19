@@ -636,6 +636,7 @@ void ASenniteMenuController::Press(const FVector2D& Where)
 {
 	const ASenniteMenuHUD* Hud = Cast<ASenniteMenuHUD>(GetHUD());
 	Pressed = Hud != nullptr ? Hud->ButtonAt(Where) : NAME_None;
+	PressedGreyedOut = Hud != nullptr && Pressed.IsNone() ? Hud->ButtonAt(Where, true) : NAME_None;
 }
 
 void ASenniteMenuController::Release(const FVector2D& Where)
@@ -646,7 +647,12 @@ void ASenniteMenuController::Release(const FVector2D& Where)
 	if (!Action.IsNone() && Action == Pressed) {
 		Act(Action);
 	}
+	// a greyed-out button does nothing, and is heard to do nothing
+	else if (Hud != nullptr && !PressedGreyedOut.IsNone() && Hud->ButtonAt(Where, true) == PressedGreyedOut) {
+		USenniteSounds::Play(this, TEXT("ui.denied"));
+	}
 	Pressed = NAME_None;
+	PressedGreyedOut = NAME_None;
 }
 
 void ASenniteMenuController::Act(FName Action)
@@ -972,11 +978,11 @@ void ASenniteMenuController::Act(FName Action)
 // ---------------------------------------------------------------------------------------------
 // Drawing
 
-FName ASenniteMenuHUD::ButtonAt(const FVector2D& Where) const
+FName ASenniteMenuHUD::ButtonAt(const FVector2D& Where, bool bGreyedOut) const
 {
 	// Where is on the screen; the buttons are where the canvas drew them
 	for (const FSenniteMenuButton& Each : Buttons) {
-		if (Each.bEnabled && Each.Box.IsInside(Where)) {
+		if (Each.bEnabled != bGreyedOut && Each.Box.IsInside(Where)) {
 			return Each.Action;
 		}
 	}

@@ -49,8 +49,9 @@ class SENNITE_API USenniteSounds : public UTickableWorldSubsystem
 	GENERATED_BODY()
 
 public:
-	/** Play a sound to this machine's player, the same wherever they are: a button, a hit marker. */
-	static void Play(const UObject* In, FName Name);
+	/** Play a sound to this machine's player, the same wherever they are: a button, a hit marker. One that outlives the
+	 * screen goes on to its end when the screen changes under it, as after PLAY or LEAVE; any other stops with the screen. */
+	static void Play(const UObject* In, FName Name, bool bOutlivesScreen = false);
 
 	/** Play a sound at a place in the world: nearer is louder. */
 	static void PlayAt(const UObject* In, FName Name, const FVector& Where);

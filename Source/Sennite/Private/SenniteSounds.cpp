@@ -106,7 +106,7 @@ void USenniteSounds::Count(FName Name)
 	++Counts.FindOrAdd(Name);
 }
 
-void USenniteSounds::Play(const UObject* In, FName Name)
+void USenniteSounds::Play(const UObject* In, FName Name, bool bOutlivesScreen)
 {
 	UWorld* World = WorldOf(In);
 	const FSenniteSound* Sound = World != nullptr ? Find(Name) : nullptr;
@@ -117,7 +117,12 @@ void USenniteSounds::Play(const UObject* In, FName Name)
 		Here->Count(Name);
 	}
 	if (USoundBase* Wave = Take(*Sound)) {
-		UGameplayStatics::PlaySound2D(World, Wave, Sound->Volume);
+		if (bOutlivesScreen) {
+			UGameplayStatics::SpawnSound2D(World, Wave, Sound->Volume, 1.0f, 0.0f, nullptr, bOutlivesScreen);
+		}
+		else {
+			UGameplayStatics::PlaySound2D(World, Wave, Sound->Volume);
+		}
 	}
 }
 
@@ -190,9 +195,10 @@ FName USenniteSounds::ButtonSound(FName Action)
 
 void USenniteSounds::Button(const UObject* In, FName Action)
 {
+	// a press is heard to its end though the button changes the screen (PLAY, START, LEAVE)
 	const FName Sound = ButtonSound(Action);
 	if (!Sound.IsNone()) {
-		Play(In, Sound);
+		Play(In, Sound, true);
 	}
 }
 
