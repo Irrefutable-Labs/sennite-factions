@@ -120,13 +120,14 @@ namespace
 				}
 				for (const FArenaConnector& Connector : Plan.Connectors) {
 					const bool bGorge = Connector.Kind == EConnectorKind::Floating || Connector.Kind == EConnectorKind::Bridges;
-					for (const double Across : { -Size.ConnectorWidth * 0.5 + 300.0, 0.0, Size.ConnectorWidth * 0.5 - 300.0 }) {
-						for (const double Along : { -300.0, Size.ConnectorLength + 300.0 }) {
+					for (const double Across : { -Connector.Width * 0.5 + 300.0, 0.0, Connector.Width * 0.5 - 300.0 }) {
+						for (const double Along : { -300.0, Connector.Length + 300.0 }) {
 							const double Here = High(Connector.Frame.TransformPosition(FVector(Along, Across, 0.0)));
 							bMouthsMeet = bMouthsMeet && Here < -2.0 && Here > -12.0;
 						}
-						const double Half = High(Connector.Frame.TransformPosition(FVector(Size.ConnectorLength * 0.5, Across, 0.0)));
-						bBetween = bBetween && (bGorge ? Half < Water - 700.0 : (Half < -2.0 && Half > -12.0));
+						const double Half = High(Connector.Frame.TransformPosition(FVector(Connector.Length * 0.5, Across, 0.0)));
+						// (a connector that is land has its own shape, held by its own check)
+						bBetween = bBetween && (bGorge ? Half < Water - 700.0 : ASenniteArena::IsLand(Connector.Kind) || (Half < -2.0 && Half > -12.0));
 					}
 					// from each plot's middle straight to where the way across begins, or ends, on its side
 					const FVector Ends[2][2] = {
@@ -149,7 +150,7 @@ namespace
 		Test->TestTrue(TEXT("Each plot's pad, where a faction's buildings stand, is level"), bPadsLevel);
 		Test->TestTrue(TEXT("The land of every plot past its pad is not flat: its hills rise and fall 2 m or more"), bHilly);
 		Test->TestTrue(TEXT("Where a connector meets a plot the ground lies just under the connector's floor, across its width"), bMouthsMeet);
-		Test->TestTrue(TEXT("Between plots a river or a gorge goes down under the water, and the other kinds are ground"), bBetween);
+		Test->TestTrue(TEXT("Between plots a river or a gorge goes down under the water, and what the other built kinds stand on is level ground"), bBetween);
 		Test->TestTrue(TEXT("From a plot's middle straight to its connector's way across is ground under 35 degrees steep and well above the water"), bWalkable);
 		Test->TestTrue(TEXT("Past the shore the ground is the lake's bed, under the water"), bShore);
 		UE_LOG(LogArenaCheck, Display, TEXT("GAMECHECK ground: over 200 plans the flattest plot's hills span %.1f m; the steepest step on a way out is %.0f degrees; past the shore the bed is %.1f m under the water at its shallowest"),
@@ -350,12 +351,12 @@ namespace
 		return FMath::PointDistToSegment(FVector(At.X, At.Y, 0.0), FVector(From.X, From.Y, 0.0), FVector(To.X, To.Y, 0.0));
 	}
 
-	/** How far outside a connector's strip a place is: the strip runs from one plot's edge to the other's, past where the ends of the connector meet the land, and is the connector's width across. */
+	/** How far outside the land between a connector's two plots a place is: that land runs from one plot's edge to the other's, Lead before what the connector builds and Lead after it, and is the land's width across. */
 	double OutsideStrip(const FArenaPlan& Plan, const FArenaConnector& Connector, const FVector& At)
 	{
 		const FVector Local = Connector.Frame.InverseTransformPosition(FVector(At.X, At.Y, 0.0));
-		const double Neck = Plan.Reach - Plan.Size.BaseRadius + 400.0;
-		const double Along = FMath::Max3(-Neck - Local.X, Local.X - (Plan.Size.ConnectorLength + Neck), 0.0);
+		const double Neck = Plan.Reach - Plan.Size.BaseRadius + 400.0 + Connector.Lead;
+		const double Along = FMath::Max3(-Neck - Local.X, Local.X - (Connector.Length + Neck), 0.0);
 		const double Across = FMath::Max(FMath::Abs(Local.Y) - Plan.Size.ConnectorWidth * 0.5, 0.0);
 		return FMath::Sqrt(Along * Along + Across * Across);
 	}
@@ -452,7 +453,7 @@ namespace
 					const auto InWay = [&Ways, &Centre, &Size](const FVector& At, double Margin) {
 						const FVector From = At - Centre;
 						return Ways.ContainsByPredicate([&From, &Size, Margin](const FVector& Way) {
-							return FVector::DotProduct(From, Way) > 0.0 && FMath::Abs(FVector::CrossProduct(Way, From).Z) < Size.ConnectorWidth * 0.5 + Margin;
+							return FVector::DotProduct(From, Way) > 0.0 && FMath::Abs(FVector::CrossProduct(Way, From).Z) < Size.PieceWidth * 0.5 + Margin;
 						});
 					};
 					// where a match may start this plot's heroes, past the pad, and stand their crates (SenniteMatch, SenniteCrate)
@@ -513,7 +514,7 @@ namespace
 									const FVector From = At - Centre;
 									const double Ahead = FVector::DotProduct(From, Ways[Way]);
 									const double Aside = FMath::Abs(FVector::CrossProduct(Ways[Way], From).Z);
-									if (Ahead > Size.PadRadius + 1000.0 && Ahead < 9600.0 && Aside < Size.ConnectorWidth * 0.5 && Aside < Nearest) {
+									if (Ahead > Size.PadRadius + 1000.0 && Ahead < 9600.0 && Aside < Size.PieceWidth * 0.5 && Aside < Nearest) {
 										Nearest = Aside;
 										Along = Way;
 									}
@@ -757,12 +758,18 @@ namespace
 		Test->TestTrue(FString::Printf(TEXT("Every tall rock of cover stands 2 m or more over the lowest drawn ground at its foot, so a hero hides wholly behind it (lowest %.0f cm)"), LeastCover), bHidden && Tall > 0);
 
 		// the paint, read from the mesh this machine built, against the plan itself
-		const FProcMeshSection* Section = Ground->GetProcMeshSection(0);
-		if (!Test->TestTrue(TEXT("The arena's ground has its mesh to read"), Section != nullptr && Section->ProcVertexBuffer.Num() > 0)) {
+		// (the mesh is in parts: the land at large, then one for each connector that is land itself)
+		TArray<FProcMeshVertex> Mesh;
+		for (int32 Part = 0; Part < Ground->GetNumSections(); ++Part) {
+			if (const FProcMeshSection* Section = Ground->GetProcMeshSection(Part)) {
+				Mesh.Append(Section->ProcVertexBuffer);
+			}
+		}
+		if (!Test->TestTrue(TEXT("The arena's ground has its mesh to read"), Mesh.Num() > 0)) {
 			return;
 		}
-		const auto Near = [Section](const FVector& At, double Within, TFunctionRef<void(const FProcMeshVertex&)> Each) {
-			for (const FProcMeshVertex& Point : Section->ProcVertexBuffer) {
+		const auto Near = [&Mesh](const FVector& At, double Within, TFunctionRef<void(const FProcMeshVertex&)> Each) {
+			for (const FProcMeshVertex& Point : Mesh) {
 				if (FVector::Dist2D(Point.Position, At) <= Within) {
 					Each(Point);
 				}
@@ -801,10 +808,10 @@ namespace
 			}
 		}
 		// and the mesh carries the plan's paint wherever it is read
-		for (int32 Index = 0; Index < Section->ProcVertexBuffer.Num(); Index += 97) {
-			const FProcMeshVertex& Point = Section->ProcVertexBuffer[Index];
+		for (int32 Index = 0; Index < Mesh.Num(); Index += 97) {
+			const FProcMeshVertex& Point = Mesh[Index];
 			const FColor Want = ASenniteArena::GroundPaint(Plan, Point.Position.X, Point.Position.Y).ToFColor(false);
-			bCarried = bCarried && FMath::Abs(Point.Color.R - Want.R) <= 1 && FMath::Abs(Point.Color.G - Want.G) <= 1 && FMath::Abs(Point.Color.A - Want.A) <= 1;
+			bCarried = bCarried && FMath::Abs(Point.Color.R - Want.R) <= 1 && FMath::Abs(Point.Color.G - Want.G) <= 1 && FMath::Abs(Point.Color.B - Want.B) <= 1 && FMath::Abs(Point.Color.A - Want.A) <= 1;
 			++Carried;
 		}
 		Test->TestTrue(TEXT("Each plot's pad is grass in its middle, as dry as its plot"), bPads);
@@ -980,6 +987,154 @@ namespace
 	}
 
 	/**
+	 * A canyon, held against plans for many seeds, by the ground itself (GroundHeight): the way across
+	 * keeps to level ground along the gorge's floor; walls stand either side of it through the mesa, 10 m and
+	 * more high, 20 m and more on one side; every side valley can be walked from the gorge to its end, the climbing ones
+	 * up onto the mesa's top and the bowl staying at the gorge's level; the mesa can be walked onto
+	 * from each plot, near either edge of its land; the canyon lays no block; its rocks stand over no
+	 * block and leave 3 m of floor clear along the way walked; and the ground is painted as the
+	 * canyon's own in the gorge and not at all where the canyon meets a plot.
+	 */
+	void CheckCanyon(FAutomationTestBase* Test)
+	{
+		const FArenaSizes Size = ASenniteArena::Sizes();
+		FArenaSizes Bare = Size;
+		Bare.TreesPerBase = Bare.BushesPerBase = 0;
+		Bare.CoverPerBase = Bare.CoverPerWay = Bare.OutcropsPerBase = Bare.CragsPerBase = Bare.FramesPerBase = Bare.StonesPerBase = Bare.PatchesPerBase = 0;
+		Bare.OuterRocksPerBase = Bare.OuterPatchesPerBase = Bare.GrovesPerBase = 0;
+		bool bFloor = true, bWalls = true, bValleys = true, bClimbs = true, bBowl = true, bOnto = true, bNoBlocks = true, bRocksClear = true, bRocksNoBlocks = true, bPainted = true;
+		int32 Canyons = 0, Valleys = 0, Climbs = 0, Bowls = 0, Rocks = 0, ClimbedCanyons = 0;
+		double LowestWall = TNumericLimits<double>::Max(), SteepestValley = 0.0, NearestRock = TNumericLimits<double>::Max(), HighestFloor = 0.0, SteepestOnto = 0.0, ShortOfTop = 0.0;
+		for (int32 Seed = 1; Seed <= 60; ++Seed) {
+			for (int32 Bases = 2; Bases <= 3; ++Bases) {
+				const FArenaPlan Plan = ASenniteArena::MakePlan(Seed, Bases, static_cast<int32>(EConnectorKind::Canyon), Bare);
+				const auto High = [&Plan](const FVector& At) { return ASenniteArena::GroundHeight(Plan, At.X, At.Y); };
+				bNoBlocks = bNoBlocks && Plan.Boxes.Num() == 0;
+				for (const FArenaConnector& Connector : Plan.Connectors) {
+					++Canyons;
+					const auto World = [&Connector](const FVector2D& Local) { return Connector.Frame.TransformPosition(FVector(Local.X, Local.Y, 0.0)); };
+					// the way across, a metre at a time
+					for (int32 Step = 0; Step + 2 < Connector.Route.Num(); ++Step) {
+						const FVector From = Connector.Route[Step].Point;
+						const FVector To = Connector.Route[Step + 1].Point;
+						const double Far = FVector::Dist2D(From, To);
+						for (double Gone = 0.0; Gone <= Far; Gone += 100.0) {
+							const double Here = High(FMath::Lerp(From, To, Gone / Far));
+							HighestFloor = FMath::Max(HighestFloor, FMath::Abs(Here));
+							bFloor = bFloor && FMath::Abs(Here) < 60.0;
+						}
+					}
+					if (!Test->TestTrue(TEXT("A canyon has its gorge and a side valley or more"), Connector.Trails.Num() >= 2 && Connector.Trails.Num() <= 4)) {
+						return;
+					}
+					// walls either side of the gorge, where the mesa stands at its full height
+					const FArenaTrail& Gorge = Connector.Trails[0];
+					for (int32 Each = 0; Each + 1 < Gorge.Points.Num(); ++Each) {
+						const FArenaTrailPoint& A = Gorge.Points[Each];
+						const FArenaTrailPoint& B = Gorge.Points[Each + 1];
+						const FVector2D Mid = (A.At + B.At) * 0.5;
+						if (Mid.X < 13000.0 || Mid.X > Connector.Length - 13000.0) {
+							continue;
+						}
+						const FVector2D Run = (B.At - A.At).GetSafeNormal();
+						const FVector2D Aside(-Run.Y, Run.X);
+						double Higher = 0.0;
+						for (const double Hand : { -1.0, 1.0 }) {
+							// (a side valley may open here: the wall is then met a little way along; inside a tight bend the two arms' walls meet in a fin lower than the mesa)
+							double Wall = 0.0;
+							for (double Shift = -3000.0; Shift <= 3000.0; Shift += 500.0) {
+								Wall = FMath::Max(Wall, High(World(Mid + Run * Shift + Aside * Hand * (FMath::Max(A.Half, B.Half) + 2600.0))));
+							}
+							LowestWall = FMath::Min(LowestWall, Wall);
+							Higher = FMath::Max(Higher, Wall);
+							bWalls = bWalls && Wall >= 1000.0;
+						}
+						bWalls = bWalls && Higher >= 2000.0;
+					}
+					ClimbedCanyons += Connector.Trails.ContainsByPredicate([](const FArenaTrail& Way) { return Way.Points.Last().Floor > 0.0f; }) ? 1 : 0;
+					for (int32 Valley = 1; Valley < Connector.Trails.Num(); ++Valley) {
+						const FArenaTrail& Way = Connector.Trails[Valley];
+						++Valleys;
+						double Before = High(World(Way.Points[0].At));
+						for (int32 Each = 0; Each + 1 < Way.Points.Num(); ++Each) {
+							const FVector From = World(Way.Points[Each].At);
+							const FVector To = World(Way.Points[Each + 1].At);
+							const double Far = FVector::Dist2D(From, To);
+							for (double Gone = 100.0; Gone <= Far; Gone += 100.0) {
+								const double Here = High(FMath::Lerp(From, To, Gone / Far));
+								SteepestValley = FMath::Max(SteepestValley, FMath::Abs(Here - Before) / 100.0);
+								bValleys = bValleys && FMath::Abs(Here - Before) / 100.0 < 0.7;
+								Before = Here;
+							}
+						}
+						const double End = High(World(Way.Points.Last().At));
+						if (Way.Points.Last().Floor > 0.0f) {
+							++Climbs;
+							bClimbs = bClimbs && End > Connector.Rise - 700.0;
+						}
+						else {
+							++Bowls;
+							bBowl = bBowl && FMath::Abs(End) < 60.0;
+						}
+					}
+					// onto the mesa from each plot, 15 m in from either edge of the land
+					for (const double Edge : { -1.0, 1.0 }) {
+						for (const bool bFar : { false, true }) {
+							double Before = High(World(FVector2D(bFar ? Connector.Length : 0.0, Edge * (Connector.Width * 0.5 - 1500.0))));
+							for (double Gone = 100.0; Gone <= 12000.0; Gone += 100.0) {
+								const double Here = High(World(FVector2D(bFar ? Connector.Length - Gone : Gone, Edge * (Connector.Width * 0.5 - 1500.0))));
+								SteepestOnto = FMath::Max(SteepestOnto, FMath::Abs(Here - Before) / 100.0);
+								bOnto = bOnto && FMath::Abs(Here - Before) / 100.0 < 0.7;
+								Before = Here;
+							}
+							ShortOfTop = FMath::Max(ShortOfTop, Connector.Rise - Before);
+							bOnto = bOnto && Before > Connector.Rise - 700.0;
+						}
+					}
+					// its rocks: each 3 m and more from the way walked, by its whole reach
+					for (const FArenaProp& Piece : Plan.Props) {
+						const FVector At = Piece.Transform.GetLocation();
+						const FVector Local = Connector.Frame.InverseTransformPosition(At);
+						if (Local.X < 0.0 || Local.X > Connector.Length || FMath::Abs(Local.Y) > Connector.Width * 0.5) {
+							continue;
+						}
+						++Rocks;
+						bRocksNoBlocks = bRocksNoBlocks && Piece.Scenery >= EArenaScenery::CoverRock02 && Piece.Scenery <= EArenaScenery::CoverRock08;
+						const double Reach = 0.5 * FVector2D(BoxOf(Piece).X, BoxOf(Piece).Y).Size();
+						for (int32 Step = 0; Step + 2 < Connector.Route.Num(); ++Step) {
+							const double Off = FromLine(At, Connector.Route[Step].Point, Connector.Route[Step + 1].Point) - Reach;
+							NearestRock = FMath::Min(NearestRock, Off);
+							bRocksClear = bRocksClear && Off >= 299.0;
+						}
+					}
+					// the paint: the canyon's own in the gorge, half way; none where the canyon meets its plots
+					const FVector Middle = Connector.Route[Connector.Route.Num() / 2].Point;
+					bPainted = bPainted && ASenniteArena::GroundPaint(Plan, Middle.X, Middle.Y).B > 0.99f;
+					for (const double Along : { 0.0, static_cast<double>(Connector.Length) }) {
+						for (const double Across : { -0.4, 0.0, 0.4 }) {
+							const FVector At = World(FVector2D(Along, Across * Connector.Width));
+							bPainted = bPainted && ASenniteArena::GroundPaint(Plan, At.X, At.Y).B < 0.004f;
+						}
+					}
+				}
+			}
+		}
+		Test->TestTrue(TEXT("A canyon's way across keeps to the gorge's level floor"), bFloor && Canyons > 0);
+		Test->TestTrue(TEXT("Through its mesa a canyon's gorge has a wall 10 m and more high either side, and 20 m and more on one"), bWalls);
+		Test->TestTrue(TEXT("Every side valley of a canyon is ground under 35 degrees steep from the gorge to its end"), bValleys && Valleys > 0);
+		Test->TestTrue(TEXT("A climbing side valley ends on the mesa's top"), bClimbs);
+		Test->TestTrue(TEXT("Nine canyons in ten have a side valley that climbs to the mesa's top"), ClimbedCanyons * 10 >= Canyons * 9);
+		Test->TestTrue(TEXT("The bowl of a canyon stays at the gorge's level"), bBowl && Bowls > 0);
+		Test->TestTrue(TEXT("A canyon's mesa can be walked onto from each plot, near either edge of its land"), bOnto);
+		Test->TestTrue(TEXT("A canyon lays no block: it is ground"), bNoBlocks);
+		Test->TestTrue(TEXT("What stands in a canyon is rocks, solid by their own shapes"), bRocksNoBlocks && Rocks > 0);
+		Test->TestTrue(TEXT("A canyon's rocks leave 3 m of floor clear either side of the way walked"), bRocksClear);
+		Test->TestTrue(TEXT("The ground is painted as the canyon's own in its gorge, and not where it meets a plot"), bPainted);
+		UE_LOG(LogArenaCheck, Display, TEXT("GAMECHECK canyon: %d canyons over 120 plans; the way across lies within %.0f cm of level; the lowest wall stands %.1f m; %d side valleys (%d climb to the top, in %d canyons; %d bowls), the steepest %.0f degrees; the way onto the mesa is %.0f degrees at its steepest and ends %.1f m under the mesa's own height at most; %d rocks, the nearest to the way walked %.1f m"),
+			Canyons, HighestFloor, LowestWall / 100.0, Valleys, Climbs, ClimbedCanyons, Bowls, FMath::RadiansToDegrees(FMath::Atan(SteepestValley)), FMath::RadiansToDegrees(FMath::Atan(SteepestOnto)), ShortOfTop / 100.0, Rocks, NearestRock / 100.0);
+	}
+
+	/**
 	 * The trees and bushes round the bases, held against plans for many seeds: every base has trees
 	 * and bushes; each stands on its plot's land, off its pad, on the ground; none stands in a way out; trees
 	 * stand apart; every tree has its trunk block; and the rest of the arena (its bases, connectors,
@@ -1024,7 +1179,7 @@ namespace
 						bool bInForest = false;
 						for (const FArenaConnector& Connector : Plan.Connectors) {
 							const FVector Local = Connector.Frame.InverseTransformPosition(FVector(At.X, At.Y, 0.0));
-							bInForest = bInForest || (Connector.Kind == EConnectorKind::TreeTop && Local.X > 0.0 && Local.X < Size.ConnectorLength && FMath::Abs(Local.Y) < Size.ConnectorWidth * 0.5);
+							bInForest = bInForest || (Connector.Kind == EConnectorKind::TreeTop && Local.X > 0.0 && Local.X < Connector.Length && FMath::Abs(Local.Y) < Connector.Width * 0.5);
 						}
 						const bool bTrunk = Plan.Boxes.ContainsByPredicate([&At](const FArenaBox& Block) {
 							return Block.Tint == EArenaTint::Hidden && FVector::Dist2D(Block.Centre, At) < 1.0 && FMath::IsNearlyEqual(Block.Centre.Z - Block.Size.Z * 0.5, At.Z, 1.0);
@@ -1047,7 +1202,7 @@ namespace
 						}
 						const FVector Way = (Plan.Bases[Connector.FromBase == Base ? Connector.ToBase : Connector.FromBase] - Plan.Bases[Base]).GetSafeNormal2D();
 						const FVector From = At - Plan.Bases[Base];
-						bWaysOutClear = bWaysOutClear && !(FVector::DotProduct(From, Way) > 0.0 && FMath::Abs(FVector::CrossProduct(Way, From).Z) < Size.ConnectorWidth * 0.5 + 150.0);
+						bWaysOutClear = bWaysOutClear && !(FVector::DotProduct(From, Way) > 0.0 && FMath::Abs(FVector::CrossProduct(Way, From).Z) < Size.PieceWidth * 0.5 + 150.0);
 					}
 					if (IsTree(Piece)) {
 						++TreesOn[Base];
@@ -1163,7 +1318,7 @@ namespace
 				TSet<EConnectorKind> Seen;
 				for (int32 Index = 0; Index < Plan.Connectors.Num(); ++Index) {
 					const FArenaConnector& Connector = Plan.Connectors[Index];
-					bEveryConnectorBuilt &= Connector.Route.Num() >= 2;
+					bEveryConnectorBuilt &= Connector.Route.Num() >= 2 && (!ASenniteArena::IsLand(Connector.Kind) || Connector.Trails.Num() > 0);
 					bNeighboursDiffer &= Plan.Connectors.Num() < 2 || Connector.Kind != Plan.Connectors[(Index + 1) % Plan.Connectors.Num()].Kind;
 					bNoKindTwice &= !Seen.Contains(Connector.Kind);
 					Seen.Add(Connector.Kind);
@@ -1183,7 +1338,8 @@ namespace
 				NoTrees.BushesPerBase = 0;
 				NoTrees.CoverPerBase = NoTrees.CoverPerWay = NoTrees.OutcropsPerBase = NoTrees.CragsPerBase = NoTrees.FramesPerBase = NoTrees.StonesPerBase = NoTrees.PatchesPerBase = 0;
 				NoTrees.OuterRocksPerBase = NoTrees.OuterPatchesPerBase = NoTrees.GrovesPerBase = 0;
-				bEveryConnectorBuilt &= ASenniteArena::MakePlan(Seed, Bases, INDEX_NONE, NoTrees).Boxes.Num() > 0 && Plan.Bases.Num() == Bases;
+				const bool bAllLand = !Plan.Connectors.ContainsByPredicate([](const FArenaConnector& Connector) { return !ASenniteArena::IsLand(Connector.Kind); });
+				bEveryConnectorBuilt &= (bAllLand || ASenniteArena::MakePlan(Seed, Bases, INDEX_NONE, NoTrees).Boxes.Num() > 0) && Plan.Bases.Num() == Bases;
 				if (Bases == 2) {
 					KindsAsOnlyConnector.Add(static_cast<int32>(Plan.Connectors[0].Kind));
 				}
@@ -1194,7 +1350,7 @@ namespace
 			Test->TestEqual(FString::Printf(TEXT("With %d bases, %d seeds give %d different arenas"), Bases, Seeds, Seeds), Hashes.Num(), Seeds);
 		}
 		Test->TestTrue(TEXT("The same seed gives the same arena"), bRepeatable);
-		Test->TestTrue(TEXT("Every connector has blocks and a way across"), bEveryConnectorBuilt);
+		Test->TestTrue(TEXT("Every connector has a way across, and blocks or, where it is land itself, ways cut through its land"), bEveryConnectorBuilt);
 		Test->TestTrue(TEXT("Connectors that meet at a base are never the same kind"), bNeighboursDiffer);
 		Test->TestTrue(TEXT("No kind of connector appears twice in a match of up to six bases"), bNoKindTwice);
 		Test->TestEqual(TEXT("Every kind turns up as the connector between two bases"), KindsAsOnlyConnector.Num(), Kinds);
@@ -1254,6 +1410,7 @@ namespace
 			CheckGreen(Test);
 			CheckDressing(Test);
 			CheckOuterLand(Test);
+			CheckCanyon(Test);
 			CheckGroundBuilt(Test, World, Arena);
 			CheckLand(Test, World, Arena);
 			CheckTrees(Test, World, Arena);
@@ -1272,8 +1429,8 @@ namespace
 				Plan.Seed, Plan.Bases.Num(), *Plan.KindsText(), Plan.Boxes.Num(), Plan.Craft.Num(), Connector.Route.Num());
 
 			// a camera above the middle of the connector, looking down along it, for a picture of the whole of it
-			const FVector Middle = Connector.Frame.TransformPosition(FVector(Size.ConnectorLength * 0.5, 0.0, 0.0));
-			const FVector Eye = Connector.Frame.TransformPosition(FVector(-Size.ConnectorLength * 0.25, -Size.ConnectorLength * 1.3, Size.ConnectorLength * 1.35));
+			const FVector Middle = Connector.Frame.TransformPosition(FVector(Connector.Length * 0.5, 0.0, 0.0));
+			const FVector Eye = Connector.Frame.TransformPosition(FVector(Connector.Length * 0.5 - Size.ConnectorLength * 0.75, -Size.ConnectorLength * 1.3, Size.ConnectorLength * 1.35));
 			Above = World->SpawnActor<ACameraActor>(Eye, (Middle - Eye).Rotation());
 			if (Above.IsValid()) {
 				Controller->SetViewTarget(Above.Get());
@@ -1303,8 +1460,8 @@ namespace
 			if (Step == 1) {
 				// and from the side and below, for the bases and what is under them
 				Step = 2;
-				const FVector Middle = Plan.Connectors[0].Frame.TransformPosition(FVector(Size.ConnectorLength * 0.5, 0.0, -Size.ConnectorLength * 0.12));
-				const FVector Eye = Plan.Connectors[0].Frame.TransformPosition(FVector(Size.ConnectorLength * 0.5, -Size.ConnectorLength * 1.9, Size.ConnectorLength * 0.12));
+				const FVector Middle = Plan.Connectors[0].Frame.TransformPosition(FVector(Plan.Connectors[0].Length * 0.5, 0.0, -Size.ConnectorLength * 0.12));
+				const FVector Eye = Plan.Connectors[0].Frame.TransformPosition(FVector(Plan.Connectors[0].Length * 0.5, -Size.ConnectorLength * 1.9, Size.ConnectorLength * 0.12));
 				if (Above.IsValid()) {
 					Above->SetActorLocationAndRotation(Eye, (Middle - Eye).Rotation());
 				}

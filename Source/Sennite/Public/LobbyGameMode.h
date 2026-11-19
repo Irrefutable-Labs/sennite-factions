@@ -8,7 +8,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogSenniteLobby, Log, All);
 
 /**
  * The lobby: the Menu map hosted with ?listen?game=lobby. Players join it by address and stand on the
- * stage as the hero each chose; the host starts, and the server travels everyone to the test range
+ * stage as the hero each chose; the host starts, and the server travels everyone to an arena
  * together, each keeping their hero (ASennitePlayerState::CopyProperties).
  */
 UCLASS()
@@ -21,7 +21,7 @@ public:
 
 	/** The map, and its options, the lobby travels to when the host starts. */
 	UPROPERTY(EditDefaultsOnly, Category = "Sennite|Lobby")
-	FString MatchMap = TEXT("/Game/Maps/TestRange?listen");
+	FString MatchMap = TEXT("/Game/Maps/Arena?listen");
 
 	/** Nobody is given a body in the lobby: their hero stands on the stage. */
 	virtual bool PlayerCanRestart_Implementation(APlayerController* Player) override { return false; }
