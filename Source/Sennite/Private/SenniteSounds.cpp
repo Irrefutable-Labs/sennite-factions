@@ -476,7 +476,8 @@ void USenniteSounds::Destroyed(AActor* Actor)
 	const FVector At = Actor->GetActorLocation();
 	if (const ABuildingActor* Piece = Cast<ABuildingActor>(Actor)) {
 		// It fell: on the server because its health ran out, on another machine because the server took it away.
-		const bool bFell = !Piece->IsPreview && (Piece->HasAuthority() ? Piece->Health <= 0.0f : Piece->GetLocalRole() == ROLE_SimulatedProxy);
+		// One taken away whole was already heard going (piece.remove).
+		const bool bFell = !Piece->IsPreview && !Piece->bTakenAway && (Piece->HasAuthority() ? Piece->Health <= 0.0f : Piece->GetLocalRole() == ROLE_SimulatedProxy);
 		if (bFell) {
 			PlayAt(this, Named(TEXT("piece.break"), Made(Piece->MaterialType)), At);
 		}

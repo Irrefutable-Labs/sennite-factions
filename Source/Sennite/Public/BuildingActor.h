@@ -146,6 +146,12 @@ public:
 	/** The player on this machine who is editing it, if one is. While they are, what arrives from the server does not redraw it. */
 	TWeakObjectPtr<ASenniteCharacter> EditingHere;
 
+	/**
+	 * Taken away whole by a player of its side, not brought down: it leaves no rubble and no crash. Set on
+	 * each machine as it is told (ASenniteCharacter::NetMulticastPieceTakenAway), just before the piece ends.
+	 */
+	bool bTakenAway = false;
+
 	virtual void PreInitializeComponents() override;
 
 	/** A piece that falls breaks into its tiles where it stood (ASennitePieceRubble), on every machine that draws. */

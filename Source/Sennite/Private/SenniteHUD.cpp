@@ -202,7 +202,7 @@ void ASenniteHUD::DrawStatus()
 	// editing a piece: what the buttons do
 	if (Now.bEditing) {
 		HudPlate(Canvas, W * 0.5f - 200.0f * S, H * 0.70f, 400.0f * S, 34.0f * S);
-		Label(TEXT("edit"), TEXT("EDITING   FIRE: CUT OR PUT BACK A TILE   AIM: RESET   G: DONE"), W * 0.5f - 188.0f * S, H * 0.70f + 9.0f * S, 11, FLinearColor::White);
+		Label(TEXT("edit"), TEXT("EDITING   FIRE: CUT OR PUT BACK A TILE   AIM: RESET   G: DONE   R: REMOVE IT"), W * 0.5f - 232.0f * S, H * 0.70f + 9.0f * S, 11, FLinearColor::White);
 	}
 
 	const FLinearColor Plate(0.0f, 0.0f, 0.0f, 0.35f);

@@ -2,7 +2,9 @@
 // shows a wall preview and the left mouse button builds the wall on the build grid; turning the
 // camera a quarter turn and pressing C then F does the same for a ramp and a floor, the right mouse
 // button changing the material in between; each piece costs its price once, has its material's
-// strength, and is solid: the hero then runs up the ramp she built.
+// strength, and is solid. G then edits the wall she built and the reload button takes it away whole:
+// it is gone without rubble, heard as taken away, nothing is given back for it and the ramp and the
+// floor stand. The hero then runs up the ramp she built.
 //
 // Tools/check_building.sh runs this and reads the result.
 
@@ -15,6 +17,7 @@
 #include "SenniteCharacter.h"
 #include "SenniteGameMode.h"
 #include "SennitePlayerState.h"
+#include "SenniteSounds.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -31,7 +34,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, WallPreview, WallBuilt, Turn, RampPreview, RampBuilt, FloorPreview, FloorBuilt, Climb, Done };
+		enum class EPhase { WaitForPawn, WallPreview, WallBuilt, Turn, RampPreview, RampBuilt, FloorPreview, FloorBuilt, TakeAway, Climb, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -100,6 +103,10 @@ namespace
 		FVector Origin = FVector::ZeroVector;
 		double StartZ = 0.0;
 		double TopZ = 0.0;
+		TWeakObjectPtr<ABuildingActor> Taken;
+		FRotator LookBefore = FRotator::ZeroRotator;
+		int32 WoodBefore = 0;
+		int32 TakenAwayBefore = 0;
 		GameCheck::FMouseTurn Turn;
 	};
 
@@ -233,6 +240,63 @@ namespace
 			if (Elapsed(World) < 1.6) {
 				return false;
 			}
+			LookBefore = Controller->GetControlRotation();
+			Enter(EPhase::TakeAway, World);
+			return false;
+
+		case EPhase::TakeAway:
+			// Out of build mode, looking at the wall she built: G edits it, and the reload button takes it away
+			// whole. (The floor lies under the ramp, so from above the aim falls on the ramp first.)
+			if (Step == 0) {
+				const TArray<ABuildingActor*> Walls = Built(World, TEXT("Wall"));
+				if (Walls.Num() != 1) {
+					return Fail(TEXT("The wall she built is not standing"));
+				}
+				Taken = Walls[0];
+				const FVector Middle = (Taken->TileTransform(Taken->TileCount() / 2, false) * Taken->GetActorTransform()).GetLocation();
+				if (!GameCheck::AimStep(Controller, Controller->PlayerCameraManager->GetCameraLocation(), Middle, 0.5)) {
+					return Elapsed(World) > 10.0 ? Fail(TEXT("Could not look at the wall she built")) : false;
+				}
+				int32 Tile = INDEX_NONE;
+				Test->TestTrue(TEXT("The wall she built is hers to edit"), Hero->EditablePieceUnderAim(Tile) == Taken.Get());
+				WoodBefore = State->MaterialCounts[0];
+				TakenAwayBefore = USenniteSounds::Heard(World, TEXT("piece.remove"));
+				Tap(Controller, EKeys::G);
+				Step = 1;
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (Step == 1) {
+				if (Elapsed(World) < 0.3) {
+					return false;
+				}
+				Test->TestTrue(TEXT("G begins editing the wall"), Hero->GetEditingPiece() == Taken.Get());
+				// the reload button, while editing
+				Tap(Controller, EKeys::R);
+				Step = 2;
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (Elapsed(World) < 0.8) {
+				return false;
+			}
+			Test->TestTrue(TEXT("Taking the piece away ends the edit"), Hero->GetEditingPiece() == nullptr);
+			Test->TestFalse(TEXT("The wall is gone"), Taken.IsValid());
+			Test->TestEqual(TEXT("No wall stands"), Built(World, TEXT("Wall")).Num(), 0);
+			Test->TestEqual(TEXT("The ramp and the floor stand"), Built(World, TEXT("Ramp")).Num() + Built(World, TEXT("Floor")).Num(), 2);
+			Test->TestEqual(TEXT("Nothing is given back for a piece taken away"), State->MaterialCounts[0], WoodBefore);
+			Test->TestEqual(TEXT("The piece is heard taken away, once"), USenniteSounds::Heard(World, TEXT("piece.remove")), TakenAwayBefore + 1);
+			{
+				int32 Rubble = 0;
+				for (TActorIterator<ASennitePieceRubble> It(World); It; ++It) {
+					++Rubble;
+				}
+				Test->TestEqual(TEXT("A piece taken away leaves no rubble"), Rubble, 0);
+			}
+			UE_LOG(LogBuildingCheck, Display, TEXT("GAMECHECK taken away: walls %d, wood %d -> %d, heard %d"), Built(World, TEXT("Wall")).Num(),
+				WoodBefore, State->MaterialCounts[0], USenniteSounds::Heard(World, TEXT("piece.remove")) - TakenAwayBefore);
+			// back to the view she had, facing the ramp
+			Controller->SetControlRotation(LookBefore);
 			StartZ = Hero->GetActorLocation().Z;
 			TopZ = StartZ;
 			GameCheck::Key(Controller, EKeys::W, IE_Pressed);

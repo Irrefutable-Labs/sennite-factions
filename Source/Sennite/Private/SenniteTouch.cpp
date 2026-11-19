@@ -182,6 +182,10 @@ bool USenniteTouchControls::Shows(const FButton& Button) const
 	if (Hero == nullptr) {
 		return false;
 	}
+	if (Button.Key == EKeys::R && Hero->GetEditingPiece() != nullptr) {
+		// while editing a piece it reads REMOVE and takes the whole piece away, gun in hand or not
+		return true;
+	}
 	if (Button.Key == EKeys::E) {
 		// the same test the HUD makes before it says how to open a crate
 		const ASenniteCrate* Rules = GetDefault<ASenniteCrate>();
@@ -219,7 +223,7 @@ FString USenniteTouchControls::LabelOf(const FButton& Button) const
 	const ASenniteCharacter* Hero = Controller ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
 	const ASennitePlayerState* State = Controller ? Controller->GetPlayerState<ASennitePlayerState>() : nullptr;
 	const bool bBuilding = State != nullptr && State->InBuildMode;
-	// editing a piece: FIRE marks the tile in sight, AIM puts every tile back, EDIT finishes
+	// editing a piece: FIRE marks the tile in sight, AIM puts every tile back, EDIT finishes, RELOAD takes the piece away
 	if (Hero != nullptr && Hero->GetEditingPiece() != nullptr) {
 		if (Button.Key == EKeys::LeftMouseButton) {
 			return TEXT("TILE");
@@ -229,6 +233,9 @@ FString USenniteTouchControls::LabelOf(const FButton& Button) const
 		}
 		if (Button.Key == EKeys::G) {
 			return TEXT("DONE");
+		}
+		if (Button.Key == EKeys::R) {
+			return TEXT("REMOVE");
 		}
 	}
 	if (Button.Key == EKeys::LeftMouseButton && Hero != nullptr) {
