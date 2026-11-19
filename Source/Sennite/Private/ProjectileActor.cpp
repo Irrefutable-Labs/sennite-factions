@@ -23,6 +23,8 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "TimerManager.h"
+#include "Camera/PlayerCameraManager.h"
+#include "GameFramework/PlayerController.h"
 #include "UObject/UObjectIterator.h"
 
 // Sets default values
@@ -119,7 +121,14 @@ void AProjectileActor::BeginPlay()
 		else {
 			UE_LOG(LogTemp, Error, TEXT("Laser '%s' did not load: the bullet is seen as a bolt"), *Laser.ToString());
 		}
-		PlayFor(this, LaserFlash, GetActorLocation(), GetActorRotation(), LaserFlashSeconds);
+		// not right in front of this player's own eyes: aimed in, the shot leaves at the camera, and the flash would be a
+		// ball over the view (seen so on the A16, 2026-11-19)
+		const APlayerController* Mine = GetWorld()->GetFirstPlayerController();
+		const bool bAtMyEyes = Mine != nullptr && Mine->PlayerCameraManager != nullptr
+			&& FVector::Dist(Mine->PlayerCameraManager->GetCameraLocation(), GetActorLocation()) < FlashNearest;
+		if (!bAtMyEyes) {
+			PlayFor(this, LaserFlash, GetActorLocation(), GetActorRotation(), LaserFlashSeconds);
+		}
 	}
 	if (HasAuthority()) {
 		//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, "projectile beginplay");

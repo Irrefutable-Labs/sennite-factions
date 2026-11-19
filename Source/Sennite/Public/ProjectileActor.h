@@ -82,6 +82,10 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Mesh")
 	float LaserHitSeconds = 0.35f;
 
+	/** A muzzle flash nearer this player's camera than this, in cm, is not played: it would cover the view. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Mesh")
+	float FlashNearest = 150.0f;
+
 	/** The laser the bullet carries, on every machine that draws it; none for a round or a bolt. */
 	UPROPERTY(Transient)
 	TObjectPtr<class UNiagaraComponent> Beam;
