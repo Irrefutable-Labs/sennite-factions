@@ -627,7 +627,7 @@ void ASenniteBaseEditor::DressHero()
 		return;
 	}
 	if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(Want.TryLoad())) {
-		Hero->GetMesh()->SetSkeletalMeshAsset(Mesh);
+		Hero->WearMesh(Mesh);
 		Dressed = Want;
 	}
 	else {
