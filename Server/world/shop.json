@@ -1,10 +1,6 @@
 {
   "currency": { "symbol": "DBUCKS", "name": "D-bucks", "supply": "100000000" },
   "vault": { "era": "10", "dbucks": "10000", "feeBps": 100 },
-  "grant": {
-    "era": { "perRequest": "5", "total": "50" },
-    "dbucks": { "perRequest": "5000", "total": "100000" }
-  },
   "skins": [
     { "id": "magma", "name": "Dekker Magma", "price": "800" },
     { "id": "energized", "name": "Dekker Energized", "price": "800" },

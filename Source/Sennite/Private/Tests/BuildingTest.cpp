@@ -2,7 +2,9 @@
 // shows a wall preview and the left mouse button builds the wall on the build grid; turning the
 // camera a quarter turn and pressing C then F does the same for a ramp and a floor, the right mouse
 // button changing the material in between; each piece costs its price once, has its material's
-// strength, and is solid: the hero then runs up the ramp she built.
+// strength, and is solid. G then edits the wall she built and the reload button takes it away whole:
+// it is gone without rubble, heard as taken away, what it cost is given back once (asking again for the
+// same piece is refused) and the ramp and the floor stand. The hero then runs up the ramp she built.
 //
 // Tools/check_building.sh runs this and reads the result.
 
@@ -15,6 +17,7 @@
 #include "SenniteCharacter.h"
 #include "SenniteGameMode.h"
 #include "SennitePlayerState.h"
+#include "SenniteSounds.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -31,7 +34,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, WallPreview, WallBuilt, Turn, RampPreview, RampBuilt, FloorPreview, FloorBuilt, Climb, Done };
+		enum class EPhase { WaitForPawn, WallPreview, WallBuilt, Turn, RampPreview, RampBuilt, FloorPreview, FloorBuilt, TakeAway, Climb, NextRamp, ClimbOn, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -100,6 +103,13 @@ namespace
 		FVector Origin = FVector::ZeroVector;
 		double StartZ = 0.0;
 		double TopZ = 0.0;
+		TWeakObjectPtr<ABuildingActor> Taken;
+		FRotator LookBefore = FRotator::ZeroRotator;
+		int32 WoodBefore = 0;
+		int32 TakenAwayBefore = 0;
+		bool AskedAgain = false;
+		int32 DeniedBefore = 0;
+		int32 DeniedAfter = 0;
 		GameCheck::FMouseTurn Turn;
 	};
 
@@ -233,6 +243,73 @@ namespace
 			if (Elapsed(World) < 1.6) {
 				return false;
 			}
+			LookBefore = Controller->GetControlRotation();
+			Enter(EPhase::TakeAway, World);
+			return false;
+
+		case EPhase::TakeAway:
+			// Out of build mode, looking at the wall she built: G edits it, and the reload button takes it away
+			// whole. (The floor lies under the ramp, so from above the aim falls on the ramp first.)
+			if (Step == 0) {
+				const TArray<ABuildingActor*> Walls = Built(World, TEXT("Wall"));
+				if (Walls.Num() != 1) {
+					return Fail(TEXT("The wall she built is not standing"));
+				}
+				Taken = Walls[0];
+				const FVector Middle = (Taken->TileTransform(Taken->TileCount() / 2, false) * Taken->GetActorTransform()).GetLocation();
+				if (!GameCheck::AimStep(Controller, Controller->PlayerCameraManager->GetCameraLocation(), Middle, 0.5)) {
+					return Elapsed(World) > 10.0 ? Fail(TEXT("Could not look at the wall she built")) : false;
+				}
+				int32 Tile = INDEX_NONE;
+				Test->TestTrue(TEXT("The wall she built is hers to edit"), Hero->EditablePieceUnderAim(Tile) == Taken.Get());
+				WoodBefore = State->MaterialCounts[0];
+				TakenAwayBefore = USenniteSounds::Heard(World, TEXT("piece.remove"));
+				Tap(Controller, EKeys::G);
+				Step = 1;
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (Step == 1) {
+				if (Elapsed(World) < 0.3) {
+					return false;
+				}
+				Test->TestTrue(TEXT("G begins editing the wall"), Hero->GetEditingPiece() == Taken.Get());
+				// the reload button, while editing
+				Tap(Controller, EKeys::R);
+				Step = 2;
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			// Taken away and not yet ended: the same ask a second time is refused and gives nothing back.
+			if (!AskedAgain && Taken.IsValid() && Taken->bTakenAway) {
+				AskedAgain = true;
+				DeniedBefore = USenniteSounds::Heard(World, TEXT("ui.denied"));
+				Hero->ServerRemovePiece(Taken.Get());
+				DeniedAfter = USenniteSounds::Heard(World, TEXT("ui.denied"));
+				return false;
+			}
+			if (Elapsed(World) < 0.8) {
+				return false;
+			}
+			Test->TestTrue(TEXT("The piece was asked for a second time while it was taken away"), AskedAgain);
+			Test->TestEqual(TEXT("The second ask is refused"), DeniedAfter, DeniedBefore + 1);
+			Test->TestTrue(TEXT("Taking the piece away ends the edit"), Hero->GetEditingPiece() == nullptr);
+			Test->TestFalse(TEXT("The wall is gone"), Taken.IsValid());
+			Test->TestEqual(TEXT("No wall stands"), Built(World, TEXT("Wall")).Num(), 0);
+			Test->TestEqual(TEXT("The ramp and the floor stand"), Built(World, TEXT("Ramp")).Num() + Built(World, TEXT("Floor")).Num(), 2);
+			Test->TestEqual(TEXT("What the wall cost is given back, once"), State->MaterialCounts[0], WoodBefore + Hero->BuildingPieceCost);
+			Test->TestEqual(TEXT("The piece is heard taken away, once"), USenniteSounds::Heard(World, TEXT("piece.remove")), TakenAwayBefore + 1);
+			{
+				int32 Rubble = 0;
+				for (TActorIterator<ASennitePieceRubble> It(World); It; ++It) {
+					++Rubble;
+				}
+				Test->TestEqual(TEXT("A piece taken away leaves no rubble"), Rubble, 0);
+			}
+			UE_LOG(LogBuildingCheck, Display, TEXT("GAMECHECK taken away: walls %d, wood %d -> %d, heard %d, asked again %d, refused %d"), Built(World, TEXT("Wall")).Num(),
+				WoodBefore, State->MaterialCounts[0], USenniteSounds::Heard(World, TEXT("piece.remove")) - TakenAwayBefore, AskedAgain ? 1 : 0, DeniedAfter - DeniedBefore);
+			// back to the view she had, facing the ramp
+			Controller->SetControlRotation(LookBefore);
 			StartZ = Hero->GetActorLocation().Z;
 			TopZ = StartZ;
 			GameCheck::Key(Controller, EKeys::W, IE_Pressed);
@@ -241,19 +318,77 @@ namespace
 			return false;
 
 		case EPhase::Climb:
-			// W with Left Shift runs her the way the camera faces: onto the ramp and up it
+			// W with Left Shift runs her the way the camera faces: onto the ramp and up it. She stops part of the way
+			// up, standing on it.
 			TopZ = FMath::Max(TopZ, Hero->GetActorLocation().Z);
-			if (Step == 0 && TopZ - StartZ > 0.6 * Cell) {
-				Step = 1;
-				GameCheck::Shot(TEXT("Building"), TEXT("on_ramp.png"));
+			if (TopZ - StartZ < 0.45 * Cell) {
+				return Elapsed(World) > 6.0 ? Fail(FString::Printf(TEXT("The hero did not run up the ramp she built (rose %.0f of %.0f)"), TopZ - StartZ, Cell)) : false;
 			}
-			if (Elapsed(World) < 2.2) {
+			GameCheck::Key(Controller, EKeys::LeftShift, IE_Released);
+			GameCheck::Key(Controller, EKeys::W, IE_Released);
+			GameCheck::Shot(TEXT("Building"), TEXT("on_ramp.png"));
+			UE_LOG(LogBuildingCheck, Display, TEXT("GAMECHECK climb: rose %.0f of %.0f"), TopZ - StartZ, Cell);
+			Enter(EPhase::NextRamp, World);
+			return false;
+
+		case EPhase::NextRamp: {
+			// Standing on the ramp and facing up it, the next ramp goes on from this one's top: in the next cell that
+			// way, one level up, not on the ground. Built, the two make one climb.
+			const FVector Onward = Origin + FVector(0.0, -2.0 * Cell, Cell);
+			switch (Step) {
+			case 0:
+				if (Elapsed(World) < 0.6) { return false; }
+				Test->TestTrue(TEXT("She stands on the ramp, part of the way up"), Hero->GetCharacterMovement()->IsMovingOnGround() && Hero->GetActorLocation().Z - StartZ > 0.3 * Cell);
+				Step = 1;
+				Tap(Controller, EKeys::C);
+				return false;
+			case 1: {
+				if (Elapsed(World) < 1.1) { return false; }
+				const ABuildingActor* Preview = Hero->BuildingPreview;
+				Test->TestTrue(TEXT("On a ramp, the ramp preview shows"), Preview != nullptr && Preview->StructureType == TEXT("Ramp"));
+				if (Preview != nullptr) {
+					Test->TestTrue(FString::Printf(TEXT("The next ramp goes on from the top of the one she stands on (preview at %s, the top is %s)"),
+						*Preview->GetActorLocation().ToCompactString(), *Onward.ToCompactString()), Preview->GetActorLocation().Equals(Onward, 1.0));
+					Test->TestTrue(TEXT("and rises the same way"), FMath::Abs(FMath::FindDeltaAngleDegrees(Preview->GetActorRotation().Yaw, -90.0)) < 1.0);
+					UE_LOG(LogBuildingCheck, Display, TEXT("GAMECHECK next ramp: preview at %s, the first ramp's top is %s"), *Preview->GetActorLocation().ToCompactString(), *Onward.ToCompactString());
+				}
+				GameCheck::Shot(TEXT("Building"), TEXT("next_ramp.png"));
+				Step = 2;
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Pressed);
+				return false;
+			}
+			case 2: {
+				if (Elapsed(World) < 1.9) { return false; }
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
+				const TArray<ABuildingActor*> Ramps = Built(World, TEXT("Ramp"));
+				Test->TestEqual(TEXT("A second ramp is built"), Ramps.Num(), 2);
+				Test->TestTrue(TEXT("It stands where its preview was, one level up"), Ramps.ContainsByPredicate([&Onward](const ABuildingActor* Each) { return Each->GetActorLocation().Equals(Onward, 1.0); }));
+				Step = 3;
+				// C again leaves build mode
+				Tap(Controller, EKeys::C);
+				return false;
+			}
+			default:
+				if (Elapsed(World) < 2.6) { return false; }
+				Test->TestTrue(TEXT("Out of build mode again"), !State->InBuildMode);
+				GameCheck::Key(Controller, EKeys::W, IE_Pressed);
+				GameCheck::Key(Controller, EKeys::LeftShift, IE_Pressed);
+				Enter(EPhase::ClimbOn, World);
+				return false;
+			}
+		}
+
+		case EPhase::ClimbOn:
+			// on up the second ramp: she ends well above the top of the first
+			TopZ = FMath::Max(TopZ, Hero->GetActorLocation().Z);
+			if (TopZ - StartZ < 1.5 * Cell && Elapsed(World) < 5.0) {
 				return false;
 			}
 			GameCheck::Key(Controller, EKeys::LeftShift, IE_Released);
 			GameCheck::Key(Controller, EKeys::W, IE_Released);
-			Test->TestTrue(TEXT("The hero runs up the ramp she built"), TopZ - StartZ > 0.6 * Cell);
-			UE_LOG(LogBuildingCheck, Display, TEXT("GAMECHECK climb: rose %.0f of %.0f"), TopZ - StartZ, Cell);
+			Test->TestTrue(FString::Printf(TEXT("The two ramps make one climb: she rises past the top of the first (rose %.0f, a ramp is %.0f)"), TopZ - StartZ, Cell), TopZ - StartZ > 1.5 * Cell);
+			GameCheck::Shot(TEXT("Building"), TEXT("up_two_ramps.png"));
+			UE_LOG(LogBuildingCheck, Display, TEXT("GAMECHECK climb on: rose %.0f of %.0f"), TopZ - StartZ, 2.0 * Cell);
 			UE_LOG(LogBuildingCheck, Display, TEXT("GAMECHECK finished"));
 			Phase = EPhase::Done;
 			return true;

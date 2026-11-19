@@ -106,7 +106,7 @@ void USenniteSounds::Count(FName Name)
 	++Counts.FindOrAdd(Name);
 }
 
-void USenniteSounds::Play(const UObject* In, FName Name)
+void USenniteSounds::Play(const UObject* In, FName Name, bool bOutlivesScreen)
 {
 	UWorld* World = WorldOf(In);
 	const FSenniteSound* Sound = World != nullptr ? Find(Name) : nullptr;
@@ -117,7 +117,12 @@ void USenniteSounds::Play(const UObject* In, FName Name)
 		Here->Count(Name);
 	}
 	if (USoundBase* Wave = Take(*Sound)) {
-		UGameplayStatics::PlaySound2D(World, Wave, Sound->Volume);
+		if (bOutlivesScreen) {
+			UGameplayStatics::SpawnSound2D(World, Wave, Sound->Volume, 1.0f, 0.0f, nullptr, bOutlivesScreen);
+		}
+		else {
+			UGameplayStatics::PlaySound2D(World, Wave, Sound->Volume);
+		}
 	}
 }
 
@@ -190,9 +195,10 @@ FName USenniteSounds::ButtonSound(FName Action)
 
 void USenniteSounds::Button(const UObject* In, FName Action)
 {
+	// a press is heard to its end though the button changes the screen (PLAY, START, LEAVE)
 	const FName Sound = ButtonSound(Action);
 	if (!Sound.IsNone()) {
-		Play(In, Sound);
+		Play(In, Sound, true);
 	}
 }
 
@@ -417,7 +423,9 @@ void USenniteSounds::HearHero(ASenniteCharacter* Hero, FSeen& Seen, float DeltaT
 	// a step each stride walked on the ground (a hero moved a long way in one frame was put there, not walking)
 	const float Speed = Going.Size2D();
 	const float Went = FVector::Dist2D(At, Seen.At);
-	if (bOnGround && Speed > StandingSpeed && Went < 300.0f) {
+	// A hero that floats over the ground has no steps to hear. The owner, 2026-11-19: "He's floating, so he shouldn't
+	// make footstep noises."
+	if (bOnGround && Speed > StandingSpeed && Went < 300.0f && !Hero->bHeroFloats) {
 		const bool bRunning = Speed > RunningSpeed;
 		const float Stride = bRunning ? RunStride : WalkStride;
 		Seen.Walked += Went;
@@ -476,7 +484,8 @@ void USenniteSounds::Destroyed(AActor* Actor)
 	const FVector At = Actor->GetActorLocation();
 	if (const ABuildingActor* Piece = Cast<ABuildingActor>(Actor)) {
 		// It fell: on the server because its health ran out, on another machine because the server took it away.
-		const bool bFell = !Piece->IsPreview && (Piece->HasAuthority() ? Piece->Health <= 0.0f : Piece->GetLocalRole() == ROLE_SimulatedProxy);
+		// One taken away whole was already heard going (piece.remove).
+		const bool bFell = !Piece->IsPreview && !Piece->bTakenAway && (Piece->HasAuthority() ? Piece->Health <= 0.0f : Piece->GetLocalRole() == ROLE_SimulatedProxy);
 		if (bFell) {
 			PlayAt(this, Named(TEXT("piece.break"), Made(Piece->MaterialType)), At);
 		}

@@ -19,6 +19,13 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
+#include "TimerManager.h"
+#include "Camera/PlayerCameraManager.h"
+#include "GameFramework/PlayerController.h"
+#include "UObject/UObjectIterator.h"
 
 // Sets default values
 AProjectileActor::AProjectileActor()
@@ -55,6 +62,17 @@ AProjectileActor::AProjectileActor()
 void AProjectileActor::PreInitializeComponents()
 {
 	Super::PreInitializeComponents();
+	// a bullet seen as one of the ammo models: the model as it is, its middle on the bullet, its point the way it flies
+	if (!Round.IsNull()) {
+		if (UStaticMesh* Model = Cast<UStaticMesh>(Round.TryLoad())) {
+			Bolt->SetStaticMesh(Model);
+			Bolt->SetRelativeLocation(FVector::ZeroVector);
+			Bolt->SetRelativeScale3D(FVector::OneVector);
+			bRound = true;
+			return;
+		}
+		UE_LOG(LogTemp, Error, TEXT("Round '%s' did not load: the bullet is seen as a bolt"), *Round.ToString());
+	}
 	// what a bolt is made of is one setting, held by the base class
 	const AProjectileActor* Shared = GetDefault<AProjectileActor>();
 	if (UStaticMesh* Shape = Cast<UStaticMesh>(Shared->BoltShape.TryLoad())) {
@@ -76,6 +94,9 @@ void AProjectileActor::PreInitializeComponents()
 
 void AProjectileActor::LayBolt()
 {
+	if (bRound || Beam != nullptr) {
+		return;
+	}
 	// a streak behind the bullet, no longer than the bullet has flown: it never reaches back through the gun
 	const float Length = FMath::Clamp(Flown, BoltWidth, BoltLength);
 	Bolt->SetRelativeLocation(FVector(-Length * 0.5f, 0.0f, 0.0f));
@@ -86,6 +107,29 @@ void AProjectileActor::LayBolt()
 void AProjectileActor::BeginPlay()
 {
 	Super::BeginPlay();
+	// a laser: carried along with the bullet, and flashing where it leaves, on every machine that draws it
+	if (!Laser.IsNull() && GetNetMode() != NM_DedicatedServer) {
+		if (UNiagaraSystem* System = Cast<UNiagaraSystem>(Laser.TryLoad())) {
+			Beam = UNiagaraFunctionLibrary::SpawnSystemAttached(System, CollisionComp, NAME_None, FVector::ZeroVector, FRotator::ZeroRotator,
+				EAttachLocation::KeepRelativeOffset, true, false, ENCPoolMethod::None, true);
+			if (Beam != nullptr) {
+				Bolt->SetVisibility(false);
+				LayLaser();
+				Beam->Activate(true);
+			}
+		}
+		else {
+			UE_LOG(LogTemp, Error, TEXT("Laser '%s' did not load: the bullet is seen as a bolt"), *Laser.ToString());
+		}
+		// not right in front of this player's own eyes: aimed in, the shot leaves at the camera, and the flash would be a
+		// ball over the view (seen so on the A16, 2026-11-19)
+		const APlayerController* Mine = GetWorld()->GetFirstPlayerController();
+		const bool bAtMyEyes = Mine != nullptr && Mine->PlayerCameraManager != nullptr
+			&& FVector::Dist(Mine->PlayerCameraManager->GetCameraLocation(), GetActorLocation()) < FlashNearest;
+		if (!bAtMyEyes) {
+			PlayFor(this, LaserFlash, GetActorLocation(), GetActorRotation(), LaserFlashSeconds);
+		}
+	}
 	if (HasAuthority()) {
 		//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, "projectile beginplay");
 		CollisionComp->OnComponentBeginOverlap.AddDynamic(this, &AProjectileActor::OnOverlapBegin);	// set up a notification for when this component hits something blocking
@@ -100,6 +144,7 @@ void AProjectileActor::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 	Flown += ProjectileMovementComponent->Velocity.Size() * DeltaTime;
 	LayBolt();
+	LayLaser();
 }
 
 void AProjectileActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult) {
@@ -113,49 +158,50 @@ void AProjectileActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActo
 		|| OtherActor->IsA(AProjectileActor::StaticClass()) || OtherActor->IsA(AStormActor::StaticClass())) {
 		return;
 	}
-	ASenniteCharacter* Shooter = Cast<ASenniteCharacter>(WeaponHolder);
+	if (Land(OtherActor, Damage, ProjectileType, Cast<ASenniteCharacter>(WeaponHolder))) {
+		bSpent = true;
+		Destroy();
+	}
+}
+
+bool AProjectileActor::Land(AActor* OtherActor, float Damage, int32 Kind, ASenniteCharacter* Shooter) {
 	ASenniteCharacter* Victim = Cast<ASenniteCharacter>(OtherActor);
 	if (AWeaponActor* HitWeapon = Cast<AWeaponActor>(OtherActor)) {
 		// a weapon on the ground lets the bullet by; one in a player's hands is a hit on that player
 		if (HitWeapon->Holder == nullptr) {
-			return;
+			return false;
 		}
 		Victim = HitWeapon->Holder;
 	}
 	else if (AHealingActor* HitItem = Cast<AHealingActor>(OtherActor)) {
 		if (HitItem->Holder == nullptr) {
-			return;
+			return false;
 		}
 		Victim = HitItem->Holder;
 	}
 	if (Victim != nullptr) {
 		if (Victim == Shooter) {
-			return;
+			return false;
 		}
-		bSpent = true;
 		Victim->TakeHit(Damage, Shooter);
-		Destroy();
-		return;
+		return true;
 	}
 	if (ABuildingActor* Piece = Cast<ABuildingActor>(OtherActor)) {
 		// a preview is not there to be hit
 		if (Piece->IsPreview) {
-			return;
+			return false;
 		}
-		bSpent = true;
 		// the piece stops the bullet whether the shot counts on it or not (ABuildingActor::TakeHit)
 		Piece->TakeHit(Damage, Shooter);
-		Destroy();
-		return;
+		return true;
 	}
-	bSpent = true;
 	if (ASenniteStructure* Structure = Cast<ASenniteStructure>(OtherActor)) {
 		// a faction's built structure: in a match it comes down when it has taken enough
 		Structure->TakeHit(Damage, Shooter);
 	}
 	if (AMaterialActor* Node = Cast<AMaterialActor>(OtherActor)) {
 		Node->Health -= Damage;
-		if (ProjectileType == 0 && Shooter != nullptr && Shooter->GetController() != nullptr) {
+		if (Kind == 0 && Shooter != nullptr && Shooter->GetController() != nullptr) {
 			// the pickaxe harvests: its holder gains the node's material
 			ASennitePlayerState* State = Cast<ASennitePlayerState>(Shooter->GetController()->PlayerState);
 			if (State != nullptr && State->MaterialCounts.IsValidIndex(Node->MaterialType)) {
@@ -167,7 +213,56 @@ void AProjectileActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActo
 		}
 	}
 	// anything else stops the bullet
-	Destroy();
+	return true;
+}
+
+void AProjectileActor::Preload(TArray<TObjectPtr<UObject>>& Into)
+{
+	for (TObjectIterator<UClass> It; It; ++It) {
+		if (!It->IsChildOf(AProjectileActor::StaticClass()) || It->HasAnyClassFlags(CLASS_Abstract)) {
+			continue;
+		}
+		const AProjectileActor* Made = GetDefault<AProjectileActor>(*It);
+		for (const FSoftObjectPath* Each : { &Made->Round, &Made->Laser, &Made->LaserFlash, &Made->LaserHit }) {
+			if (!Each->IsNull()) {
+				if (UObject* Loaded = Each->TryLoad()) {
+					Into.AddUnique(Loaded);
+				}
+			}
+		}
+	}
+}
+
+void AProjectileActor::LayLaser()
+{
+	if (Beam != nullptr) {
+		Beam->SetVariablePosition(TEXT("LaserEnd"), GetActorLocation() - GetActorForwardVector() * FMath::Clamp(Flown, 1.0f, LaserTrail));
+	}
+}
+
+void AProjectileActor::PlayFor(UObject* WorldContext, const FSoftObjectPath& Effect, const FVector& Where, const FRotator& Facing, float Seconds)
+{
+	UWorld* World = WorldContext != nullptr ? WorldContext->GetWorld() : nullptr;
+	UNiagaraSystem* System = Effect.IsNull() || World == nullptr ? nullptr : Cast<UNiagaraSystem>(Effect.TryLoad());
+	if (System == nullptr) {
+		return;
+	}
+	UNiagaraComponent* Playing = UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, System, Where, Facing);
+	if (Playing == nullptr) {
+		return;
+	}
+	// stopped, what it has let out fades as it would, and then it is gone
+	FTimerHandle Stop;
+	World->GetTimerManager().SetTimer(Stop, FTimerDelegate::CreateWeakLambda(Playing, [Playing]() { Playing->Deactivate(); }), FMath::Max(0.01f, Seconds), false);
+}
+
+void AProjectileActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// a laser that landed on something before its time ran out is seen hitting it there
+	if (EndPlayReason == EEndPlayReason::Destroyed && Beam != nullptr && GetWorld() != nullptr && GetWorld()->GetTimeSeconds() - CreationTime < Lifespan - 0.05f) {
+		PlayFor(this, LaserHit, GetActorLocation(), GetActorRotation(), LaserHitSeconds);
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
 void AProjectileActor::SelfDestruct() {

@@ -190,9 +190,9 @@ export class Publisher {
    * The connect code a player's wallet reads. The grant lets the game ask the
    * wallet, without asking the player again, to sign and store changes to the
    * faction's state, to commit materials within caps and take them back, to
-   * trade ERA for D-bucks through the publisher's vault and pay D-bucks to the
-   * shop within caps, to prove what it owns of the materials, D-bucks and ERA,
-   * and to take in objects the publisher issued.
+   * prove what it owns of the materials, D-bucks and ERA, and to take in
+   * objects the publisher issued. Paying D-bucks and trading ERA are in no
+   * grant (Shop.grants): each waits in the wallet for the player's approval.
    */
   async offer(caps: { symbol: string; perRequest: string; total: string }[]): Promise<Offer> {
     return this.options.app.offer({

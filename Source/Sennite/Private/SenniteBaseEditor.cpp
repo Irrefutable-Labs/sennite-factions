@@ -480,7 +480,8 @@ void ASenniteBaseEditor::ReplaceSelected()
 
 void ASenniteBaseEditor::Dismantle()
 {
-	USenniteSounds::Play(this, TEXT("ui.click"));
+	// a building taken down is heard as a piece taken away; the same key on the people page, or with none chosen, as a click
+	USenniteSounds::Play(this, !bPeople && Selected() != nullptr ? TEXT("piece.remove") : TEXT("ui.click"));
 	USennitePublisher* Server = Publisher();
 	if (bPeople) {
 		// on the people page the same key withdraws an invitation
@@ -616,47 +617,6 @@ void ASenniteBaseEditor::ShopAct()
 	}
 	// what is bought goes to the wallet, and shows in the inventory: the shop only sells
 	Server->BuySkin(Server->ShopSkins[ShopIndex - 1].Id);
-}
-
-void ASenniteBaseEditor::DressHero()
-{
-	USenniteSounds::Play(this, TEXT("ui.click"));
-	const USennitePublisher* Server = Publisher();
-	const APlayerController* Controller = GetWorld()->GetFirstPlayerController();
-	ASenniteCharacter* Hero = Controller != nullptr ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
-	if (Server == nullptr || Hero == nullptr) {
-		return;
-	}
-	if (DressedPawn.Get() != Hero || DressedHero != Hero->HeroMesh) {
-		// a new pawn, or a pawn that became another hero, starts in the hero's own mesh
-		DressedPawn = Hero;
-		DressedHero = Hero->HeroMesh;
-		Dressed = Hero->HeroMesh;
-	}
-	// the skin the player chose, only while the wallet's proof says it owns it and only on the hero it is a
-	// skin of (the same skeleton); otherwise the hero as it ships
-	FSoftObjectPath Want = Hero->HeroMesh;
-	if (Server->bMaterialsKnown && !Server->Wearing.IsEmpty() && Server->Owns(Server->Wearing)) {
-		const ASenniteBaseEditor* Shared = GetDefault<ASenniteBaseEditor>();
-		if (const FSenniteSkinMesh* Skin = Shared->Skins.FindByPredicate([Server](const FSenniteSkinMesh& S) { return S.Id == Server->Wearing; })) {
-			const USkeletalMesh* SkinMesh = Cast<USkeletalMesh>(Skin->Mesh.TryLoad());
-			const USkeletalMesh* Own = Cast<USkeletalMesh>(Hero->HeroMesh.TryLoad());
-			if (SkinMesh != nullptr && Own != nullptr && SkinMesh->GetSkeleton() == Own->GetSkeleton()) {
-				Want = Skin->Mesh;
-			}
-		}
-	}
-	if (Want == Dressed) {
-		return;
-	}
-	if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(Want.TryLoad())) {
-		Hero->WearMesh(Mesh);
-		Dressed = Want;
-	}
-	else {
-		UE_LOG(LogTemp, Error, TEXT("Skin mesh '%s' did not load ([/Script/Sennite.SenniteBaseEditor] in DefaultGame.ini)"), *Want.ToString());
-		Dressed = Want;
-	}
 }
 
 void ASenniteBaseEditor::Join()
@@ -869,7 +829,6 @@ void ASenniteBaseEditor::Tick(float DeltaTime)
 	SyncStructures();
 	UpdateGhost();
 	UpdateCursorTile();
-	DressHero();
 }
 
 void ASenniteBaseEditor::DrawOn(AHUD* Hud, UCanvas* Canvas)

@@ -17,6 +17,8 @@
 #include "SenniteGameInstance.h"
 #include "SenniteHeroes.h"
 #include "SenniteMatch.h"
+#include "SennitePublisher.h"
+#include "SenniteBaseEditor.h"
 #include "Animation/AnimMontage.h"
 #include "EngineUtils.h"
 #include "BuildingActor.h"
@@ -81,6 +83,7 @@ ASenniteCharacter::ASenniteCharacter(const FObjectInitializer& ObjectInitializer
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
 	CameraBoom->TargetArmLength = 300.0f; // The camera follows at this distance behind the character	
+	FollowDistance = CameraBoom->TargetArmLength;
 	CameraBoom->bUsePawnControlRotation = true; // Rotate the arm based on the controller
 
 	// Create a follow camera
@@ -183,16 +186,41 @@ const TArray<TSubclassOf<ABuildingActor>>* ASenniteCharacter::BuildingClassesOf(
 void ASenniteCharacter::BuildPlacement(const FString& PieceKind, FVector& OutLocation, FRotator& OutRotation) const
 {
 	// Build cells are squares of BuildGridCell centred on the grid points, in levels BuildGridCell apart.
-	// The player builds along the quarter turn the camera faces, on the level they stand on, or one
-	// level up when looking well above the horizon.
+	// The player builds along the quarter turn the camera faces, on the level they stand on.
 	const double Cell = BuildGridCell;
 	const FRotator View = GetControlRotation();
+	const double Pitch = FRotator::NormalizeAxis(View.Pitch);
 	const double FacingYaw = FMath::RoundHalfFromZero(FRotator::NormalizeAxis(View.Yaw) / 90.0) * 90.0;
 	const FVector Ahead = FRotator(0.0, FacingYaw, 0.0).Vector();
 	const FVector Feet = GetActorLocation() - FVector(0.0, 0.0, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 	const auto Snap = [Cell](double Value) { return FMath::RoundHalfFromZero(Value / Cell) * Cell; };
-	const double Level = FMath::FloorToDouble((Feet.Z + 1.0) / Cell) * Cell + (FRotator::NormalizeAxis(View.Pitch) > 40.0 ? Cell : 0.0);
-	const FVector OwnCell(Snap(Feet.X), Snap(Feet.Y), Level);
+	double Level = FMath::FloorToDouble((Feet.Z + 1.0) / Cell) * Cell;
+	FVector2D Own(Snap(Feet.X), Snap(Feet.Y));
+	// Standing on a ramp, the level is the one the ramp reaches at the edge the player faces: facing up it, its
+	// top, so that the next ramp goes on from where this one ends and a run of them climbs into the sky; facing
+	// down it, its foot; across it, whichever the feet are nearer. The owner, 2026-11-19: "the next ramp just
+	// automatically goes to the ground level. You should be able to build a ramp that walks you into the sky".
+	const UCharacterMovementComponent* Moves = GetCharacterMovement();
+	const ABuildingActor* On = Moves != nullptr ? Cast<ABuildingActor>(Moves->CurrentFloor.HitResult.GetActor()) : nullptr;
+	if (On != nullptr && On->IsPreview) {
+		On = nullptr;
+	}
+	if (On != nullptr && On->StructureType == TEXT("Ramp")) {
+		const double Foot = On->GetActorLocation().Z;
+		const double Rising = FVector::DotProduct(Ahead, On->GetActorForwardVector());
+		Own = FVector2D(On->GetActorLocation().X, On->GetActorLocation().Y);
+		Level = Rising > 0.5 ? Foot + Cell : Rising < -0.5 ? Foot : Foot + (Feet.Z - Foot > Cell * 0.5 ? Cell : 0.0);
+	}
+	// The height is the player's to pick: looking well above the horizon builds one level up; and from a piece,
+	// looking well down builds one level down. ("You should be able to pick your build height if it's coming
+	// off of another piece.")
+	if (Pitch > BuildUpAbove) {
+		Level += Cell;
+	}
+	else if (On != nullptr && Pitch < -BuildDownBelow) {
+		Level -= Cell;
+	}
+	const FVector OwnCell(Own.X, Own.Y, Level);
 	if (PieceKind == TEXT("Wall")) {
 		// on the far edge of the cell the player stands in, across the way they face
 		OutLocation = OwnCell + Ahead * (Cell * 0.5);
@@ -297,6 +325,9 @@ void ASenniteCharacter::ApplyHero()
 	HeroItemPalmOffset = Hero.ItemPalmOffset;
 	HeroAttackMontage = Hero.AttackMontage;
 	HeroCastBone = Hero.CastBone;
+	bHeroMelee = Hero.bMelee;
+	bHeroFloats = Hero.bFloats;
+	HeroAttackSound = !Hero.AttackSound.IsNone() ? Hero.AttackSound : bHeroMelee ? FName(TEXT("swing")) : FName(TEXT("attack.own"));
 	// the hero's own attack, for when it has no gun in hand
 	OwnAttack = HeroAttackMontage.IsNull() ? nullptr : Cast<UAnimMontage>(HeroAttackMontage.TryLoad());
 	if (!HeroAttackMontage.IsNull() && OwnAttack == nullptr) {
@@ -305,6 +336,7 @@ void ASenniteCharacter::ApplyHero()
 
 	if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(HeroMesh.TryLoad())) {
 		WearMesh(Mesh);
+		WornMesh = HeroMesh;
 	}
 	else {
 		UE_LOG(LogSenniteCharacter, Error, TEXT("Hero mesh '%s' did not load; the character has no body"), *HeroMesh.ToString());
@@ -387,6 +419,8 @@ void ASenniteCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerI
 
 void ASenniteCharacter::BeginPlay() {
 	Super::BeginPlay();
+	// every bullet's round and laser is loaded before the first shot (AProjectileActor::Preload)
+	AProjectileActor::Preload(BulletLooks);
 	//GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
 	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString("Client ")  + FString::FromInt(ENetMode::NM_Client) + FString(" server ") + FString::FromInt(ENetMode::NM_DedicatedServer));
 	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString::FromInt(GetNetMode()));
@@ -520,6 +554,11 @@ namespace
 
 void ASenniteCharacter::Tick(float DeltaTime) {
 	Super::Tick(DeltaTime);
+	// The skin the player wears is on the hero in every world it plays in: the arena and a match as much as the
+	// faction's land. The owner, 2026-11-19: "It doesn't actually play as that skin in the demo, in the gameplay".
+	if (const APlayerController* Mine = Cast<APlayerController>(GetController()); Mine != nullptr && Mine->IsLocalController()) {
+		WearChosenSkin();
+	}
 	// Editing a piece, on this player's own machine: a drag with the fire button held marks each tile
 	// the aim crosses alike; walking out of reach of the piece, or its fall, ends the edit unmade.
 	if (ABuildingActor* Editing = EditingPiece.Get()) {
@@ -557,8 +596,20 @@ void ASenniteCharacter::Tick(float DeltaTime) {
 		}
 		// and the player's camera looks over the hero's shoulder, so the gun and its bolts are seen past
 		// the hero, not hidden behind it
-		if (IsLocallyControlled() && CameraBoom != nullptr) {
-			CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, bFaceAim ? ShoulderView : FVector::ZeroVector, DeltaTime, 8.0f);
+		// Aiming, it comes in from behind the hero to the hero's own eyes: the hero's back is not under the
+		// crosshair, the player sees what the hero sees. Whether the hero is aiming is the one thing asked: the
+		// view closes in and opens out with it, however the aiming ended.
+		if (IsLocallyControlled() && CameraBoom != nullptr && FollowCamera != nullptr) {
+			const bool bEyes = AimedIn;
+			const FVector Beside = bEyes ? FVector(AimEyesAhead, 0.0f, 0.0f) : bFaceAim ? ShoulderView : FVector::ZeroVector;
+			CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, Beside, DeltaTime, bEyes ? 14.0f : 8.0f);
+			// up to the eyes whichever way the player looks: an offset in the world, not one that tips with the view
+			CameraBoom->TargetOffset = FMath::VInterpTo(CameraBoom->TargetOffset, FVector(0.0f, 0.0f, bEyes ? BaseEyeHeight : 0.0f), DeltaTime, 14.0f);
+			CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, bEyes ? 0.0f : FollowDistance, DeltaTime, 14.0f);
+			FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, bEyes ? AimFieldOfView : FollowFieldOfView, DeltaTime, 14.0f));
+			// Close enough to be inside the hero, the hero is not drawn for its own player (it still casts its shadow, and
+			// everyone else sees it), and its bones are kept up to date unseen: a shot leaves the gun where the gun is.
+			SeeThroughOwnEyes(CameraBoom->TargetArmLength < 0.4f * FollowDistance);
 		}
 	}
 	const bool bHideBuiltIn = CurrentWeapon != nullptr;
@@ -958,6 +1009,11 @@ void ASenniteCharacter::UseHealingItem() {
 }
 
 void ASenniteCharacter::Reload() {
+	// while editing a piece the reload button takes the whole piece away
+	if (EditingPiece.IsValid()) {
+		RemoveEditedPiece();
+		return;
+	}
 	ServerReloadWeapons();
 }
 
@@ -1671,6 +1727,12 @@ void ASenniteCharacter::ServerFireWeapon_Implementation() {
 		NextShotAt = Now + FMath::Max(0.05f, OwnAttackSeconds);
 		FTimerHandle Again;
 		GetWorldTimerManager().SetTimer(Again, this, &ASenniteCharacter::ServerPickaxeTimeOut, FMath::Max(0.05f, OwnAttackSeconds), false);
+		if (bHeroMelee) {
+			// fists, or what the hero swings: no bolt leaves it. The blow lands up close, a moment into the swing.
+			FTimerHandle Lands;
+			GetWorldTimerManager().SetTimer(Lands, this, &ASenniteCharacter::LandBlow, FMath::Max(0.01f, MeleeLandsAfter), false);
+			return;
+		}
 		ShotBullet = OwnBoltClass;
 		ShotGun = nullptr;
 		ShotAt = Now;
@@ -1950,8 +2012,9 @@ void ASenniteCharacter::ServerAimDownSights_Implementation() {
 			//ServerSetAimedInSpeed();
 			State->AimedIn = true;
 		}
-		else if (State && State->CurrentWeapon == 0 && !State->InBuildMode && CurrentHealingItem == nullptr) {
-			// the hero's own weapon is aimed as a gun is: the view closes in on where its bolt will go
+		else if (State && State->CurrentWeapon == 0 && !State->InBuildMode && CurrentHealingItem == nullptr && !bHeroMelee) {
+			// the hero's own weapon is aimed as a gun is: the view closes in on where its bolt will go. Fists and what
+			// a hero swings are not aimed: there is no bolt to send anywhere.
 			AimedIn = true;
 			ClientCameraAimIn();
 			State->AimedIn = true;
@@ -2278,12 +2341,29 @@ bool ASenniteCharacter::ServerSpawnAndAttachHealingItem_Validate(int HealingItem
 	return true;
 }
 
+// The view closes in and opens out in Tick, with AimedIn: what these two once set at a stroke.
 void ASenniteCharacter::ClientCameraAimIn_Implementation() {
-	FollowCamera->FieldOfView = 45;
 }
 
 void ASenniteCharacter::ClientCameraAimOut_Implementation() {
-	FollowCamera->FieldOfView = 90;
+}
+
+void ASenniteCharacter::SeeThroughOwnEyes(bool bEyes)
+{
+	USkeletalMeshComponent* Body = GetMesh();
+	if (Body != nullptr && bEyes != bThroughOwnEyes) {
+		bThroughOwnEyes = bEyes;
+		Body->bCastHiddenShadow = bEyes;
+		Body->SetOwnerNoSee(bEyes);
+		if (bEyes) {
+			SeenAnimTick = Body->VisibilityBasedAnimTickOption;
+		}
+		Body->VisibilityBasedAnimTickOption = bEyes ? EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones : SeenAnimTick;
+	}
+	// the gun in the hand is its own actor, and may be put in the hand or changed while aiming: on this machine, the player's own
+	if (CurrentWeapon != nullptr && CurrentWeapon->WeaponMesh != nullptr && CurrentWeapon->WeaponMesh->IsVisible() == bThroughOwnEyes) {
+		CurrentWeapon->WeaponMesh->SetVisibility(!bThroughOwnEyes);
+	}
 }
 
 void ASenniteCharacter::ClientGetBulletTransform_Implementation() {
@@ -2320,7 +2400,72 @@ void ASenniteCharacter::NetMulticastOwnAttack_Implementation() {
 	if (OwnAttack != nullptr) {
 		PlayAnimMontage(OwnAttack);
 	}
-	USenniteSounds::PlayAt(this, TEXT("attack.own"), OwnWeaponTip());
+	// as the hero's own (a blow is heard as a swing or a punch, never as a shot)
+	USenniteSounds::PlayAt(this, HeroAttackSound, OwnWeaponTip());
+}
+
+void ASenniteCharacter::LandBlow() {
+	if (!HasAuthority()) {
+		return;
+	}
+	// ahead of the chest, the way the player looks, as far as the blow reaches: the nearest thing in the way takes it
+	const FVector From = GetActorLocation() + FVector(0.0, 0.0, BaseEyeHeight * 0.5);
+	const FVector Ahead = GetControlRotation().Vector();
+	FCollisionQueryParams Skip(SCENE_QUERY_STAT(SenniteBlow), false, this);
+	if (CurrentWeapon != nullptr) {
+		Skip.AddIgnoredActor(CurrentWeapon);
+	}
+	FCollisionObjectQueryParams Kinds;
+	Kinds.AddObjectTypesToQuery(ECC_Pawn);
+	Kinds.AddObjectTypesToQuery(ECC_WorldStatic);
+	Kinds.AddObjectTypesToQuery(ECC_WorldDynamic);
+	Kinds.AddObjectTypesToQuery(ECC_PhysicsBody);
+	TArray<FHitResult> InTheWay;
+	GetWorld()->SweepMultiByObjectType(InTheWay, From, From + Ahead * MeleeReach, FQuat::Identity, Kinds, FCollisionShape::MakeSphere(MeleeAcross), Skip);
+	InTheWay.Sort([](const FHitResult& A, const FHitResult& B) { return A.Distance < B.Distance; });
+	for (const FHitResult& Each : InTheWay) {
+		AActor* Other = Each.GetActor();
+		if (Other == nullptr || Other->IsA(AProjectileActor::StaticClass()) || Other->IsA(AStormActor::StaticClass())) {
+			continue;
+		}
+		// kind 0, the pickaxe's: it takes materials from what it harvests, as the own weapon's bolt does
+		if (AProjectileActor::Land(Other, MeleeDamage, 0, this)) {
+			USenniteSounds::PlayAt(this, TEXT("bolt.hit"), Each.ImpactPoint);
+			return;
+		}
+	}
+}
+
+void ASenniteCharacter::WearChosenSkin() {
+	const UGameInstance* Game = GetGameInstance();
+	const USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+	if (Server == nullptr || !Server->IsOn() || HeroMesh.IsNull()) {
+		return;
+	}
+	FSoftObjectPath Want = HeroMesh;
+	if (Server->bMaterialsKnown && !Server->Wearing.IsEmpty() && Server->Owns(Server->Wearing)) {
+		const ASenniteBaseEditor* Shared = GetDefault<ASenniteBaseEditor>();
+		if (const FSenniteSkinMesh* Skin = Shared->Skins.FindByPredicate([Server](const FSenniteSkinMesh& S) { return S.Id == Server->Wearing; })) {
+			if (Skin->Mesh == WornMesh) {
+				return; // on already
+			}
+			const USkeletalMesh* SkinMesh = Cast<USkeletalMesh>(Skin->Mesh.TryLoad());
+			const USkeletalMesh* Own = Cast<USkeletalMesh>(HeroMesh.TryLoad());
+			if (SkinMesh != nullptr && Own != nullptr && SkinMesh->GetSkeleton() == Own->GetSkeleton()) {
+				Want = Skin->Mesh;
+			}
+		}
+	}
+	if (Want == WornMesh) {
+		return;
+	}
+	if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(Want.TryLoad())) {
+		WearMesh(Mesh);
+	}
+	else {
+		UE_LOG(LogSenniteCharacter, Error, TEXT("Skin mesh '%s' did not load ([/Script/Sennite.SenniteBaseEditor] in DefaultGame.ini)"), *Want.ToString());
+	}
+	WornMesh = Want;
 }
 
 FVector ASenniteCharacter::OwnWeaponTip() const {
@@ -2527,7 +2672,8 @@ void ASenniteCharacter::MarkEditTile(int32 Tile, bool bCut) {
 		return;
 	}
 	if (Next != EditCut) {
-		USenniteSounds::Play(this, TEXT("piece.edit"));
+		// a tile taken out is heard as a piece taken away, one put back as the edit
+		USenniteSounds::Play(this, bCut ? TEXT("piece.remove") : TEXT("piece.edit"));
 	}
 	EditCut = Next;
 	Piece->ShowCut(EditCut, EditCut);
@@ -2585,6 +2731,64 @@ bool ASenniteCharacter::MayEditPiece(const ABuildingActor* Piece, int32 NewCut) 
 		}
 	}
 	return true;
+}
+
+void ASenniteCharacter::RemoveEditedPiece() {
+	ABuildingActor* Piece = EditingPiece.Get();
+	// the edit ends with nothing cut: the piece goes whole, or the server refuses and it stands as it was
+	CancelEdit();
+	if (Piece != nullptr) {
+		ServerRemovePiece(Piece);
+	}
+}
+
+bool ASenniteCharacter::MayRemovePiece(const ABuildingActor* Piece) const {
+	// a standing piece of the player's own side, within reach: what the player may edit, the player may take away
+	return IsValid(Piece) && !Piece->IsPreview && !Piece->IsActorBeingDestroyed() && !Piece->bTakenAway && Health > 0.0f
+		&& Piece->MayBeEditedBy(GetPlayerState())
+		&& FVector::Dist(Piece->GetActorLocation(), GetActorLocation()) <= MaxBuildReach + ABuildingActor::Cell;
+}
+
+void ASenniteCharacter::ServerRemovePiece_Implementation(ABuildingActor* Piece) {
+	if (!MayRemovePiece(Piece)) {
+		if (IsValid(Piece)) {
+			ClientEditRefused(Piece);
+		}
+		return;
+	}
+	// What the piece cost goes back to whoever built it, in its material; a piece nobody paid for gives
+	// nothing back. Once only: the piece is marked taken away below, on this machine at once, and
+	// MayRemovePiece refuses a piece so marked.
+	if (ASennitePlayerState* Paid = Cast<ASennitePlayerState>(Piece->Builder)) {
+		if (Paid->MaterialCounts.IsValidIndex(Piece->MaterialType)) {
+			Paid->MaterialCounts[Piece->MaterialType] += BuildingPieceCost;
+		}
+	}
+	// Every machine is told first, so none sees it break; then it ends, and what it alone held up falls
+	// a moment later, as after any piece (ABuildingActor::EndPlay).
+	NetMulticastPieceTakenAway(Piece);
+	Piece->SetLifeSpan(PieceTakenAwaySeconds);
+}
+
+bool ASenniteCharacter::ServerRemovePiece_Validate(ABuildingActor* Piece) {
+	return true;
+}
+
+void ASenniteCharacter::NetMulticastPieceTakenAway_Implementation(ABuildingActor* Piece) {
+	if (!IsValid(Piece)) {
+		return;
+	}
+	Piece->bTakenAway = true;
+	Piece->EditingHere = nullptr;
+	Piece->SetActorHiddenInGame(true);
+	Piece->SetActorEnableCollision(false);
+	// the player who took it hears it wherever the piece is; anyone else from where it stood
+	if (IsLocallyControlled()) {
+		USenniteSounds::Play(this, TEXT("piece.remove"));
+	}
+	else {
+		USenniteSounds::PlayAt(this, TEXT("piece.remove"), Piece->GetActorLocation());
+	}
 }
 
 void ASenniteCharacter::ServerEditPiece_Implementation(ABuildingActor* Piece, int32 NewCut) {

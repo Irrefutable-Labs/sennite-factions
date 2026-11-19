@@ -24,6 +24,9 @@
 #include "SenniteTouch.h"
 #include "SenniteWeapons.h"
 #include "WeaponActor.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/GameViewportClient.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -60,7 +63,7 @@ namespace
 
 	private:
 		enum class EPhase {
-			WaitForPawn, FaceWeapons, WalkOver, Stop, OpenCrate, Slots, Jump, HoldFire, Reload, Build, Edit, FaceBack, Run, Drink, Bandage, Done
+			WaitForPawn, FaceWeapons, WalkOver, Stop, OpenCrate, Slots, Jump, HoldFire, Reload, Aim, Build, Edit, FaceBack, Run, Drink, Bandage, Done
 		};
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; }
@@ -144,6 +147,9 @@ namespace
 		FVector Mark = FVector::ZeroVector;
 		int32 ClipMark = 0;
 		int32 CountMark = 0;
+		int32 JumpMark = 0;
+		int32 PressMark = 0;
+		double BehindMark = 0.0;
 		float ShieldMark = 0.0f;
 		bool bSawWalking = false;
 		bool bSawRunning = false;
@@ -178,7 +184,7 @@ namespace
 				TEXT("FLOOR=FLOOR"), TEXT("RIFLE=RIFLE"), TEXT("SHOTGUN=SHOTGUN"), TEXT("BANDAGE=BANDAGE"), TEXT("POTION=POTION"), TEXT("STICK=0.00,0.00") }) {
 				Test->TestTrue(FString::Printf(TEXT("The HUD draws %s"), Name), Drawn(Name));
 			}
-			Test->TestFalse(TEXT("With no gun in hand, there is no RELOAD button: her own weapon has nothing to load"), Controls->LastDrawn.ContainsByPredicate([](const FString& Each) { return Each.StartsWith(TEXT("RELOAD=")); }));
+			Test->TestTrue(TEXT("With no gun in hand the RELOAD button is there, dimmed: her own weapon has nothing to load"), Drawn(TEXT("RELOAD=dimmed")));
 			Test->TestFalse(TEXT("With no crate near, there is no OPEN button"), Controls->LastDrawn.ContainsByPredicate([](const FString& Each) { return Each.StartsWith(TEXT("OPEN=")); }));
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK controls: %s"), *FString::Join(Controls->LastDrawn, TEXT(" ")));
 			GameCheck::Shot(TEXT("Touch"), TEXT("controls.png"));
@@ -192,12 +198,23 @@ namespace
 		switch (Phase) {
 		case EPhase::FaceWeapons:
 			// a drag to the right turns her right, a quarter turn, to face along the crate
+			if (Step == 0) {
+				// first a tap of the dimmed RELOAD, once the picture of the controls at rest is taken
+				if (Elapsed(World) > 0.5) {
+					Step = 1;
+					Press(TEXT("RELOAD"));
+				}
+				return false;
+			}
 			if (Elapsed(World) < 1.0) {
 				return false;
 			}
-			if (Step == 0) {
+			if (Step == 1) {
+				Lift(TEXT("RELOAD"));
+				Test->TestEqual(TEXT("A tap of RELOAD with no gun in hand is heard as refused"), USenniteSounds::Heard(World, TEXT("ui.denied")), 1);
+				Test->TestEqual(TEXT("and not as a press"), USenniteSounds::Heard(World, TEXT("ui.press")), 0);
 				// where she faced before the drag
-				Step = 1;
+				Step = 2;
 				Mark = FVector(Controller->GetControlRotation().Yaw, 0.0, 0.0);
 			}
 			if (!TurnStep(Controller, Mark.X + 90.0)) {
@@ -268,7 +285,7 @@ namespace
 
 		case EPhase::Slots:
 			// SHOTGUN, then RIFLE, each a tap
-			if (Step == 0) { Step = 1; Press(TEXT("SHOTGUN")); return false; }
+			if (Step == 0) { Step = 1; PressMark = USenniteSounds::Heard(World, TEXT("ui.press")); Press(TEXT("SHOTGUN")); return false; }
 			if (Step == 1 && Elapsed(World) > 0.15) { Step = 2; Lift(TEXT("SHOTGUN")); return false; }
 			if (Step == 2 && Elapsed(World) > 1.0) {
 				Step = 3;
@@ -304,6 +321,7 @@ namespace
 				ClipMark = Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->CurrentBulletCount : 0;
 				TopZ = Hero->GetActorLocation().Z;
 				Mark = Hero->GetActorLocation();
+				JumpMark = USenniteSounds::HeardBeginning(World, TEXT("jump."));
 				Press(TEXT("JUMP"));
 				Enter(EPhase::Jump, World);
 			}
@@ -318,9 +336,12 @@ namespace
 			Test->TestTrue(TEXT("JUMP lifts the hero off the ground"), TopZ > Mark.Z + 40.0);
 			Test->TestTrue(TEXT("She is back on the ground"), Hero->GetCharacterMovement()->IsMovingOnGround());
 			Test->TestEqual(TEXT("A touch on JUMP fires no shot"), Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->CurrentBulletCount : -1, ClipMark);
-			// every tap of a button is heard: the slots tapped above as one of a row, OPEN and JUMP as a press
-			Test->TestTrue(FString::Printf(TEXT("The taps of the slots are heard (%d)"), USenniteSounds::Heard(World, TEXT("ui.pick"))), USenniteSounds::Heard(World, TEXT("ui.pick")) >= 5);
-			Test->TestTrue(FString::Printf(TEXT("The taps of OPEN and JUMP are heard (%d)"), USenniteSounds::Heard(World, TEXT("ui.press"))), USenniteSounds::Heard(World, TEXT("ui.press")) >= 2);
+			// in play a button is heard as the owner's press recording, the one the menus' buttons play, and never as the
+			// small tick of a row: the five slots tapped above, once each. JUMP alone is heard only as the jump.
+			Test->TestEqual(TEXT("The tap of JUMP is heard as the jump"), USenniteSounds::HeardBeginning(World, TEXT("jump.")) - JumpMark, 1);
+			Test->TestEqual(TEXT("Each slot tapped is heard as a press, and JUMP is not"), USenniteSounds::Heard(World, TEXT("ui.press")) - PressMark, 5);
+			Test->TestEqual(TEXT("No tap in play is heard as a tick"), USenniteSounds::Heard(World, TEXT("ui.tick")), 0);
+			Test->TestEqual(TEXT("nor as one of a menu's row"), USenniteSounds::Heard(World, TEXT("ui.pick")), 0);
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK jump: rose %.0f cm"), TopZ - Mark.Z);
 			Press(TEXT("FIRE"));
 			Enter(EPhase::HoldFire, World);
@@ -359,9 +380,41 @@ namespace
 				GetDefault<ASenniteRifle>()->CrateRounds - (Hero->CurrentWeapon->MagazineSize - CountMark));
 			Test->TestTrue(TEXT("The reload is heard"), USenniteSounds::HeardBeginning(World, TEXT("reload.")) >= 1);
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK reload: clip %d -> %d, %d to spare"), CountMark, Hero->CurrentWeapon->CurrentBulletCount, State->EquippedWeaponsAmmunition[1]);
-			CountMark = Built(World);
-			Enter(EPhase::Build, World);
+			Enter(EPhase::Aim, World);
 			return false;
+
+		case EPhase::Aim: {
+			// AIM, tapped, looks through the hero's own eyes: the camera is where her eyes are, not behind her, and she is not
+			// drawn for her own player, so nothing of her is under the crosshair; tapped again, the camera is behind her again
+			const FVector Eyes = Hero->GetActorLocation() + FVector(0.0, 0.0, Hero->BaseEyeHeight);
+			const double CameraOff = FVector::Dist(Controller->PlayerCameraManager->GetCameraLocation(), Eyes);
+			switch (Step) {
+			case 0: if (Elapsed(World) > 0.5) { Step = 1; BehindMark = CameraOff; PressMark = USenniteSounds::Heard(World, TEXT("ui.press")); Press(TEXT("AIM")); } return false;
+			case 1: if (Elapsed(World) > 0.65) { Step = 2; Lift(TEXT("AIM")); } return false;
+			case 2:
+				if (Elapsed(World) < 1.9) { return false; }
+				Test->TestTrue(TEXT("A tap of AIM aims"), Hero->AimedIn);
+				Test->TestEqual(TEXT("and is heard as a press"), USenniteSounds::Heard(World, TEXT("ui.press")) - PressMark, 1);
+				Test->TestTrue(FString::Printf(TEXT("Aiming, the camera is at her eyes (%.0f cm from them; it follows %.0f cm off)"), CameraOff, BehindMark), CameraOff < 45.0);
+				Test->TestTrue(TEXT("and she is not drawn for her own player"), Hero->GetMesh()->bOwnerNoSee);
+				Test->TestTrue(TEXT("nor is the gun in her hand"), Hero->CurrentWeapon == nullptr || !Hero->CurrentWeapon->WeaponMesh->IsVisible());
+				UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK aim: the camera %.0f cm from her eyes aiming, %.0f cm following"), CameraOff, BehindMark);
+				GameCheck::Shot(TEXT("Touch"), TEXT("aim.png"));
+				Step = 3;
+				return false;
+			case 3: if (Elapsed(World) > 2.2) { Step = 4; Press(TEXT("AIM")); } return false;
+			case 4: if (Elapsed(World) > 2.35) { Step = 5; Lift(TEXT("AIM")); } return false;
+			default:
+				if (Elapsed(World) < 3.6) { return false; }
+				Test->TestFalse(TEXT("A second tap of AIM lets go"), Hero->AimedIn);
+				Test->TestTrue(FString::Printf(TEXT("Let go, the camera is behind her again (%.0f cm from her eyes)"), CameraOff), CameraOff > 200.0);
+				Test->TestFalse(TEXT("and she is drawn again"), Hero->GetMesh()->bOwnerNoSee);
+				Test->TestTrue(TEXT("and so is the gun in her hand"), Hero->CurrentWeapon == nullptr || Hero->CurrentWeapon->WeaponMesh->IsVisible());
+				CountMark = Built(World);
+				Enter(EPhase::Build, World);
+				return false;
+			}
+		}
 
 		case EPhase::Build:
 			// WALL, MAT, then FIRE (now BUILD) builds it; RAMP and FLOOR change the piece

@@ -126,6 +126,45 @@ public:
 	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	FName HeroCastBone;
 
+	/** The hero's own weapon is a blow up close, with no bolt and no aiming; and the hero floats, unheard as steps
+	 * (FSenniteHero::bMelee, bFloats). */
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
+	bool bHeroMelee = false;
+
+	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
+	bool bHeroFloats = false;
+
+	/** What this hero's own attack is heard as, by name (FSenniteHero::AttackSound). */
+	FName HeroAttackSound = TEXT("attack.own");
+
+	/** A blow of the hero's own weapon: what it takes off what it lands on, how far ahead it reaches, how wide it is,
+	 * and how long after the swing starts it lands. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	float MeleeDamage = 40.0f;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	float MeleeReach = 260.0f;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	float MeleeAcross = 45.0f;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")
+	float MeleeLandsAfter = 0.25f;
+
+	/** The server: the blow lands on the first thing ahead within reach, as a bolt of the hero's own weapon would. */
+	void LandBlow();
+
+	/** Every bullet's round and laser, held loaded while the hero is in play. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UObject>> BulletLooks;
+
+	/** The mesh on the body now: the hero's own, or the skin's the player wears. */
+	FSoftObjectPath WornMesh;
+
+	/** The player's own machine: the skin the player chose in the store is on the hero wherever it plays, only while the
+	 * wallet's proof says it owns it and only on the hero it is a skin of; otherwise the hero as it ships. */
+	void WearChosenSkin();
+
 	/** The hero's own attack, loaded. */
 	UPROPERTY()
 	TObjectPtr<UAnimMontage> OwnAttack;
@@ -148,6 +187,29 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Camera")
 	FVector ShoulderView = FVector(0.0f, 60.0f, 35.0f);
 
+	/**
+	 * Aiming, the player looks through the hero's own eyes: the camera comes in from behind the hero to its eye height and
+	 * this far ahead of its middle, and the hero and what it holds are not drawn for its own player, so nothing of the hero
+	 * is under the crosshair. Everyone else sees the hero as before. The owner, 2026-11-19, of aiming from behind the hero:
+	 * "When it zooms in, it's still behind him. It should go into first person or something, I guess. Right now, the
+	 * crosshairs are on his butt."
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "Camera")
+	float AimEyesAhead = 18.0f;
+
+	/** How wide the player's view is, in degrees: following the hero, and aiming. */
+	UPROPERTY(EditDefaultsOnly, Category = "Camera")
+	float FollowFieldOfView = 90.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Camera")
+	float AimFieldOfView = 45.0f;
+
+	/** On the player's own machine: stop drawing the hero and the gun in its hand for its own player, or draw them again. */
+	void SeeThroughOwnEyes(bool bEyes);
+
+	/** The player's own machine: the camera is close enough to the hero's eyes that the hero is not drawn for its player. */
+	bool IsSeenThroughOwnEyes() const { return bThroughOwnEyes; }
+
 	/** How much larger than its model a gun is in this hero's hands: the hero's arm against GunArm, between GunSizeLeast and GunSizeMost. */
 	float GunSize() const;
 
@@ -168,6 +230,12 @@ public:
 
 	/** Whether the hero's built-in weapon is hidden right now. */
 	bool bBuiltInWeaponHidden = false;
+	/** The player's own machine: the hero is not drawn for its own player, who is looking through its eyes. */
+	bool bThroughOwnEyes = false;
+	/** How the hero's bones were kept up to date while it was drawn, to go back to. */
+	EVisibilityBasedAnimTickOption SeenAnimTick = EVisibilityBasedAnimTickOption::AlwaysTickPose;
+	/** How far behind the hero the camera follows when not aiming: the boom's length as the hero was made. */
+	float FollowDistance = 300.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "State")
 	TSubclassOf<ASennitePlayerState> PlayerStateClass;
@@ -253,6 +321,27 @@ public:
 
 	/** On the server: whether this player's edit of a piece would be made. */
 	bool MayEditPiece(const ABuildingActor* Piece, int32 NewCut) const;
+
+	/** While editing a piece: take the whole piece away (the reload button, while editing). */
+	void RemoveEditedPiece();
+
+	/**
+	 * On the server: take a piece away whole, if this player may: a piece of the player's own side, within
+	 * reach, as for an edit. What it cost goes back to whoever built it, and what it alone held up falls as
+	 * after any piece.
+	 */
+	UFUNCTION(Server, Reliable, WithValidation)
+	void ServerRemovePiece(ABuildingActor* Piece);
+
+	/** On the server: whether this player may take a piece away. */
+	bool MayRemovePiece(const ABuildingActor* Piece) const;
+
+	/** On every machine: a piece was taken away. It goes at once, heard as taken away, and does not fall apart. */
+	UFUNCTION(NetMulticast, Reliable)
+	void NetMulticastPieceTakenAway(ABuildingActor* Piece);
+
+	/** How long after a piece is taken away the server ends it: time for every machine to be told first. */
+	static constexpr float PieceTakenAwaySeconds = 0.2f;
 
 	/** The server refused an edit: show the piece as it is. */
 	UFUNCTION(Client, Reliable)
@@ -714,6 +803,13 @@ public:
 	/** The side of one build grid cell. */
 	UPROPERTY(EditDefaultsOnly, Category = "Building")
 	float BuildGridCell = 480.0f;
+
+	/** Looking this many degrees above the horizon builds one level up; standing on a piece and looking this many below it, one level down. */
+	UPROPERTY(EditDefaultsOnly, Category = "Building")
+	float BuildUpAbove = 40.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Building")
+	float BuildDownBelow = 50.0f;
 
 	/**
 	 * The shot the server last let out and that has not left yet: its bullet, the gun it was let out

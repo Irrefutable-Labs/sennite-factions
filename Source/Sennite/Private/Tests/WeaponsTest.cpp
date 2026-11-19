@@ -19,6 +19,9 @@
 #include "SenniteHeroMesh.h"
 #include "SennitePlayerState.h"
 #include "SenniteWeapons.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
+#include "SenniteSounds.h"
 #include "Sound/SoundAttenuation.h"
 #include "Sound/SoundBase.h"
 #include "Animation/AnimInstance.h"
@@ -46,11 +49,19 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, OwnWeapon, OpenCrate, FromCrate, HoldShotgun, HoldRifle, Fire, HoldFire, BoughtGuns, OtherGuns, Done };
+		enum class EPhase { WaitForPawn, OwnWeapon, OpenCrate, FromCrate, HoldShotgun, HoldRifle, Fire, HoldFire, BoughtGuns, OtherGuns, Crossing, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
 		bool Fail(const FString& Why) { Test->AddError(Why); return true; }
+
+		/** A laser trails its shot: drawn behind it, about as far as its trail, and not far ahead or to its sides. */
+		void LaserLies(const TCHAR* Whose, const AProjectileActor* Made)
+		{
+			Test->TestTrue(FString::Printf(TEXT("The beam of %s trails it (%.0f cm behind, its trail %.0f)"), Whose, LaserBehind, Made->LaserTrail),
+				LaserBehind > Made->LaserTrail * 0.5f && LaserBehind < Made->LaserTrail + 150.0f);
+			Test->TestTrue(FString::Printf(TEXT("and does not reach ahead of it or wide (%.0f ahead, %.0f aside)"), LaserAhead, LaserAside), LaserAhead < 200.0f && LaserAside < 200.0f);
+		}
 
 		/** The held weapon is of the class asked for, fixed to the hero's weapon bone, near her hand, with a mesh. */
 		void CheckHeld(ASenniteCharacter* Hero, UClass* WeaponClass, const TCHAR* What)
@@ -92,6 +103,11 @@ namespace
 		double BulletOffLine = 0.0;
 		double BulletFromMuzzle = 0.0;
 		bool bBoltSeen = false;
+		/** What the last bullet was seen as: "round <its model>", "laser <its effect>" or "bolt"; and, for a laser, how far the
+		 * beam reaches behind it, ahead of it and to its sides, in its own frame (cm). */
+		FString SeenAs;
+		float LaserBehind = 0.0f, LaserAhead = 0.0f, LaserAside = 0.0f;
+		int32 FlightFrames = 0;
 		bool bBulletSent = false;
 		float BoltLongest = 0.0f;
 		int32 BulletsSpawned = 0;
@@ -141,6 +157,10 @@ namespace
 				Test->TestTrue(FString::Printf(TEXT("%s has a name"), *Gun->GetName()), !Made->DisplayName.IsEmpty());
 				Test->TestTrue(FString::Printf(TEXT("%s has a shot sound that loads"), *Gun->GetName()), Cast<USoundBase>(Made->FireSound.TryLoad()) != nullptr);
 			}
+			// every laser, the energy rifle's shot and a hero's own, is the owner's one laser recording
+			Test->TestTrue(TEXT("A hero's own shot is the energy rifle's laser, and nothing else"),
+				USenniteSounds::Takes(TEXT("attack.own")) == TArray<FSoftObjectPath>{ GetDefault<AWeaponActor>(ASenniteEnergyRifle::StaticClass())->FireSound });
+			Test->TestEqual(TEXT("The laser is the owner's recording"), GetDefault<AWeaponActor>(ASenniteEnergyRifle::StaticClass())->FireSound.ToString(), FString(TEXT("/Game/Sounds/SW_LaserShot.SW_LaserShot")));
 			Test->TestTrue(TEXT("A shot fades with distance"), Cast<USoundAttenuation>(GetDefault<AWeaponActor>()->FireFalloff.TryLoad()) != nullptr);
 			Test->TestTrue(TEXT("Opening a crate has a sound that loads"), Cast<USoundBase>(GetDefault<ASenniteCrate>()->OpenSound.TryLoad()) != nullptr);
 			Enter(EPhase::OwnWeapon, World);
@@ -159,7 +179,13 @@ namespace
 				BulletFar = 0.0;
 				BulletOffLine = 0.0;
 				BoltLongest = 0.0f;
-				bBoltSeen = Flying->Bolt != nullptr && Flying->Bolt->GetStaticMesh() != nullptr && Flying->Bolt->GetMaterial(0) != nullptr && Flying->Bolt->IsVisible() && !Flying->IsHidden();
+				// seen: a round or a bolt with a shape and a material, showing; or a laser, playing
+				const bool bLaser = Flying->Beam != nullptr && Flying->Beam->IsActive() && Flying->Beam->GetAsset() != nullptr;
+				bBoltSeen = !Flying->IsHidden() && (bLaser || (Flying->Bolt != nullptr && Flying->Bolt->GetStaticMesh() != nullptr && Flying->Bolt->GetMaterial(0) != nullptr && Flying->Bolt->IsVisible()));
+				SeenAs = bLaser ? FString::Printf(TEXT("laser %s"), *Flying->Beam->GetAsset()->GetPathName())
+					: Flying->bRound ? FString::Printf(TEXT("round %s"), *Flying->Bolt->GetStaticMesh()->GetPathName()) : FString(TEXT("bolt"));
+				LaserBehind = LaserAhead = LaserAside = 0.0f;
+				FlightFrames = 0;
 				bBulletSent = Flying->GetIsReplicated() && Flying->IsReplicatingMovement();
 				if (BulletsSpawned == 4) {
 					// a bolt of the held burst, on its way
@@ -170,6 +196,17 @@ namespace
 			BulletFar = FMath::Max(BulletFar, FVector::DotProduct(Gone, BulletWay));
 			BulletOffLine = FMath::Max(BulletOffLine, (Gone - BulletWay * FVector::DotProduct(Gone, BulletWay)).Size());
 			BoltLongest = FMath::Max(BoltLongest, Flying->Bolt->GetRelativeScale3D().X * 100.0f);
+			if (Flying->Beam != nullptr && ++FlightFrames >= 3) {
+				// where the beam is drawn, in the bullet's own frame (+X the way it flies), once it has had a few frames
+				const FBox Box = Flying->Beam->Bounds.GetBox();
+				const FTransform Mine = Flying->GetActorTransform();
+				for (int32 Corner = 0; Corner < 8; ++Corner) {
+					const FVector At = Mine.InverseTransformPosition(FVector(Corner & 1 ? Box.Max.X : Box.Min.X, Corner & 2 ? Box.Max.Y : Box.Min.Y, Corner & 4 ? Box.Max.Z : Box.Min.Z));
+					LaserBehind = FMath::Max(LaserBehind, float(-At.X));
+					LaserAhead = FMath::Max(LaserAhead, float(At.X));
+					LaserAside = FMath::Max(LaserAside, float(FMath::Max(FMath::Abs(At.Y), FMath::Abs(At.Z))));
+				}
+			}
 		}
 
 		switch (Phase) {
@@ -216,6 +253,8 @@ namespace
 			Test->TestTrue(TEXT("The bolt is her own weapon's"), BulletClass == ASenniteOwnBolt::StaticClass());
 			Test->TestTrue(TEXT("The bolt starts at the top of her staff"), FVector::Dist(BulletFrom, OwnTip) < 40.0);
 			Test->TestTrue(TEXT("The bolt is seen and sent to every machine"), bBoltSeen && bBulletSent);
+			Test->TestEqual(TEXT("Her own shot is seen as the owner's laser"), SeenAs, FString::Printf(TEXT("laser %s"), *GetDefault<ASenniteOwnBolt>()->Laser.GetAssetPathString()));
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK own shot seen as %s; the beam %.0f behind, %.0f ahead, %.0f aside"), *SeenAs, LaserBehind, LaserAhead, LaserAside);
 			Test->TestTrue(TEXT("The bolt travels: seen more than 10 m out, straight"), BulletFar > 1000.0 && BulletOffLine < 5.0);
 			Test->TestTrue(TEXT("She still holds no game weapon"), Hero->CurrentWeapon == nullptr);
 			{
@@ -347,7 +386,8 @@ namespace
 			Test->TestTrue(TEXT("The bullet starts at the rifle's muzzle"), BulletFromMuzzle >= 0.0 && BulletFromMuzzle < 60.0);
 			Test->TestTrue(TEXT("The bullet travels: seen more than 10 m out from where it started"), BulletFar > 1000.0);
 			Test->TestTrue(TEXT("The bullet flies straight, the way it was fired"), BulletOffLine < 5.0);
-			Test->TestTrue(TEXT("The bolt grows behind the bullet to its length and no longer"), BoltLongest > 100.0f && BoltLongest <= GetDefault<ASenniteRifleBullet>()->BoltLength + 0.5f);
+			Test->TestEqual(TEXT("The rifle's bullet is seen as the owner's round"), SeenAs, FString::Printf(TEXT("round %s"), *GetDefault<ASenniteRifleBullet>()->Round.GetAssetPathString()));
+			Test->TestTrue(TEXT("drawn as it is, not stretched as a bolt"), FMath::IsNearlyEqual(BoltLongest, 100.0f, 0.5f));
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK bolt: seen=%d sent=%d started %.0f from the muzzle, seen %.0f out, %.1f off its line, bolt up to %.0f long"),
 				bBoltSeen ? 1 : 0, bBulletSent ? 1 : 0, BulletFromMuzzle, BulletFar, BulletOffLine, BoltLongest);
 			Test->TestTrue(TEXT("The shot spends one round"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->CurrentBulletCount == RoundsBefore - 1);
@@ -458,11 +498,48 @@ namespace
 			}
 			Test->TestEqual(FString::Printf(TEXT("One pull of the %s's trigger sends one bolt out"), One.Name), BulletsSpawned, 1);
 			Test->TestTrue(FString::Printf(TEXT("The %s fires its own bolt"), One.Name), BulletClass == One.Shot);
+			{
+				const AProjectileActor* Made = One.Shot != nullptr ? GetDefault<AProjectileActor>(One.Shot) : nullptr;
+				const FString Want = Made == nullptr ? FString() : !Made->Laser.IsNull() ? FString::Printf(TEXT("laser %s"), *Made->Laser.GetAssetPathString())
+					: Made->Round.IsNull() ? FString(TEXT("bolt")) : FString::Printf(TEXT("round %s"), *Made->Round.GetAssetPathString());
+				Test->TestEqual(FString::Printf(TEXT("The %s's shot is seen as the owner's round or laser"), One.Name), SeenAs, Want);
+				Test->TestTrue(FString::Printf(TEXT("The %s's shot is seen"), One.Name), bBoltSeen);
+				UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK %s shot seen as %s; a beam %.0f behind, %.0f ahead, %.0f aside"), One.Name, *SeenAs, LaserBehind, LaserAhead, LaserAside);
+			}
 			Test->TestTrue(FString::Printf(TEXT("The %s's shot spends one round"), One.Name), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->CurrentBulletCount == RoundsBefore - 1);
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK %s: bolts=%d of %s, rounds %d -> %d"), One.Name, BulletsSpawned, *GetNameSafe(BulletClass), RoundsBefore,
 				Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1);
 			if (++OtherGun < UE_ARRAY_COUNT(Others)) {
 				Step = 0;
+				return false;
+			}
+			Step = 0;
+			Enter(EPhase::Crossing, World);
+			return false;
+		}
+
+		case EPhase::Crossing: {
+			// Each laser shot sent across the view, along the world's X, a way in front of the camera: seen from the side,
+			// its beam trails it, as far as its trail and no farther ahead or wider than its beam. (The player's own shots
+			// fly away from the camera, so their trail is seen end-on.)
+			static UClass* const Lasers[] = { ASenniteEnergyBolt::StaticClass(), ASenniteOwnBolt::StaticClass() };
+			UClass* Shot = Lasers[Step / 2];
+			if (Step % 2 == 0) {
+				Controller->SetControlRotation(FRotator(-5.0, 90.0, 0.0));
+				const FVector From = Hero->GetActorLocation() + FVector(-1800.0, 1600.0, 250.0);
+				World->SpawnActor<AProjectileActor>(Shot, From, FRotator::ZeroRotator);
+				PhaseStart = World->GetTimeSeconds();
+				++Step;
+				return false;
+			}
+			if (Elapsed(World) < 0.12) {
+				return false;
+			}
+			const AProjectileActor* Made = GetDefault<AProjectileActor>(Shot);
+			GameCheck::Shot(TEXT("Weapons"), *FString::Printf(TEXT("laser_%s.png"), *Shot->GetName()));
+			LaserLies(*Shot->GetName(), Made);
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK %s across the view: the beam %.0f behind, %.0f ahead, %.0f aside"), *Shot->GetName(), LaserBehind, LaserAhead, LaserAside);
+			if (++Step < 2 * UE_ARRAY_COUNT(Lasers)) {
 				return false;
 			}
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK finished"));

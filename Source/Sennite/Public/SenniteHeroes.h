@@ -51,6 +51,19 @@ struct FSenniteHero
 	UPROPERTY()
 	FSoftObjectPath AttackMontage;
 
+	/** The hero's own weapon is its fists or what it swings: its attack is a blow up close. It lets no bolt go, is heard as a swing
+	 * and not as a shot, and is not aimed. */
+	UPROPERTY()
+	bool bMelee = false;
+
+	/** The sound its own attack is heard as, by name (USenniteSounds): a swing for a melee hero, a shot for the rest, if none is named. */
+	UPROPERTY()
+	FName AttackSound;
+
+	/** The hero floats over the ground: its going is not heard as steps. */
+	UPROPERTY()
+	bool bFloats = false;
+
 	/** The bone its own weapon's bolt leaves from: the top of a staff, the mouth of a cannon. The weapon bone, if none is named. */
 	UPROPERTY()
 	FName CastBone;

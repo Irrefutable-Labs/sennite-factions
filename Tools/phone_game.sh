@@ -20,7 +20,15 @@ IP="${SENNITE_LAN_IP:-$(ipconfig getifaddr en0)}"
 LINE="-project=\"../../../Sennite/Sennite.uproject\" -PublisherUrl=http://$IP:8790"
 TMP=$(mktemp)
 print -r -- "$LINE" > "$TMP"
-"$ADB" shell mkdir -p "${FILE:h}" && "$ADB" push "$TMP" "$FILE" >/dev/null || { rm -f "$TMP"; exit 1; }
+# A game newly installed has not made its folder yet, and a folder made from here is the shell's, which the
+# game cannot read: the game is started once to make its own, then stopped.
+if ! "$ADB" shell "[ -d '${FILE:h}' ]"; then
+  "$ADB" shell am start -n $PKG/com.epicgames.unreal.SplashActivity >/dev/null
+  for i in {1..60}; do "$ADB" shell "[ -d '${FILE:h}' ]" && break; sleep 1; done
+  "$ADB" shell am force-stop $PKG
+  "$ADB" shell "[ -d '${FILE:h}' ]" || { echo "the game did not make its folder on the phone (${FILE:h})" >&2; rm -f "$TMP"; exit 1; }
+fi
+"$ADB" push "$TMP" "$FILE" >/dev/null || { rm -f "$TMP"; exit 1; }
 rm -f "$TMP"
 "$ADB" shell am start -n $PKG/com.epicgames.unreal.SplashActivity >/dev/null
 echo "the game on the phone reaches the publisher's server at http://$IP:8790"

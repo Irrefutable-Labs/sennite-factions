@@ -180,6 +180,8 @@ public:
 private:
 	/** The button a press began on, by tap or click; it acts when the press ends on the same button. */
 	FName Pressed;
+	/** The greyed-out button a press began on: it is heard refused when the press ends on it. */
+	FName PressedGreyedOut;
 	/** When the store's swap next reads the vaults again. */
 	double NextSwapRead = 0.0;
 
@@ -247,8 +249,9 @@ public:
 	/** Each line of text the last frame drew, as "name=text": what a check reads. */
 	TArray<FString> LastDrawn;
 
-	/** The enabled button at a point of the screen (the screen's own measure, as a touch or the mouse gives it), or none. */
-	FName ButtonAt(const FVector2D& Where) const;
+	/** The enabled button at a point of the screen (the screen's own measure, as a touch or the mouse gives it), or none;
+	 * or with bGreyedOut, the greyed-out one there. */
+	FName ButtonAt(const FVector2D& Where, bool bGreyedOut = false) const;
 
 	/** Where on the screen a button was drawn: its middle, where a finger taps it. False if the last frame drew no such button. */
 	bool Centre(FName Action, FVector2D& Out) const;

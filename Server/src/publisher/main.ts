@@ -58,6 +58,11 @@ const server = await new Service({ publisher, world, store, matchSecret }).liste
 const address = server.address() as AddressInfo;
 console.log(`[publisher] serving the game on http://${address.address}:${address.port}`);
 
+// What the shop asked wallets to pay for: a player may approve one at any time, and the sale is carried out then.
+setInterval(() => {
+  publisher.shop.sweep().catch((e: unknown) => console.error(`[publisher] the shop's look at what it asked: ${e instanceof Error ? e.message : String(e)}`));
+}, 10_000);
+
 // The 48-hour clock for leavers (spec 3): the publisher's server keeps it.
 setInterval(() => {
   publisher.tick().then(

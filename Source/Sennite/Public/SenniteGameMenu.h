@@ -81,7 +81,8 @@ public:
 	static int32 QualityNow();
 
 private:
-	FName ButtonAt(const FVector2D& Where) const;
+	/** The enabled button at a point of the screen, or none; or with bGreyedOut, the greyed-out one there. */
+	FName ButtonAt(const FVector2D& Where, bool bGreyedOut = false) const;
 	void Press(const FVector2D& Where);
 	void Release(const FVector2D& Where);
 
@@ -101,6 +102,8 @@ private:
 	bool bSettingsOnly = false;
 	/** The button a press began on, by tap or click; it acts when the press ends on the same button. */
 	FName Pressed;
+	/** The greyed-out button a press began on: it is heard refused when the press ends on it. */
+	FName PressedGreyedOut;
 	FName Hovered;
 	/** What the menu says about the last thing asked. */
 	FString Note;

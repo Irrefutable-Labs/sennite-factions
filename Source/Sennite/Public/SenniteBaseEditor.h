@@ -121,9 +121,6 @@ public:
 	bool bInventory = false;
 	/** Which skin of the inventory is chosen. */
 	int32 InventoryIndex = 0;
-	/** The mesh the hero is dressed in now, and the hero's own mesh it was dressed over. */
-	FSoftObjectPath Dressed;
-	FSoftObjectPath DressedHero;
 
 	/** Whether the panel shows the faction's people instead of the parcel. */
 	bool bPeople = false;
@@ -185,7 +182,6 @@ private:
 	void ShopAct();
 	void ToggleInventory();
 	void InventoryAct();
-	void DressHero();
 	void Join();
 	void InvitePerson();
 	void VotePerson();
@@ -228,9 +224,6 @@ private:
 	/** The grid cell the cursor is on, marked on the ground. */
 	UPROPERTY()
 	UStaticMeshComponent* CursorTile = nullptr;
-
-	/** The pawn the hero mesh was last set on: a new pawn starts in the hero's own mesh. */
-	TWeakObjectPtr<APawn> DressedPawn;
 };
 
 /** Puts the base editor in every game world when a publisher's server is set. */

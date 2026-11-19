@@ -67,6 +67,8 @@ export interface PlayerRecord {
   approved?: boolean;
   /** When the player's game last asked anything with its token, to the hour (milliseconds). */
   lastSeen?: number;
+  /** Which terms the player's offer was made on (TERMS in service.ts); a record from before they were kept has none. */
+  terms?: number;
 }
 
 /** A skin the shop sold: the one object issued for it. */
@@ -112,6 +114,23 @@ export interface PendingSale {
   object: string;
 }
 
+/**
+ * A payment the shop asked a wallet for and has not seen the end of: it waits
+ * in the wallet for the player, who may approve it at any time. Kept until the
+ * payment lands (the sale then becomes pending), or it is declined or fails.
+ */
+export interface AskedSale {
+  /** The request, as the account names it: the connection's id and the request's number on it. */
+  connection: string;
+  seq: string;
+  kind: "skin" | "hero" | "weapon";
+  itemId: string;
+  /** The buyer's wallet: its signing key (lowercase hex). */
+  buyer: string;
+  /** When it was asked, on the server's clock (milliseconds). */
+  at?: number;
+}
+
 /** The shop's own record (spec 10.5). Who owns what is never here: a wallet proves that. */
 export interface ShopRecord {
   /** How many skins and heroes the shop has sold. */
@@ -126,6 +145,8 @@ export interface ShopRecord {
   paid: Record<string, string>;
   /** payment -> the sale it pays for, while the item has not been given. */
   pending: Record<string, PendingSale>;
+  /** "connection:seq" of a payment the shop asked a wallet for -> what it is for, until the wallet's answer is seen. */
+  asked: Record<string, AskedSale>;
 }
 
 /** One member's share of a match's prize (spec 10.6): an escrow vault the publisher's account locks. */
@@ -173,7 +194,7 @@ export interface StoreData {
   matches: Record<string, MatchRecord>;
 }
 
-const empty = (): StoreData => ({ asked: {}, factions: {}, players: {}, shop: { serial: 0, skins: {}, heroes: {}, weapons: {}, paid: {}, pending: {} }, matches: {} });
+const empty = (): StoreData => ({ asked: {}, factions: {}, players: {}, shop: { serial: 0, skins: {}, heroes: {}, weapons: {}, paid: {}, pending: {}, asked: {} }, matches: {} });
 
 export class Store {
   readonly data: StoreData;

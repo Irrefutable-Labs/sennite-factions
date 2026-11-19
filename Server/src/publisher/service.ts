@@ -16,6 +16,7 @@ import { decodeChange, encodeChange, type Change } from "../faction/change.js";
 import type { Funding } from "../dsm/contributions.js";
 import type { Member } from "../faction/state.js";
 import { buildingAt, Publisher, Refused, type Structure } from "./publisher.js";
+import type { Say } from "./shop.js";
 import { leastOf } from "./swap.js";
 import type { Store } from "./store.js";
 import type { World } from "./world.js";
@@ -36,6 +37,10 @@ interface Job {
   message: string;
   /** What else the answer carries, beside whether it was carried out. */
   data: Record<string, unknown>;
+  /** While it is pending: what it is waiting on, in words for the player; empty when the work does not say. */
+  stage: string;
+  /** While it is pending: whether what it waits on is the player, in their wallet. */
+  onWallet: boolean;
 }
 
 class HttpError extends Error {
@@ -68,6 +73,20 @@ const TICKET_MS = 2 * 60 * 1000;
 const MAX_TICKETS = 10_000;
 /** How long a hero pass is good for. It is good once: the game server that asks with it uses it up. */
 const PASS_MS = 2 * 60 * 1000;
+/** The words the server's routes are made of: all of a path that is written to the server's output (said). */
+const ROUTE_WORDS = new Set([
+  "world", "players", "me", "prizes", "shop", "dbucks", "swap", "price", "trades", "skins", "heroes", "weapons", "hero-pass", "hero-passes", "free",
+  "materials", "factions", "parcels", "base", "invitations", "changes", "commitments", "withdrawals", "requests", "destroyed", "matches", "outcome",
+  "tickets", "entries", "bases",
+]);
+
+/**
+ * The terms an offer is made on. 1: the shop's grant let the game be paid D-bucks and trade ERA within caps without
+ * asking the player. 2: it grants neither, and every payment and trade waits for the player in their wallet. A player
+ * whose offer was made on other terms than these is a new player the next time their game asks anything.
+ */
+const TERMS = 2;
+
 /** How old a wallet's proof of its heroes may be and still answer a hero pass. */
 const PROOF_FRESH_MS = 60 * 60 * 1000;
 /** The most wallets whose proven heroes are kept at once. */
@@ -127,6 +146,8 @@ export class Service {
   readonly #tickets = new Map<string, Ticket>();
   /** The heroes each wallet (by signing key) proved it owns at its last proof here, and when. Kept in memory, oldest first: a game proves again on connecting. */
   readonly #provenHeroes = new Map<string, { heroes: string[]; at: number }>();
+  /** The last answer each game was given to each read, so that only a change is written down (said). */
+  readonly #saidLast = new Map<string, number>();
   /** Hero passes: pass -> the wallet it speaks for, the one game that may ask with it, and until when. One live pass per wallet. */
   readonly #passes = new Map<string, { signingKey: string; wallet: string; audience: string; until: number }>();
 
@@ -141,15 +162,38 @@ export class Service {
     });
   }
 
+  /**
+   * What a game asked and what it was answered, one line each on the server's output: everything that is not a
+   * read, and a read whose answer changed since that game last made it (a game reads the same things every
+   * second). Nothing secret is written: a game is named by six characters of a hash of what it bears (its token,
+   * or the match server's secret), never by a piece of it, and of a path only the words the server's routes are
+   * made of are kept; a request's id, a hero pass, a parcel, a faction or a match is written as "…".
+   */
+  private said(req: IncomingMessage, status: number, why = ""): void {
+    const bears = this.bearer(req);
+    const game = bears === "" ? "-" : createHash("sha256").update(bears).digest("hex").slice(0, 6);
+    const path = (req.url ?? "").split("?")[0]!.split("/").map((part) => (part === "" || ROUTE_WORDS.has(part) ? part : "…")).join("/");
+    // which read it is, is told by the whole path (kept here only, never written): two parcels are two reads
+    const key = `${game} ${req.method} ${createHash("sha256").update(req.url ?? "").digest("hex").slice(0, 16)}`;
+    if (req.method === "GET") {
+      if (this.#saidLast.get(key) === status) return;
+      if (this.#saidLast.size > 4096) this.#saidLast.clear();
+      this.#saidLast.set(key, status);
+    }
+    console.log(`[publisher] ${new Date().toISOString().slice(11, 19)}Z game ${game} ${req.method} ${path} -> ${status}${why === "" ? "" : `: ${why}`}`);
+  }
+
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
       const answer = await this.route(req);
       const bytes = Buffer.from(JSON.stringify(answer.body));
       res.writeHead(answer.status, { "content-type": "application/json", "content-length": bytes.length });
       res.end(bytes);
+      this.said(req, answer.status, typeof (answer.body as { request?: unknown }).request === "string" ? `request ${String((answer.body as { request: string }).request).slice(0, 6)}` : "");
     } catch (e) {
       const status = e instanceof HttpError ? e.status : e instanceof Refused ? 409 : 500;
       const message = e instanceof Error ? e.message : String(e);
+      this.said(req, status, message);
       if (status === 500) console.error(`[publisher] ${req.method} ${req.url}: ${message}`);
       const bytes = Buffer.from(JSON.stringify({ error: status === 500 ? "the publisher's server could not answer" : message }));
       res.writeHead(status, { "content-type": "application/json", "content-length": bytes.length });
@@ -188,6 +232,13 @@ export class Service {
     const players = this.options.store.data.players;
     const record = token !== "" && Object.hasOwn(players, token) ? players[token] : undefined;
     if (record === undefined) throw new HttpError(401, "the game is not known to the server");
+    if ((record.terms ?? 1) !== TERMS) {
+      // the offer this player's wallet approved granted what the game no longer asks for: the game starts again as a
+      // new player, and the wallet approves an offer on the terms there are now
+      delete players[token];
+      this.options.store.save();
+      throw new HttpError(401, "the game is not known to the server");
+    }
     const now = Date.now();
     if (now - (record.lastSeen ?? record.since) > IDLE_MS) {
       // unused for too long: the token is over, and the game starts again as a new player
@@ -206,10 +257,21 @@ export class Service {
   private async connection(player: string): Promise<Connection | undefined> {
     const record = this.options.store.data.players[player];
     if (record === undefined) return undefined;
-    const found = (await this.options.publisher.app.connections()).find((c) => c.connected && hex(c.raw.offerDigest) === record.offer);
+    const all = await this.options.publisher.app.connections();
+    const found = all.find((c) => c.connected && hex(c.raw.offerDigest) === record.offer);
     if (found !== undefined && record.approved !== true) {
       record.approved = true;
       this.options.store.save();
+    }
+    if (found === undefined && all.some((c) => !c.connected && hex(c.raw.offerDigest) === record.offer)) {
+      // The wallet that approved this player's offer ended the connection. That is not a passing state: the account
+      // lists an ended connection as ended for good, and an offer is approved once, so its code cannot connect a
+      // wallet again (the account refuses a second approval of it). So the player is over, and the game starts
+      // again as a new player with a new code for the wallet to approve. Nothing of the wallet's is lost with the
+      // record: what it owns and its faction are kept by its own key, not by the game's token.
+      delete this.options.store.data.players[player];
+      this.options.store.save();
+      throw new HttpError(401, "the wallet ended its connection to the game: connect it again");
     }
     return found;
   }
@@ -288,13 +350,16 @@ export class Service {
   /** Start work a wallet has to answer; the game reads what became of it under the id. */
   private start(
     player: string,
-    work: () => Promise<{ ok: boolean; message: string; data?: Record<string, unknown> }>,
+    work: (say: Say) => Promise<{ ok: boolean; message: string; data?: Record<string, unknown> }>,
     factionId = "",
   ): { request: string } {
     const id = hex(randomBytes(16));
-    const job: Job = { player, state: "pending", ok: false, message: "", data: {} };
+    const job: Job = { player, state: "pending", ok: false, message: "", data: {}, stage: "", onWallet: false };
     this.#jobs.set(id, job);
-    work()
+    work((stage, onWallet) => {
+      job.stage = stage;
+      job.onWallet = onWallet;
+    })
       .then(
         (done) => Object.assign(job, done),
         (e: unknown) => {
@@ -305,6 +370,7 @@ export class Service {
       .finally(() => {
         job.state = "done";
         this.#bases.delete(factionId);
+        console.log(`[publisher] ${new Date().toISOString().slice(11, 19)}Z request ${id.slice(0, 6)} of game ${createHash("sha256").update(player).digest("hex").slice(0, 6)} is done: ${job.ok ? "carried out" : "not carried out"}: ${job.message}`);
       });
     return { request: id };
   }
@@ -353,7 +419,7 @@ export class Service {
       const grant = world.economy.grant;
       const offer = await publisher.offer(world.economy.resources.map((r) => ({ symbol: r.symbol, ...grant })));
       const player = hex(randomBytes(32));
-      store.data.players[player] = { offer: hex(offer.digest), since: Date.now() };
+      store.data.players[player] = { offer: hex(offer.digest), since: Date.now(), terms: TERMS };
       store.save();
       return { status: 201, body: { player, code: offer.code } };
     }
@@ -396,10 +462,10 @@ export class Service {
       if (!/^[0-9]{1,6}(\.[0-9]{1,2})?$/.test(era) || Number(era) <= 0) throw new HttpError(400, "the ERA to trade is not an amount above zero");
       return {
         status: 202,
-        body: this.start(player, async () => {
+        body: this.start(player, async (say) => {
           const quoted = await publisher.shop.price(connection, era);
           // the price is the vault's at the time of the trade: a little less than quoted is taken, much less is not
-          const traded = await publisher.shop.buyDbucks(connection, era, Math.floor(quoted * 0.97));
+          const traded = await publisher.shop.buyDbucks(connection, era, Math.floor(quoted * 0.97), say);
           return traded.ok ? { ok: true, message: `${era} ERA traded for D-bucks` } : { ok: false, message: traded.why };
         }),
       };
@@ -439,8 +505,8 @@ export class Service {
       const atLeast = leastOf(BigInt(shown));
       return {
         status: 202,
-        body: this.start(player, async () => {
-          const traded = await publisher.swap.trade(connection, from, to, amount, atLeast);
+        body: this.start(player, async (say) => {
+          const traded = await publisher.swap.trade(connection, from, to, amount, atLeast, say);
           return traded.ok ? { ok: true, message: `${amount} ${from.name} swapped for ${to.name}` } : { ok: false, message: traded.why };
         }),
       };
@@ -453,8 +519,8 @@ export class Service {
       const skin = publisher.shop.skin(text((await body(req)).skinId, "skinId"));
       return {
         status: 202,
-        body: this.start(player, async () => {
-          const sold = await publisher.shop.buySkin(connection, skin.id);
+        body: this.start(player, async (say) => {
+          const sold = await publisher.shop.buySkin(connection, skin.id, say);
           return sold.ok ? { ok: true, message: `${sold.skin.name} #${sold.skin.serial} is the wallet's` } : { ok: false, message: sold.why };
         }),
       };
@@ -467,8 +533,8 @@ export class Service {
       const hero = publisher.shop.hero(text((await body(req)).heroId, "heroId"));
       return {
         status: 202,
-        body: this.start(player, async () => {
-          const sold = await publisher.shop.buyHero(connection, hero.id);
+        body: this.start(player, async (say) => {
+          const sold = await publisher.shop.buyHero(connection, hero.id, say);
           return sold.ok ? { ok: true, message: `${sold.hero.name} #${sold.hero.serial} is the wallet's` } : { ok: false, message: sold.why };
         }),
       };
@@ -481,8 +547,8 @@ export class Service {
       const weapon = publisher.shop.weapon(text((await body(req)).weaponId, "weaponId"));
       return {
         status: 202,
-        body: this.start(player, async () => {
-          const sold = await publisher.shop.buyWeapon(connection, weapon.id);
+        body: this.start(player, async (say) => {
+          const sold = await publisher.shop.buyWeapon(connection, weapon.id, say);
           return sold.ok ? { ok: true, message: `${sold.weapon.name} #${sold.weapon.serial} is the wallet's` } : { ok: false, message: sold.why };
         }),
       };
@@ -714,7 +780,10 @@ export class Service {
     if (is("GET", "requests", null) && b !== undefined) {
       const job = this.#jobs.get(b);
       if (job === undefined || job.player !== this.player(req)) throw new HttpError(404, "no such request");
-      return { status: 200, body: job.state === "pending" ? { state: "pending" } : { ...job.data, state: "done", ok: job.ok, message: job.message } };
+      return {
+        status: 200,
+        body: job.state === "pending" ? { state: "pending", stage: job.stage, onWallet: job.onWallet } : { ...job.data, state: "done", ok: job.ok, message: job.message },
+      };
     }
 
     // The publisher's match server records that a battle destroyed a built structure (spec 7.6).

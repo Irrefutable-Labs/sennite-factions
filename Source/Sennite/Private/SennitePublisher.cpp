@@ -16,6 +16,11 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#if PLATFORM_ANDROID
+#include "Android/AndroidApplication.h"
+#include "Android/AndroidJavaEnv.h"
+#include "Android/AndroidJNI.h"
+#endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogSennitePublisher, Log, All);
 
@@ -542,7 +547,7 @@ void USennitePublisher::Swap(const FString& From, const FString& To, const FStri
 	Body->SetStringField(TEXT("to"), To);
 	Body->SetStringField(TEXT("amount"), Amount);
 	Body->SetStringField(TEXT("shown"), SwapPrice.Out);
-	Ask(TEXT("/shop/swap/trades"), Body, TEXT("waiting for the wallet to swap..."));
+	AskToPay(TEXT("/shop/swap/trades"), Body, TEXT("approve the swap in your DSM wallet (Apps, Waiting), then come back"));
 	bSwapping = bBusy;
 	bProveAfter = bBusy;
 }
@@ -573,22 +578,39 @@ FString USennitePublisher::DBucksLine(bool& bKnown) const
 	return FString(ProofPending() ? TEXT("ASKING YOUR WALLET ...") : TEXT("NOT PROVED YET"));
 }
 
+bool USennitePublisher::OpenWalletPlain()
+{
+	bool bOpened = false;
+#if PLATFORM_ANDROID
+	// Sennite_UPL.xml: the wallet's launch intent
+	if (JNIEnv* Env = FAndroidApplication::GetJavaEnv()) {
+		static jmethodID Open = FJavaWrapper::FindMethod(Env, FJavaWrapper::GameActivityClassID, "AndroidThunkJava_SenniteOpenWallet", "()Z", true);
+		if (Open != nullptr) {
+			bOpened = FJavaWrapper::CallBooleanMethod(Env, FJavaWrapper::GameActivityThis, Open);
+		}
+	}
+#endif
+	WalletOpens += bOpened ? 1 : 0;
+	UE_LOG(LogSennitePublisher, Display, TEXT("The game %s the DSM wallet"), bOpened ? TEXT("opened") : TEXT("could not open"));
+	return bOpened;
+}
+
 void USennitePublisher::BuyDBucks(const FString& InEra)
 {
 	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
 	Body->SetStringField(TEXT("era"), InEra);
-	Ask(TEXT("/shop/dbucks"), Body, TEXT("waiting for the wallet to trade ERA for D-bucks..."));
+	AskToPay(TEXT("/shop/dbucks"), Body, TEXT("approve the trade of ERA for D-bucks in your DSM wallet (Apps, Waiting), then come back"));
 	bProveAfter = bBusy;
 }
 
 void USennitePublisher::BuySkin(const FString& SkinId)
 {
 	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
-	Body->SetStringField(TEXT("skinId"), SkinId);
+	Body->SetStringField(TEXT("skinId"), SkinId.ToLower());
 	if (bBusy) {
 		return;
 	}
-	Ask(TEXT("/shop/skins"), Body, TEXT("waiting for the wallet to pay for the skin..."));
+	AskToPay(TEXT("/shop/skins"), Body, TEXT("approve the payment for the skin in your DSM wallet (Apps, Waiting), then come back"));
 	bProveAfter = bBusy;
 	BuyingSkin = SkinId;
 }
@@ -596,11 +618,13 @@ void USennitePublisher::BuySkin(const FString& SkinId)
 void USennitePublisher::BuyHero(const FString& HeroId)
 {
 	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
-	Body->SetStringField(TEXT("heroId"), HeroId);
+	// The shop's ids are lower case. A hero's id is a name here, and a name is written in the case Unreal first met
+	// it in ("Rampage", from the hero's own assets), so it is sent as the shop has it.
+	Body->SetStringField(TEXT("heroId"), HeroId.ToLower());
 	if (bBusy) {
 		return;
 	}
-	Ask(TEXT("/shop/heroes"), Body, TEXT("waiting for the wallet to pay for the hero..."));
+	AskToPay(TEXT("/shop/heroes"), Body, TEXT("approve the payment for the hero in your DSM wallet (Apps, Waiting), then come back"));
 	bProveAfter = bBusy;
 	BuyingHero = HeroId;
 }
@@ -608,11 +632,11 @@ void USennitePublisher::BuyHero(const FString& HeroId)
 void USennitePublisher::BuyWeapon(const FString& WeaponId)
 {
 	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
-	Body->SetStringField(TEXT("weaponId"), WeaponId);
+	Body->SetStringField(TEXT("weaponId"), WeaponId.ToLower());
 	if (bBusy) {
 		return;
 	}
-	Ask(TEXT("/shop/weapons"), Body, TEXT("waiting for the wallet to pay for the gun..."));
+	AskToPay(TEXT("/shop/weapons"), Body, TEXT("approve the payment for the gun in your DSM wallet (Apps, Waiting), then come back"));
 	bProveAfter = bBusy;
 	// bought and given as a hero is: it is the wallet's once the wallet proves it, in the same list
 	BuyingHero = WeaponId;
@@ -858,6 +882,7 @@ void USennitePublisher::AskRequest()
 			if (Status == 404) {
 				PendingRequest.Reset();
 				bBusy = false;
+				bOnWallet = false;
 				bPricing = false;
 				bSwapping = false;
 				bLastOk = false;
@@ -866,11 +891,20 @@ void USennitePublisher::AskRequest()
 			return;
 		}
 		if (Json->GetStringField(TEXT("state")) != TEXT("done")) {
+			// what it is waiting on, as the server says: the player in their wallet, or the shop's own work
+			FString Stage;
+			if (Json->TryGetStringField(TEXT("stage"), Stage) && !Stage.IsEmpty()) {
+				Message = Stage;
+				bool bOn = false;
+				bOnWallet = Json->TryGetBoolField(TEXT("onWallet"), bOn) && bOn;
+			}
 			return;
 		}
 		PendingRequest.Reset();
 		bBusy = false;
+		bOnWallet = false;
 		bLastOk = Json->GetBoolField(TEXT("ok"));
+		UE_LOG(LogSennitePublisher, Display, TEXT("What was asked of the wallet is done, %s: %s"), bLastOk ? TEXT("carried out") : TEXT("not carried out"), *Json->GetStringField(TEXT("message")));
 		if (!BuyingSkin.IsEmpty()) {
 			// bought and given: it is the wallet's once the wallet has taken it in and proves it
 			if (bLastOk) {
@@ -937,8 +971,16 @@ void USennitePublisher::Ask(const FString& Path, const TSharedPtr<FJsonObject>& 
 		if (Status == 202 && Json.IsValid() && Json->TryGetStringField(TEXT("request"), Request)) {
 			PendingRequest = Request;
 			NextRequest = 0.0;
+			if (bOpenWalletWhenAsked) {
+				// the server has the request: now the wallet, where the player approves it
+				bOpenWalletWhenAsked = false;
+				Message = WordsWhenAsked;
+				bOnWallet = true;
+				OpenWalletToApprove();
+			}
 			return;
 		}
+		bOpenWalletWhenAsked = false;
 		bBusy = false;
 		bPricing = false;
 		bSwapping = false;
@@ -946,7 +988,48 @@ void USennitePublisher::Ask(const FString& Path, const TSharedPtr<FJsonObject>& 
 		BuyingSkin.Reset();
 		BuyingHero.Reset();
 		Message = ErrorOf(Status, Json);
+		UE_LOG(LogSennitePublisher, Warning, TEXT("The shop did not take what was asked: %s"), *Message);
 	});
+}
+
+void USennitePublisher::AskToPay(const FString& Path, const TSharedPtr<FJsonObject>& Body, const TCHAR* Waiting)
+{
+	if (bBusy) {
+		return;
+	}
+	// Until the server has taken the request nothing waits in the wallet, so nothing says it does: a request the
+	// server refuses (no wallet connected, the server not reached) never sent the player to their wallet for nothing.
+	Ask(Path, Body, TEXT("asking the shop..."));
+	// No payment and no trade is in the grant: each waits in the wallet for the player's approval. So the game goes to
+	// the wallet with it, as soon as the server has taken the request (Ask), and the player approves it there. The
+	// owner, 2026-11-19: "when you hit fucking buy, it goes to the wallet, and it goes to where it asks you to approve".
+	bOpenWalletWhenAsked = bBusy;
+	WordsWhenAsked = Waiting;
+}
+
+bool USennitePublisher::OpenWalletToApprove()
+{
+	bool bOpened = false;
+#if PLATFORM_ANDROID
+	// Sennite_UPL.xml: the wallet, opened on the connect code it is connected to this game by
+	if (JNIEnv* Env = !ConnectCode.IsEmpty() ? FAndroidApplication::GetJavaEnv() : nullptr) {
+		static jmethodID Open = FJavaWrapper::FindMethod(Env, FJavaWrapper::GameActivityClassID, "AndroidThunkJava_SenniteOpenWalletLink", "(Ljava/lang/String;)Z", true);
+		if (Open != nullptr) {
+			auto Link = FJavaHelper::ToJavaString(Env, ConnectCode);
+			bOpened = FJavaWrapper::CallBooleanMethod(Env, FJavaWrapper::GameActivityThis, Open, *Link);
+		}
+	}
+#endif
+	if (bOpened) {
+		++WalletOpens;
+		UE_LOG(LogSennitePublisher, Display, TEXT("The game opened the DSM wallet on its connect code, for the player to approve what it asked"));
+	}
+	else {
+		// no code kept, or a wallet that does not take the link: the wallet as it opens by itself
+		bOpened = OpenWalletPlain();
+	}
+	bWalletHere = bOpened;
+	return bOpened;
 }
 
 void USennitePublisher::ProveMaterials()
