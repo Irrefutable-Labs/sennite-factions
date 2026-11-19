@@ -100,20 +100,22 @@ export class Shop {
     return [];
   }
 
+  // The shop's ids are lower case. A game may send one in another case: Unreal keeps a name in the case it first
+  // met it in, so its hero "rampage" can come as "Rampage". The id is the same id whatever its case.
   skin(skinId: string): SkinForSale {
-    const found = this.world.skins.find((k) => k.id === skinId);
+    const found = this.world.skins.find((k) => k.id === skinId.toLowerCase());
     if (found === undefined) throw new Refused(`the shop has no skin ${skinId}`);
     return found;
   }
 
   hero(heroId: string): HeroForSale {
-    const found = this.world.heroes.find((h) => h.id === heroId);
+    const found = this.world.heroes.find((h) => h.id === heroId.toLowerCase());
     if (found === undefined) throw new Refused(`the shop has no hero ${heroId}`);
     return found;
   }
 
   weapon(weaponId: string): WeaponForSale {
-    const found = this.world.weapons.find((w) => w.id === weaponId);
+    const found = this.world.weapons.find((w) => w.id === weaponId.toLowerCase());
     if (found === undefined) throw new Refused(`the shop has no gun ${weaponId}`);
     return found;
   }
