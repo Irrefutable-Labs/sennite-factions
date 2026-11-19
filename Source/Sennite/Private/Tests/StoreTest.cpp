@@ -20,6 +20,7 @@
 #include "SenniteBaseEditor.h"
 #include "SenniteHeroes.h"
 #include "SennitePublisher.h"
+#include "SenniteSounds.h"
 #include "SenniteUi.h"
 #include "Animation/SkeletalMeshActor.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -133,6 +134,10 @@ namespace
 			Test->TestTrue(TEXT("With a publisher's server it can be tapped"), bBase);
 			Test->TestTrue(TEXT("and nothing says it cannot"), MenuCheck::Line(Menu, TEXT("why")).IsEmpty());
 			Test->TestFalse(TEXT("The first screen has no HEROES of its own: they are in the store"), MenuCheck::Has(Menu, TEXT("heroes")));
+			// two seconds on the first screen with nothing tapped: a button's sound is a tap's, never the game's own each frame
+			const int32 Untapped = USenniteSounds::HeardBeginning(World, TEXT("ui."));
+			Test->TestEqual(TEXT("With a publisher's server and nothing tapped, no button is heard"), Untapped, 0);
+			UE_LOG(LogStoreCheck, Display, TEXT("GAMECHECK quiet: %d button sounds heard in %.1f s with nothing tapped"), Untapped, World->GetTimeSeconds());
 			GameCheck::Shot(TEXT("Store"), TEXT("menu.png"));
 			Enter(EPhase::Store);
 			return false;

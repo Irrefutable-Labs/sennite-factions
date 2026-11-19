@@ -620,7 +620,7 @@ void ASenniteBaseEditor::ShopAct()
 
 void ASenniteBaseEditor::DressHero()
 {
-	USenniteSounds::Play(this, TEXT("ui.click"));
+	// each frame, not at a press: it has no sound of its own (wearing a skin is heard at InventoryAct)
 	const USennitePublisher* Server = Publisher();
 	const APlayerController* Controller = GetWorld()->GetFirstPlayerController();
 	ASenniteCharacter* Hero = Controller != nullptr ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
