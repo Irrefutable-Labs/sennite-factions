@@ -36,9 +36,7 @@ ONE_SHOTS = [
     # the menus
     ("SW_UiClick", "UIClick_UI Click 33_CB Sounddesign_ACTIVATION2.wav", "start", None),
     ("SW_UiSelect", "Bluezone_BC0303_futuristic_user_interface_high_tech_beep_038.wav", "start", None),
-    ("SW_UiBack", "UI_Window_MEDIUM_SlideMetal_02_CLOSED.wav", "start", 0.7),
     ("SW_UiPage", "Bluezone_BC0303_futuristic_user_interface_transition_006.wav", "start", 1.0),
-    ("SW_UiPlay", "Bluezone_BC0300_alien_interface_sci_fi_transition_004.wav", "start", None),
     ("SW_UiOpen", "UIMvmt_UI Zooms 103_CB Soudndesign_ACTIVATION2.wav", "start", None),
     ("SW_UiDenied", "UI_Noisy_Impact_09.wav", "start", 0.6),
     ("SW_UiBought", "UIMisc_Feedback 36 up_CB Sounddesign_ACTIVATION2.wav", "start", None),

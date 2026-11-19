@@ -76,6 +76,7 @@ void USenniteGameMenu::Open()
 		return;
 	}
 	bOpen = true;
+	bSettingsOnly = false;
 	USenniteSounds::Play(Controller, TEXT("ui.open"));
 	Page = ESenniteGameMenuPage::Main;
 	Note.Reset();
@@ -92,6 +93,15 @@ void USenniteGameMenu::Open()
 	FInputModeGameAndUI Mode;
 	Mode.SetHideCursorDuringCapture(false);
 	Controller->SetInputMode(Mode);
+}
+
+void USenniteGameMenu::OpenSettings()
+{
+	Open();
+	if (bOpen) {
+		Page = ESenniteGameMenuPage::Settings;
+		bSettingsOnly = true;
+	}
 }
 
 void USenniteGameMenu::Close()
@@ -195,7 +205,6 @@ void USenniteGameMenu::Act(FName Action)
 		return;
 	}
 	const FString Name = Action.ToString();
-	USenniteSounds::Button(Controller, Action);
 	USenniteProfile& Profile = USenniteProfile::Get();
 	UWorld* World = Controller->GetWorld();
 	Note.Reset();
@@ -232,7 +241,7 @@ void USenniteGameMenu::Act(FName Action)
 		Controller->ConsoleCommand(TEXT("quit"));
 	}
 	else if (Name == TEXT("back") || Name == TEXT("stay")) {
-		if (Page == ESenniteGameMenuPage::Main) {
+		if (Page == ESenniteGameMenuPage::Main || bSettingsOnly) {
 			Close();
 		}
 		else {
@@ -250,6 +259,9 @@ void USenniteGameMenu::Act(FName Action)
 		else if (Name == TEXT("vol-") || Name == TEXT("vol+")) {
 			Profile.Volume = FMath::Clamp(Tenths(Profile.Volume + (Name == TEXT("vol+") ? VolumeStep : -VolumeStep)), 0.0f, 1.0f);
 		}
+		else if (Name == TEXT("music-") || Name == TEXT("music+")) {
+			Profile.MusicVolume = FMath::Clamp(Tenths(Profile.MusicVolume + (Name == TEXT("music+") ? VolumeStep : -VolumeStep)), 0.0f, 1.0f);
+		}
 		else if (Name == TEXT("quality-") || Name == TEXT("quality+")) {
 			// from what is in effect now; a device's own mix of levels counts as medium
 			const int32 Now = QualityNow();
@@ -261,6 +273,10 @@ void USenniteGameMenu::Act(FName Action)
 		}
 		Profile.Save();
 		ApplySettings(World);
+	}
+	// a press that closed the menu is heard as the menu closing
+	if (bOpen) {
+		USenniteSounds::Button(Controller, Action);
 	}
 }
 
@@ -382,9 +398,9 @@ void USenniteGameMenu::DrawSettings(UCanvas* Canvas)
 	const float X = 48.0f;
 	const float Arrow = 60.0f;
 	const float Value = 200.0f;
-	const float High = 52.0f;
-	const float Step = 96.0f;
-	float Y = 116.0f;
+	const float High = 50.0f;
+	const float Step = 86.0f;
+	float Y = 112.0f;
 	// a row: what it sets, then less, its value, more
 	auto Row = [&](const TCHAR* Name, const TCHAR* Title, const FString& Shown, bool bLess, bool bMore) {
 		Line(Canvas, *FString::Printf(TEXT("label:%s"), Name), Title, X + 2.0f, Y, 12, SenniteUi::Gold);
@@ -400,7 +416,8 @@ void USenniteGameMenu::DrawSettings(UCanvas* Canvas)
 	Line(Canvas, TEXT("label:invert"), TEXT("INVERT LOOK"), X + 2.0f, Y, 12, SenniteUi::Gold);
 	Button(Canvas, TEXT("invert"), Profile.bInvertLook ? TEXT("ON") : TEXT("OFF"), X, Y + 24.0f, 2.0f * Arrow + Value, High);
 	Y += Step;
-	Row(TEXT("vol"), TEXT("VOLUME"), FString::Printf(TEXT("%d%%"), FMath::RoundToInt(Profile.Volume * 100.0f)), Profile.Volume > 0.01f, Profile.Volume < 0.99f);
+	Row(TEXT("vol"), TEXT("VOLUME: EVERYTHING"), FString::Printf(TEXT("%d%%"), FMath::RoundToInt(Profile.Volume * 100.0f)), Profile.Volume > 0.01f, Profile.Volume < 0.99f);
+	Row(TEXT("music"), TEXT("MUSIC VOLUME"), FString::Printf(TEXT("%d%%"), FMath::RoundToInt(Profile.MusicVolume * 100.0f)), Profile.MusicVolume > 0.01f, Profile.MusicVolume < 0.99f);
 	const int32 Quality = QualityNow();
 	Row(TEXT("quality"), TEXT("GRAPHICS QUALITY"), QualityName(Quality), Quality != 0, Quality < QualityMost);
 	Button(Canvas, TEXT("back"), TEXT("BACK"), X, Y + 12.0f, 2.0f * Arrow + Value, 58.0f);

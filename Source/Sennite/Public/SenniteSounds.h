@@ -58,8 +58,20 @@ public:
 	/** A hero's own voice (Kind: hit, jump, land, pain), for the heroes that have a human one. It says nothing when the hero attacks or shoots. */
 	static void Voice(const ASenniteCharacter* Hero, FName Kind);
 
-	/** The sound of a menu's button, from the action it does. */
+	/**
+	 * The sound of a menu's button, from the action it does: every menu's buttons, the in-game menu's
+	 * too. Each kind of button has its own: one of the first screen or the in-game menu (ui.press); a
+	 * section of the store (ui.tab); the arrows that turn to the next hero, skin or gun (ui.turn); one of
+	 * a row along the bottom (ui.pick); back (ui.back); a thing done, as choose, buy, swap, start
+	 * (ui.confirm); a digit of a keypad (ui.key); a setting a step less or more (ui.step).
+	 */
+	static FName ButtonSound(FName Action);
+
+	/** Make it heard, once. */
 	static void Button(const UObject* In, FName Action);
+
+	/** A sound's recordings, for the checks. */
+	static TArray<FSoftObjectPath> Takes(FName Name);
 
 	/** How many recordings a sound names, and how many of them load, for the checks. */
 	static int32 TakesNamed(FName Name);

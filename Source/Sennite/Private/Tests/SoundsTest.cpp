@@ -69,7 +69,8 @@ namespace
 				Test->TestEqual(FString::Printf(TEXT("Every recording of %s loads"), *Name.ToString()), Load, Named);
 			}
 			// the ones the game's own code asks for by name are in the list
-			for (const TCHAR* Name : { TEXT("ui.click"), TEXT("ui.select"), TEXT("ui.back"), TEXT("ui.page"), TEXT("ui.play"), TEXT("ui.open"), TEXT("ui.denied"),
+			for (const TCHAR* Name : { TEXT("ui.press"), TEXT("ui.tab"), TEXT("ui.turn"), TEXT("ui.pick"), TEXT("ui.back"), TEXT("ui.confirm"), TEXT("ui.key"), TEXT("ui.step"),
+				TEXT("ui.click"), TEXT("ui.select"), TEXT("ui.page"), TEXT("ui.open"), TEXT("ui.denied"),
 				TEXT("ui.bought"), TEXT("ui.coins"), TEXT("ui.tick"), TEXT("wallet.connected"), TEXT("hit.marker"), TEXT("attack.own"), TEXT("swing"),
 				TEXT("reload.rifle"), TEXT("reload.shotgun"), TEXT("weapon.switch"), TEXT("bolt.hit"), TEXT("body.hit"), TEXT("fell"), TEXT("harvest"),
 				TEXT("piece.place"), TEXT("piece.hit.wood"), TEXT("piece.hit.stone"), TEXT("piece.hit.steel"), TEXT("piece.break.wood"), TEXT("piece.break.stone"),
@@ -205,7 +206,7 @@ namespace
 			if (Elapsed() < 0.5) {
 				return false;
 			}
-			Test->TestEqual(TEXT("A button that opens a page is heard"), USenniteSounds::Heard(World, TEXT("ui.page")), 1);
+			Test->TestEqual(TEXT("A button of the menu is heard, once"), USenniteSounds::Heard(World, TEXT("ui.press")), 1);
 			Menu->Close();
 			Enter(EPhase::Closed);
 			return false;
@@ -217,8 +218,8 @@ namespace
 			}
 			Test->TestFalse(TEXT("The menu is closed"), Menu->IsOpen());
 			Test->TestEqual(TEXT("The menu is heard closing"), USenniteSounds::Heard(World, TEXT("ui.back")), 1);
-			UE_LOG(LogSoundsCheck, Display, TEXT("GAMECHECK menu: opening heard %d, a page %d, closing %d"), USenniteSounds::Heard(World, TEXT("ui.open")),
-				USenniteSounds::Heard(World, TEXT("ui.page")), USenniteSounds::Heard(World, TEXT("ui.back")));
+			UE_LOG(LogSoundsCheck, Display, TEXT("GAMECHECK menu: opening heard %d, a button %d, closing %d"), USenniteSounds::Heard(World, TEXT("ui.open")),
+				USenniteSounds::Heard(World, TEXT("ui.press")), USenniteSounds::Heard(World, TEXT("ui.back")));
 			UE_LOG(LogSoundsCheck, Display, TEXT("GAMECHECK finished"));
 			Phase = EPhase::Done;
 			return true;

@@ -149,33 +149,56 @@ void USenniteSounds::Voice(const ASenniteCharacter* Hero, FName Kind)
 	}
 }
 
-void USenniteSounds::Button(const UObject* In, FName Action)
+FName USenniteSounds::ButtonSound(FName Action)
 {
 	const FString Name = Action.ToString();
-	if (Action.IsNone() || Name == TEXT("resume")) {
-		// closing the menu is heard as it closes
-		return;
+	if (Action.IsNone()) {
+		return NAME_None;
 	}
-	const TCHAR* Sound = TEXT("ui.click");
-	if (Name.Contains(TEXT(":")) || Name == TEXT("prev") || Name == TEXT("next") || Name == TEXT("wear") || Name == TEXT("takeoff") || Name == TEXT("choose")) {
-		// one of several picked: a hero, a skin, a section
-		Sound = TEXT("ui.select");
+	if (Name == TEXT("prev") || Name == TEXT("next")) {
+		// the arrows that turn to the next hero, skin or gun
+		return TEXT("ui.turn");
 	}
-	else if (Name == TEXT("back") || Name == TEXT("quit") || Name == TEXT("leave") || Name == TEXT("mainmenu")) {
-		Sound = TEXT("ui.back");
+	if (Name.StartsWith(TEXT("tab:"))) {
+		// a section of the store
+		return TEXT("ui.tab");
 	}
-	else if (Name == TEXT("play") || Name == TEXT("start")) {
-		Sound = TEXT("ui.play");
+	if (Name.StartsWith(TEXT("hero:")) || Name.StartsWith(TEXT("gun:")) || Name.StartsWith(TEXT("skinsof:")) || Name.StartsWith(TEXT("skin:")) || Name == TEXT("swap:from") || Name == TEXT("swap:to")) {
+		// one of a row
+		return TEXT("ui.pick");
 	}
-	else if (Name.EndsWith(TEXT("+")) || Name.EndsWith(TEXT("-")) || Name == TEXT("invert")) {
-		// a setting stepped
-		Sound = TEXT("ui.tick");
+	if (Name == TEXT("back") || Name == TEXT("leave") || Name == TEXT("stay") || Name == TEXT("resume")) {
+		return TEXT("ui.back");
 	}
-	else if (Name == TEXT("store") || Name == TEXT("heroes") || Name == TEXT("settings") || Name == TEXT("base") || Name == TEXT("host") || Name == TEXT("join")) {
-		// another page
-		Sound = TEXT("ui.page");
+	if (Name.StartsWith(TEXT("num:")) || Name.StartsWith(TEXT("key:"))) {
+		// a digit of a keypad
+		return TEXT("ui.key");
 	}
-	Play(In, Sound);
+	if (Name.EndsWith(TEXT("-")) || Name.EndsWith(TEXT("+")) || Name == TEXT("invert") || Name == TEXT("swap:flip")) {
+		// a setting a step less or more
+		return TEXT("ui.step");
+	}
+	for (const TCHAR* Done : { TEXT("choose"), TEXT("buy"), TEXT("buygun"), TEXT("buyskin"), TEXT("wear"), TEXT("takeoff"), TEXT("dbucks"), TEXT("wallet"), TEXT("price"), TEXT("trade"), TEXT("connect"), TEXT("start") }) {
+		if (Name == Done) {
+			// a thing done
+			return TEXT("ui.confirm");
+		}
+	}
+	return TEXT("ui.press");
+}
+
+void USenniteSounds::Button(const UObject* In, FName Action)
+{
+	const FName Sound = ButtonSound(Action);
+	if (!Sound.IsNone()) {
+		Play(In, Sound);
+	}
+}
+
+TArray<FSoftObjectPath> USenniteSounds::Takes(FName Name)
+{
+	const FSenniteSound* Sound = Find(Name);
+	return Sound != nullptr ? Sound->Takes : TArray<FSoftObjectPath>();
 }
 
 int32 USenniteSounds::TakesNamed(FName Name)

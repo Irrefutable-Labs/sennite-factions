@@ -5,6 +5,7 @@
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "CanvasItem.h"
+#include "Components/AudioComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
@@ -19,21 +20,50 @@
 #include "SenniteBaseEditor.h"
 #include "SenniteCharacter.h"
 #include "SenniteGameInstance.h"
+#include "SenniteGameMenu.h"
 #include "SenniteHeroes.h"
 #include "SennitePlayerState.h"
 #include "SennitePublisher.h"
 #include "SenniteUi.h"
 #include "SenniteWeapons.h"
 #include "SocketSubsystem.h"
+#include "Sound/SoundBase.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogSenniteMenu, Log, All);
 
 namespace
 {
 	const TCHAR* MenuMap = TEXT("/Game/Maps/Menu");
-	const TCHAR* PlayMap = TEXT("/Game/Maps/TestRange");
+	/** Where a base is planned: the range the factions' bases stand on. */
+	const TCHAR* BaseMap = TEXT("/Game/Maps/TestRange");
 	/** How far apart the lobby's heroes stand, in cm. */
 	const float Spacing = 190.0f;
 	/** The camera's field of view, across. */
 	const float FieldOfView = 60.0f;
+	/** How high a gun's middle is held on the stage, in cm: at a standing hero's eye, so that it is seen against the far rocks and the sky and not against the plants behind the stage, where a gun's thin shape is lost. The camera rises with it. */
+	const float GunHeight = 136.0f;
+	/** How far above the screen's middle the store's two arrows have theirs, in the screen's 720-line measure. */
+	const float ArrowsAbove = 18.0f;
+	/** How far above and below its middle a gun on the stage may reach, in cm. */
+	const float GunHalfHigh = 45.0f;
+	/** How wide one of the store's two arrows is, and how far inside them a gun's ends stay as it turns, in the screen's 720-line measure. */
+	const float ArrowWide = 76.0f;
+	const float GunClear = 24.0f;
+
+	/**
+	 * How far either side of the gun the store's two arrows stand, on a screen Wide across (both in the
+	 * screen's 720-line measure). A gun is long where a hero is tall: on a screen with the room for it the
+	 * arrows stand further apart than they do about a hero, never over the words at the left or off the
+	 * right edge, and never nearer than about a hero.
+	 */
+	float GunRoom(const float Wide)
+	{
+		const float Middle = Wide * 0.67f;
+		return FMath::Clamp(FMath::Min(Middle - ArrowWide - 527.0f, Wide - 100.0f - Middle), 254.0f, 344.0f);
+	}
+
+	/** Which of the menu's songs is next. It outlasts a menu: back from a match, the menu goes on to the song after the one it last began. */
+	int32 NextSong = 0;
 
 	int32 IndexOf(FName Id)
 	{
@@ -146,6 +176,57 @@ void ASenniteMenuController::BeginPlay()
 		StageCamera->GetCameraComponent()->bConstrainAspectRatio = false;
 		SetViewTarget(StageCamera);
 	}
+	// the player's own loudness, then the menu's songs
+	USenniteGameMenu::ApplySettings(GetWorld());
+	PlayNextSong();
+}
+
+void ASenniteMenuController::PlayNextSong()
+{
+	if (Songs.Num() == 0) {
+		return;
+	}
+	const int32 Which = NextSong % Songs.Num();
+	NextSong = (Which + 1) % Songs.Num();
+	Song = Cast<USoundBase>(Songs[Which].TryLoad());
+	if (Song == nullptr) {
+		UE_LOG(LogSenniteMenu, Warning, TEXT("The menu's song %s is not a sound"), *Songs[Which].ToString());
+		return;
+	}
+	// turned all the way down it plays on, unheard: it does not end, and the next does not begin, for want of loudness
+	Song->VirtualizationMode = EVirtualizationMode::PlayWhenSilent;
+	// the song before this one is stopped where it has not ended: that end is not a call for the next
+	bSongChanging = true;
+	if (Music == nullptr) {
+		// no sound device, no player: a game run without sound has chosen its song and plays it to nobody
+		Music = UGameplayStatics::CreateSound2D(this, Song, FMath::Clamp(USenniteProfile::Get().MusicVolume, 0.0f, 1.0f), 1.0f, 0.0f, nullptr, false, false);
+		if (Music != nullptr) {
+			Music->OnAudioFinishedNative.AddUObject(this, &ASenniteMenuController::SongEnded);
+		}
+	}
+	else {
+		Music->SetSound(Song);
+	}
+	if (Music != nullptr) {
+		Music->Play();
+	}
+	bSongChanging = false;
+	UE_LOG(LogSenniteMenu, Display, TEXT("The menu plays %s (%s)"), *Song->GetName(), Music != nullptr ? TEXT("heard") : TEXT("no sound device"));
+}
+
+bool ASenniteMenuController::SongIsHeard() const
+{
+	return Music != nullptr && Music->IsPlaying();
+}
+
+void ASenniteMenuController::SongEnded(UAudioComponent* Played)
+{
+	// a song that ends because the menu is going away is not followed by another
+	const UWorld* World = GetWorld();
+	if (IsActorBeingDestroyed() || World == nullptr || World->bIsTearingDown || Played != Music || bSongChanging || SongIsHeard()) {
+		return;
+	}
+	PlayNextSong();
 }
 
 bool ASenniteMenuController::InLobby() const
@@ -214,6 +295,12 @@ void ASenniteMenuController::PlayerTick(float DeltaTime)
 	Super::PlayerTick(DeltaTime);
 	if (!IsLocalController()) {
 		return;
+	}
+	// the songs are as loud as the player's MUSIC VOLUME says, as it is changed
+	const float Loud = FMath::Clamp(USenniteProfile::Get().MusicVolume, 0.0f, 1.0f);
+	if (Music != nullptr && Loud != SongLoud) {
+		SongLoud = Loud;
+		Music->SetVolumeMultiplier(Loud);
 	}
 	// what the menu said to do in the wallet is done once the wallet is connected
 	if (bNoteForWallet) {
@@ -285,10 +372,6 @@ void ASenniteMenuController::UpdateStage(float DeltaTime)
 
 	// one hero turns on the turntable; the lobby's row faces the camera
 	Spin = FMath::Fmod(Spin + 30.0f * DeltaTime, 360.0f);
-	if (StageGun != nullptr) {
-		// a gun's model has its muzzle along +X: side on to the camera, turning
-		StageGun->SetActorRotation(FRotator(0.0, 90.0 + Spin, 0.0));
-	}
 	const bool bTurn = Figures.Num() == 1;
 	float Top = 150.0f;
 	for (int32 Index = 0; Index < Figures.Num(); ++Index) {
@@ -303,12 +386,9 @@ void ASenniteMenuController::UpdateStage(float DeltaTime)
 			Top = FMath::Max(Top, float(Bounds.Origin.Z + Bounds.BoxExtent.Z));
 		}
 	}
-	if (StageCamera == nullptr) {
-		return;
-	}
 	// frame them all, whole, with the menu's buttons to the left on every page but the character select
-	const float Aspect = GEngine != nullptr && GEngine->GameViewport != nullptr && GEngine->GameViewport->Viewport != nullptr && GEngine->GameViewport->Viewport->GetSizeXY().Y > 0
-		? float(GEngine->GameViewport->Viewport->GetSizeXY().X) / GEngine->GameViewport->Viewport->GetSizeXY().Y : 16.0f / 9.0f;
+	const FIntPoint View = GEngine != nullptr && GEngine->GameViewport != nullptr && GEngine->GameViewport->Viewport != nullptr ? GEngine->GameViewport->Viewport->GetSizeXY() : FIntPoint::ZeroValue;
+	const float Aspect = View.Y > 0 ? float(View.X) / View.Y : 16.0f / 9.0f;
 	const float HalfAcross = FMath::Tan(FMath::DegreesToRadians(FieldOfView * 0.5f));
 	const float HalfUp = HalfAcross / Aspect;
 	const float Row = (Figures.Num() - 1) * Spacing + 160.0f;
@@ -319,9 +399,35 @@ void ASenniteMenuController::UpdateStage(float DeltaTime)
 	const bool bSkins = Page == ESenniteMenuPage::Skins;
 	const bool bSelect = Page == ESenniteMenuPage::Heroes || bSkins || Page == ESenniteMenuPage::Weapons;
 	const float Distance = FMath::Max(Top * (bSkins ? 1.6f : bSelect ? 1.38f : 1.2f) / (2.0f * HalfUp), Row * (Figures.Num() > 1 ? 2.1f : 1.25f) / (2.0f * HalfAcross));
+	if (StageGun != nullptr) {
+		// a gun's model has its muzzle along +X: side on to the camera, turning about its own middle, and as
+		// large as turns whole between the store's two arrows. The screen is 720 lines high whatever its
+		// shape, and at the stage a line is this many cm
+		const float PerLine = 2.0f * Distance * HalfUp / 720.0f;
+		float Reach = (GunRoom(720.0f * Aspect) - GunClear) * PerLine;
+		// where the last frame drew the arrows is the room there is: a screen with a notch or rounded corners
+		// draws them inside its safe part. The stage's middle is 0.67 of the way across, as the camera stands
+		const ASenniteMenuHUD* Drawn = Cast<ASenniteMenuHUD>(GetHUD());
+		const FSenniteMenuButton* Before = Drawn != nullptr ? Drawn->Buttons.FindByPredicate([](const FSenniteMenuButton& Each) { return Each.Action == TEXT("prev"); }) : nullptr;
+		const FSenniteMenuButton* After = Drawn != nullptr ? Drawn->Buttons.FindByPredicate([](const FSenniteMenuButton& Each) { return Each.Action == TEXT("next"); }) : nullptr;
+		if (Before != nullptr && After != nullptr && View.Y > 0) {
+			const float Middle = View.X * 0.67f;
+			const float Lines = FMath::Min(Middle - float(Before->Box.Max.X), float(After->Box.Min.X) - Middle) * 720.0f / View.Y;
+			Reach = (Lines - GunClear) * PerLine;
+		}
+		const float Scale = FMath::Max(0.1f, FMath::Min(Reach / FMath::Max(1.0f, StageGunReach), GunHalfHigh / FMath::Max(1.0f, StageGunHalfHigh)));
+		const FRotator Turned(0.0, 90.0 + Spin, 0.0);
+		StageGun->SetActorScale3D(FVector(Scale));
+		StageGun->SetActorLocationAndRotation(FVector(0.0, 0.0, GunHeight) - Turned.RotateVector(StageGunMiddle * Scale), Turned);
+	}
+	if (StageCamera == nullptr) {
+		return;
+	}
 	const float Across = 2.0f * Distance * HalfAcross;
 	const float Aside = -0.17f * Across;
-	const FVector Goal(-Distance, Aside, Top * (bSkins ? 0.4f : bSelect ? 0.47f : 0.52f));
+	// a gun is held level with the arrows either side of it: the camera looks level, from that much under the gun's middle
+	const float Height = Page == ESenniteMenuPage::Weapons ? GunHeight - ArrowsAbove * 2.0f * Distance * HalfUp / 720.0f : Top * (bSkins ? 0.4f : bSelect ? 0.47f : 0.52f);
+	const FVector Goal(-Distance, Aside, Height);
 	const FVector Now = FMath::VInterpTo(StageCamera->GetActorLocation(), Goal, DeltaTime, 4.0f);
 	StageCamera->SetActorLocationAndRotation(Now, FRotator(bSelect ? 0.0 : -2.0, 0.0, 0.0));
 }
@@ -383,8 +489,13 @@ void ASenniteMenuController::StandGun(const FString& WeaponId)
 	if (Model == nullptr) {
 		return;
 	}
-	// held up where a hero's chest would be, larger than life: a gun is an arm's length, the stage a hero's height
-	const FVector Where(0.0, 0.0, 78.0);
+	// held up larger than life: a gun is an arm's length, the stage a hero's height. Where its middle is, how far it reaches from the upright line through that middle as it turns,
+	// and how far above and below: what each frame sizes and places it by
+	const FBoxSphereBounds Bounds = Model->GetBounds();
+	StageGunMiddle = Bounds.Origin;
+	StageGunReach = float(FVector2D(Bounds.BoxExtent.X, Bounds.BoxExtent.Y).Size());
+	StageGunHalfHigh = float(Bounds.BoxExtent.Z);
+	const FVector Where(0.0, 0.0, GunHeight);
 	FActorSpawnParameters Spawn;
 	Spawn.ObjectFlags |= RF_Transient;
 	Spawn.bDeferConstruction = true;
@@ -395,13 +506,22 @@ void ASenniteMenuController::StandGun(const FString& WeaponId)
 	// the stage is this player's own: nothing on it goes to anyone else's game
 	StageGun->SetReplicates(false);
 	StageGun->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
-	StageGun->FinishSpawning(FTransform(FRotator(0.0, 90.0, 0.0), Where, FVector(1.6)));
+	StageGun->FinishSpawning(FTransform(FRotator(0.0, 90.0, 0.0), Where));
 	StageGun->GetStaticMeshComponent()->SetStaticMesh(Model);
 	StageGun->SetActorEnableCollision(false);
 }
 
+USenniteGameMenu* ASenniteMenuController::SettingsIfOpen() const
+{
+	return Settings != nullptr && Settings->IsOpen() ? Settings.Get() : nullptr;
+}
+
 bool ASenniteMenuController::InputTouch(const FTouchId TouchId, const ETouchType::Type Type, const FVector2D& TouchLocation, const float Force, const uint64 Timestamp)
 {
+	// SETTINGS, while it is open, takes every touch
+	if (USenniteGameMenu* Open = SettingsIfOpen()) {
+		return Open->Touch(Type, TouchLocation);
+	}
 	if (Type == ETouchType::Began) {
 		Press(TouchLocation);
 		return true;
@@ -415,6 +535,10 @@ bool ASenniteMenuController::InputTouch(const FTouchId TouchId, const ETouchType
 
 bool ASenniteMenuController::InputKey(const FInputKeyEventArgs& Params)
 {
+	// SETTINGS, while it is open, takes every key: Escape or the back button closes it
+	if (USenniteGameMenu* Open = SettingsIfOpen()) {
+		return Open->Key(Params);
+	}
 	const FKey Key = Params.Key;
 	if (Key == EKeys::LeftMouseButton && (Params.Event == IE_Pressed || Params.Event == IE_Released)) {
 		float X = 0.0f;
@@ -532,7 +656,14 @@ void ASenniteMenuController::Act(FName Action)
 	const TArray<FSenniteHero>& Heroes = USenniteHeroes::All();
 	USenniteProfile& Profile = USenniteProfile::Get();
 	if (Name == TEXT("play")) {
-		UGameplayStatics::OpenLevel(this, FName(PlayMap));
+		UGameplayStatics::OpenLevel(this, FName(*PlayMap));
+	}
+	else if (Name == TEXT("settings")) {
+		if (Settings == nullptr) {
+			Settings = NewObject<USenniteGameMenu>(this);
+			Settings->Bind(this);
+		}
+		Settings->OpenSettings();
 	}
 	else if (Name == TEXT("store") || Name == TEXT("heroes") || Name == TEXT("tab:heroes")) {
 		// the store opens on its heroes; the lobby's HEROES is the same section
@@ -656,7 +787,7 @@ void ASenniteMenuController::Act(FName Action)
 		// the player's base is on the map the game is played on: it opens there, on the planning view
 		const USennitePublisher* Server = Shop(this);
 		if (Server != nullptr && Server->IsOn()) {
-			UGameplayStatics::OpenLevel(this, FName(PlayMap), true, ASenniteBaseEditor::OpenOption);
+			UGameplayStatics::OpenLevel(this, FName(BaseMap), true, ASenniteBaseEditor::OpenOption);
 		}
 	}
 	else if (Name == TEXT("host")) {
@@ -934,6 +1065,13 @@ void ASenniteMenuHUD::DrawHUD()
 	if (Menu == nullptr) {
 		return;
 	}
+	if (USenniteGameMenu* Settings = Menu->SettingsIfOpen()) {
+		// SETTINGS is over the first screen, which is not drawn under it: its own buttons are what is tapped
+		Drawing.Add(TEXT("page=settings"));
+		Settings->Draw(Canvas);
+		LastDrawn = Drawing;
+		return;
+	}
 	Drawing.Add(FString::Printf(TEXT("page=%d"), int32(Menu->Page)));
 	switch (Menu->Page) {
 	case ESenniteMenuPage::Main: DrawMain(Menu); break;
@@ -980,13 +1118,14 @@ void ASenniteMenuHUD::DrawMain(ASenniteMenuController* Menu)
 	SenniteUi::Fade(Canvas, FBox2D(FVector2D(Whole.Min.X, H - 180.0f * S), Whole.Max), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), FLinearColor(0.0f, 0.0f, 0.0f, 0.5f), true);
 	Heading(TEXT("SENNITE"), TEXT("FACTIONS"), TEXT("BETA"));
 	const float X = 48.0f;
-	float Y = 140.0f;
-	const float Step = 72.0f;
+	float Y = 128.0f;
+	const float Step = 70.0f;
 	// a base is planned where there is a publisher's server, which keeps the factions' bases
 	const USennitePublisher* Server = Shop(Menu);
 	const bool bBases = Server != nullptr && Server->IsOn();
 	for (const TPair<const TCHAR*, const TCHAR*>& Each : { TPair<const TCHAR*, const TCHAR*>(TEXT("play"), TEXT("PLAY")), { TEXT("store"), TEXT("STORE") },
-			{ TEXT("base"), TEXT("BASE EDITOR") }, { TEXT("host"), TEXT("HOST A LOBBY") }, { TEXT("join"), TEXT("JOIN A LOBBY") }, { TEXT("quit"), TEXT("QUIT") } }) {
+			{ TEXT("base"), TEXT("BASE EDITOR") }, { TEXT("host"), TEXT("HOST A LOBBY") }, { TEXT("join"), TEXT("JOIN A LOBBY") }, { TEXT("settings"), TEXT("SETTINGS") },
+			{ TEXT("quit"), TEXT("QUIT") } }) {
 		Button(Each.Key, Each.Value, X, Y, 320.0f, 60.0f, bBases || FName(Each.Key) != TEXT("base"), 18, FName(Each.Key) == TEXT("play"));
 		Y += Step;
 	}
@@ -1424,10 +1563,11 @@ void ASenniteMenuHUD::DrawWeapons(ASenniteMenuController* Menu)
 	Text(TEXT("free"), TEXT("THE RIFLE AND THE SHOTGUN ARE FREE: EVERY CRATE GIVES THEM. A GUN SOLD HERE COMES OUT OF A CRATE ONLY FOR ITS OWNERS."),
 		(Left + 2.0f) * S, (H - 112.0f) * S, 12, White, 0.0f, false);
 
-	// the arrows, either side of the gun
+	// the arrows, either side of the gun: as far apart as the screen has room for, the gun turning whole between them
 	const float HeroX = W * 0.67f;
-	Button(TEXT("prev"), TEXT("<"), HeroX - 330.0f, H * 0.5f - 76.0f, 76.0f, 116.0f, true, 34, false, -1);
-	Button(TEXT("next"), TEXT(">"), FMath::Min(HeroX + 254.0f, W - 100.0f), H * 0.5f - 76.0f, 76.0f, 116.0f, true, 34, false, 1);
+	const float Apart = GunRoom(W);
+	Button(TEXT("prev"), TEXT("<"), HeroX - Apart - ArrowWide, H * 0.5f - 76.0f, ArrowWide, 116.0f, true, 34, false, -1);
+	Button(TEXT("next"), TEXT(">"), FMath::Min(HeroX + Apart, W - 100.0f), H * 0.5f - 76.0f, ArrowWide, 116.0f, true, 34, false, 1);
 
 	// every gun along the bottom, each on its own tile: the one shown in gold, one not owned faint
 	const float Gap = 8.0f;

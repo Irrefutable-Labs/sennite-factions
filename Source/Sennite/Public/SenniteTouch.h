@@ -85,7 +85,14 @@ private:
 		EUse Use = EUse::Look;
 		int32 Button = INDEX_NONE;
 		FVector2D Last = FVector2D::ZeroVector;
+		/** The finger tapped a button that stays as it is set when the finger lifts (AIM). */
+		bool bLatched = false;
 	};
+
+	/** The gun a slot along the bottom holds, by the key it presses: 1 rifle, 2 shotgun, 3 energy rifle, 4 sniper; 0 for any other button. */
+	static int32 GunOfSlot(const FKey& InKey);
+	/** Whether a button is AIM as it aims: a tap aims and the next lets go, where a mouse button is held. */
+	bool AimLatches(const FButton& Button) const;
 
 	/** Which buttons show now: OPEN only beside a closed crate, RELOAD only with a gun in hand, EDIT only by a piece to edit or while editing, the rest while the player has a hero. */
 	bool Shows(const FButton& Button) const;

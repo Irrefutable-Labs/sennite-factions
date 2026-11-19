@@ -1,7 +1,7 @@
 #!/bin/zsh
 # The menu check (Source/Sennite/Private/Tests/MenuTest.cpp), by taps on the screen: the game opens on
 # the menu, HEROES shows each hero turning on the stage, a bought hero cannot be chosen on a game with no
-# shop, CHOOSE keeps a free hero in the profile on disk, and PLAY puts the player on the test range as it.
+# shop, CHOOSE keeps a free hero in the profile on disk, and PLAY puts the player on the arena as it.
 # Runs with a profile of its own (MenuCheck), new each run. Screenshots and log in Saved/Menu/.
 cd "$(dirname "$0")/.."
 rm -f Saved/SaveGames/MenuCheck.sav

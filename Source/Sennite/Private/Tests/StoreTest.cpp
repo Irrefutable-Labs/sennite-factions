@@ -4,7 +4,8 @@
 // - STORE opens on the heroes; SKINS shows each skin the shop lists, on the hero it is a skin of, turning
 //   on the stage in the skin's own mesh, with its price; the arrows and the tiles go through them;
 // - a skin not owned offers the next step toward it: with no wallet connected, connecting one;
-// - WEAPONS shows each gun the shop sells, turning on the stage in the hero's place, with its price;
+// - WEAPONS shows each gun the shop sells, turning on the stage in the hero's place, with its price: about
+//   its own middle, whole between the two arrows, and taking most of the room between them;
 // - SWAP shows what the publisher's vaults hold to swap, takes an amount from the screen's keypad, and
 //   changes the two sides over; with no wallet connected it offers to connect one, and no price is asked;
 // - BACK goes to the first screen, and BASE EDITOR opens the test range on the planning view of a parcel.
@@ -22,6 +23,9 @@
 #include "SenniteUi.h"
 #include "Animation/SkeletalMeshActor.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -33,6 +37,42 @@ namespace
 	{
 		TActorIterator<ASkeletalMeshActor> It(World);
 		return It ? FSoftObjectPath(It->GetSkeletalMeshComponent()->GetSkeletalMeshAsset()).ToString() : FString();
+	}
+
+	/**
+	 * The gun on the stage is seen whole: it turns about its own middle, which is on the stage's upright
+	 * line; at its longest across the screen, side on, both its ends are inside the store's two arrows; and
+	 * it takes most of the room between them, not a corner of it.
+	 */
+	void StoreGunIsSeenWhole(FAutomationTestBase* Test, ASenniteMenuController* Menu, const FString& GunId)
+	{
+		const AStaticMeshActor* Gun = Menu->GunOnStage();
+		const ASenniteMenuHUD* Drawn = MenuCheck::Hud(Menu);
+		const UStaticMesh* Model = Gun != nullptr ? Gun->GetStaticMeshComponent()->GetStaticMesh() : nullptr;
+		const FSenniteMenuButton* Before = Drawn != nullptr ? Drawn->Buttons.FindByPredicate([](const FSenniteMenuButton& Each) { return Each.Action == TEXT("prev"); }) : nullptr;
+		const FSenniteMenuButton* After = Drawn != nullptr ? Drawn->Buttons.FindByPredicate([](const FSenniteMenuButton& Each) { return Each.Action == TEXT("next"); }) : nullptr;
+		if (!Test->TestTrue(FString::Printf(TEXT("The gun %s is on the stage between two arrows"), *GunId), Model != nullptr && Before != nullptr && After != nullptr)) {
+			return;
+		}
+		const FVector Middle = Gun->GetStaticMeshComponent()->Bounds.Origin;
+		Test->TestTrue(FString::Printf(TEXT("The gun %s turns about its own middle (its middle is %.1f cm off the stage's line)"), *GunId, FVector2D(Middle.X, Middle.Y).Size()),
+			FVector2D(Middle.X, Middle.Y).Size() < 1.0);
+		const FBoxSphereBounds Shipped = Model->GetBounds();
+		const double Reach = FVector2D(Shipped.BoxExtent.X, Shipped.BoxExtent.Y).Size() * Gun->GetActorScale3D().X;
+		FVector2D One;
+		FVector2D Other;
+		if (!Test->TestTrue(TEXT("The gun's two ends are on the screen"), Menu->ProjectWorldLocationToScreen(Middle - FVector(0.0, Reach, 0.0), One) && Menu->ProjectWorldLocationToScreen(Middle + FVector(0.0, Reach, 0.0), Other))) {
+			return;
+		}
+		Test->TestTrue(FString::Printf(TEXT("The gun %s is held level with the arrows (its middle at %.0f down the screen, the arrows from %.0f to %.0f)"), *GunId, One.Y, Before->Box.Min.Y, Before->Box.Max.Y),
+			One.Y > Before->Box.Min.Y && One.Y < Before->Box.Max.Y);
+		const double Left = FMath::Min(One.X, Other.X);
+		const double Right = FMath::Max(One.X, Other.X);
+		const double Room = After->Box.Min.X - Before->Box.Max.X;
+		Test->TestTrue(FString::Printf(TEXT("The gun %s is clear of the arrow before it (its end at %.0f, the arrow's edge at %.0f)"), *GunId, Left, Before->Box.Max.X), Left > Before->Box.Max.X);
+		Test->TestTrue(FString::Printf(TEXT("The gun %s is clear of the arrow after it (its end at %.0f, the arrow's edge at %.0f)"), *GunId, Right, After->Box.Min.X), Right < After->Box.Min.X);
+		Test->TestTrue(FString::Printf(TEXT("The gun %s takes most of the room between the arrows (%.0f of %.0f)"), *GunId, Right - Left, Room), Right - Left > 0.7 * Room);
+		UE_LOG(LogStoreCheck, Display, TEXT("GAMECHECK weapons: %s is %.0f across between arrows %.0f apart, at %.2f times its size"), *GunId, Right - Left, Room, Gun->GetActorScale3D().X);
 	}
 
 	FString StoreSkinMesh(const FString& SkinId)
@@ -232,6 +272,7 @@ namespace
 				for (const FSenniteHeroForSale& Each : Server->ShopWeapons) {
 					Test->TestTrue(FString::Printf(TEXT("The gun %s has a tile"), *Each.Id), MenuCheck::Has(Menu, FName(*(FString(TEXT("gun:")) + Each.Id))));
 				}
+				StoreGunIsSeenWhole(Test, Menu, Gun.Id);
 				UE_LOG(LogStoreCheck, Display, TEXT("GAMECHECK weapons: %d listed; %s on the stage at %s"), Server->ShopWeapons.Num(), *Menu->StageWeapon(), *MenuCheck::Line(Menu, TEXT("status")));
 				GameCheck::Shot(TEXT("Store"), TEXT("weapons.png"));
 				WeaponStep = 1;
@@ -249,6 +290,7 @@ namespace
 				return Elapsed() > 30.0 ? Fail(TEXT("A tap on a gun's tile did not bring it onto the stage in 30 s")) : false;
 			}
 			Test->TestEqual(TEXT("A tap on a gun's tile shows that gun"), MenuCheck::Line(Menu, TEXT("name")), FString(TEXT("SNIPER")));
+			StoreGunIsSeenWhole(Test, Menu, Server->ShopWeapons[Last].Id);
 			GameCheck::Shot(TEXT("Store"), TEXT("weapons_last.png"));
 			Enter(EPhase::DBucks);
 			return false;
