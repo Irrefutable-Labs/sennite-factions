@@ -168,7 +168,8 @@ export class Service {
     const bears = this.bearer(req);
     const game = bears === "" ? "-" : createHash("sha256").update(bears).digest("hex").slice(0, 6);
     const path = (req.url ?? "").split("?")[0]!.split("/").map((part) => (part === "" || ROUTE_WORDS.has(part) ? part : "…")).join("/");
-    const key = `${game} ${req.method} ${path}`;
+    // which read it is, is told by the whole path (kept here only, never written): two parcels are two reads
+    const key = `${game} ${req.method} ${createHash("sha256").update(req.url ?? "").digest("hex").slice(0, 16)}`;
     if (req.method === "GET") {
       if (this.#saidLast.get(key) === status) return;
       if (this.#saidLast.size > 4096) this.#saidLast.clear();

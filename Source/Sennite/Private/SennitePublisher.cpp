@@ -632,7 +632,7 @@ void USennitePublisher::BuyDBucks(const FString& InEra)
 void USennitePublisher::BuySkin(const FString& SkinId)
 {
 	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
-	Body->SetStringField(TEXT("skinId"), SkinId);
+	Body->SetStringField(TEXT("skinId"), SkinId.ToLower());
 	if (bBusy) {
 		return;
 	}
@@ -644,7 +644,9 @@ void USennitePublisher::BuySkin(const FString& SkinId)
 void USennitePublisher::BuyHero(const FString& HeroId)
 {
 	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
-	Body->SetStringField(TEXT("heroId"), HeroId);
+	// The shop's ids are lower case. A hero's id is a name here, and a name is written in the case Unreal first met
+	// it in ("Rampage", from the hero's own assets), so it is sent as the shop has it.
+	Body->SetStringField(TEXT("heroId"), HeroId.ToLower());
 	if (bBusy) {
 		return;
 	}
@@ -656,7 +658,7 @@ void USennitePublisher::BuyHero(const FString& HeroId)
 void USennitePublisher::BuyWeapon(const FString& WeaponId)
 {
 	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
-	Body->SetStringField(TEXT("weaponId"), WeaponId);
+	Body->SetStringField(TEXT("weaponId"), WeaponId.ToLower());
 	if (bBusy) {
 		return;
 	}
