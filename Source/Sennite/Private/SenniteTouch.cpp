@@ -202,6 +202,17 @@ bool USenniteTouchControls::Shows(const FButton& Button) const
 	return true;
 }
 
+int32 USenniteTouchControls::GunOfSlot(const FKey& InKey)
+{
+	return InKey == EKeys::Two ? 1 : InKey == EKeys::Three ? 2 : InKey == EKeys::Six ? 3 : InKey == EKeys::Seven ? 4 : 0;
+}
+
+bool USenniteTouchControls::AimLatches(const FButton& Button) const
+{
+	// while it reads AIM: in build mode it changes the material, and while editing it resets, each at a tap
+	return Button.Key == EKeys::RightMouseButton && LabelOf(Button) == TEXT("AIM");
+}
+
 FString USenniteTouchControls::LabelOf(const FButton& Button) const
 {
 	const ASenniteCharacter* Hero = Controller ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
@@ -483,7 +494,15 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 		}
 		if (New.Use == EUse::Button) {
 			const bool bAlreadyDown = Fingers.ContainsByPredicate([&New](const FFinger& Each) { return Each.Use == EUse::Button && Each.Button == New.Button; });
-			if (!bAlreadyDown) {
+			if (AimLatches(All[New.Button])) {
+				// a thumb cannot hold AIM and fire too: one tap aims, the next lets go
+				const ASenniteCharacter* Hero = Cast<ASenniteCharacter>(Controller->GetPawn());
+				New.bLatched = true;
+				if (!bAlreadyDown) {
+					Key(All[New.Button].Key, Hero != nullptr && Hero->AimedIn ? IE_Released : IE_Pressed);
+				}
+			}
+			else if (!bAlreadyDown) {
 				Key(All[New.Button].Key, IE_Pressed);
 			}
 		}
@@ -519,7 +538,7 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 		}
 		else if (Gone.Use == EUse::Button) {
 			const bool bStillDown = Fingers.ContainsByPredicate([&Gone](const FFinger& Each) { return Each.Use == EUse::Button && Each.Button == Gone.Button; });
-			if (!bStillDown) {
+			if (!bStillDown && !Gone.bLatched) {
 				Key(Buttons()[Gone.Button].Key, IE_Released);
 			}
 		}
@@ -681,8 +700,9 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 		// what is in hand, or the piece being placed, is marked; what the player does not have is dimmed
 		bool bInHand = false;
 		bool bHave = true;
-		if (Button.Key == EKeys::Two || Button.Key == EKeys::Three) {
-			const int32 Kind = Button.Key == EKeys::Two ? 1 : 2;
+		if (GunOfSlot(Button.Key) != 0) {
+			// a gun the player has not got, from a crate or bought in the store, is dimmed: its slot does nothing
+			const int32 Kind = GunOfSlot(Button.Key);
 			bHave = State->EquippedWeapons.Contains(Kind);
 			bInHand = !State->InBuildMode && Hero->CurrentHealingItem == nullptr && Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == Kind;
 		}
@@ -693,6 +713,10 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 		}
 		else if (Button.Key == EKeys::G) {
 			bInHand = Hero->GetEditingPiece() != nullptr;
+		}
+		else if (AimLatches(Button)) {
+			// AIM stays lit while the hero is aiming: a tap aims, the next tap lets go
+			bInHand = Hero->AimedIn;
 		}
 		else if (Button.Key == EKeys::X || Button.Key == EKeys::C || Button.Key == EKeys::F) {
 			bInHand = State->InBuildMode && State->BuildMode.Equals(Button.Name, ESearchCase::IgnoreCase);

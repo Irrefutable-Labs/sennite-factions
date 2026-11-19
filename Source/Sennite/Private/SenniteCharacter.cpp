@@ -1645,7 +1645,7 @@ void ASenniteCharacter::ServerFireWeapon_Implementation() {
 		// No gun in hand: the hero attacks with its own weapon (a staff, a fist, a hammer). It plays its
 		// own attack and a bolt leaves the weapon, good up close and at a distance; there is nothing to
 		// load and nothing to run out of, only OwnAttackSeconds between one and the next.
-		if (CurrentWeapon != nullptr || State->InBuildMode || State->AimedIn || State->JustSwungPickaxe || State->JustUsedHealingItem) {
+		if (CurrentWeapon != nullptr || State->InBuildMode || State->JustSwungPickaxe || State->JustUsedHealingItem) {
 			return;
 		}
 		NetMulticastOwnAttack();
@@ -1932,6 +1932,12 @@ void ASenniteCharacter::ServerAimDownSights_Implementation() {
 			//ServerSetAimedInSpeed();
 			State->AimedIn = true;
 		}
+		else if (State && State->CurrentWeapon == 0 && !State->InBuildMode && CurrentHealingItem == nullptr) {
+			// the hero's own weapon is aimed as a gun is: the view closes in on where its bolt will go
+			AimedIn = true;
+			ClientCameraAimIn();
+			State->AimedIn = true;
+		}
 	}
 }
 
@@ -1947,6 +1953,12 @@ void ASenniteCharacter::ServerAimHipFire_Implementation() {
 			HoldingWeaponType = 1;
 			ClientCameraAimOut();
 			//ServerSetWalkingSpeed();
+			State->AimedIn = false;
+		}
+		else if (State && (AimedIn || State->AimedIn)) {
+			// aiming its own weapon, or whatever it took in hand since
+			AimedIn = false;
+			ClientCameraAimOut();
 			State->AimedIn = false;
 		}
 	}
@@ -2289,6 +2301,13 @@ void ASenniteCharacter::KickGun() {
 void ASenniteCharacter::NetMulticastOwnAttack_Implementation() {
 	if (OwnAttack != nullptr) {
 		PlayAnimMontage(OwnAttack);
+	}
+	// and is heard, where the hero's own weapon is, as a gun's shot is
+	if (GetNetMode() != NM_DedicatedServer) {
+		if (USoundBase* Shot = Cast<USoundBase>(GetDefault<AWeaponActor>()->OwnAttackSound.TryLoad())) {
+			USoundAttenuation* Fades = Cast<USoundAttenuation>(GetDefault<AWeaponActor>()->FireFalloff.TryLoad());
+			UGameplayStatics::PlaySoundAtLocation(this, Shot, OwnWeaponTip(), 1.0f, 1.0f, 0.0f, Fades);
+		}
 	}
 }
 
