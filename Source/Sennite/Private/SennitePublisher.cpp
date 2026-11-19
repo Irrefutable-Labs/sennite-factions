@@ -16,6 +16,10 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#if PLATFORM_ANDROID
+#include "Android/AndroidApplication.h"
+#include "Android/AndroidJNI.h"
+#endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogSennitePublisher, Log, All);
 
@@ -252,6 +256,16 @@ bool USennitePublisher::Tick(float)
 	}
 	if (!bMeAsked && Now >= NextMe) {
 		AskMe();
+	}
+	// how long the wallet has been waited on, for what the game asked it or the player did
+	if (bConnected && (bProving || bBusy)) {
+		if (WalletWaitFrom <= 0.0) {
+			WalletWaitFrom = Now;
+		}
+	}
+	else {
+		WalletWaitFrom = 0.0;
+		bWalletOpenedForWait = false;
 	}
 	if (!bShop && !bShopAsked) {
 		AskShop();
@@ -571,6 +585,36 @@ FString USennitePublisher::DBucksLine(bool& bKnown) const
 	}
 	// nothing proved yet: no amount is made up for it
 	return FString(ProofPending() ? TEXT("ASKING YOUR WALLET ...") : TEXT("NOT PROVED YET"));
+}
+
+bool USennitePublisher::OpenWallet(bool bComeBack)
+{
+	bool bOpened = false;
+#if PLATFORM_ANDROID
+	// Sennite_UPL.xml: the wallet's launch intent, and the game to the front again after
+	if (JNIEnv* Env = FAndroidApplication::GetJavaEnv()) {
+		static jmethodID Open = FJavaWrapper::FindMethod(Env, FJavaWrapper::GameActivityClassID, "AndroidThunkJava_SenniteOpenWallet", "(I)Z", true);
+		if (Open != nullptr) {
+			bOpened = FJavaWrapper::CallBooleanMethod(Env, FJavaWrapper::GameActivityThis, Open, static_cast<jint>(bComeBack ? FMath::RoundToInt(WalletComeBackAfter * 1000.0f) : 0));
+		}
+	}
+#endif
+	++WalletOpens;
+	UE_LOG(LogSennitePublisher, Display, TEXT("The game %s the DSM wallet after waiting %.1f s on it%s"), bOpened ? TEXT("opened") : TEXT("could not open"),
+		WaitingOnWallet(), bOpened && bComeBack ? TEXT(", to come back by itself") : TEXT(""));
+	return bOpened;
+}
+
+bool USennitePublisher::OpenWalletForWait()
+{
+	const double Now = FPlatformTime::Seconds();
+	if (bWalletOpenedForWait || WaitingOnWallet() < WalletWaitBeforeOpening || Now < NextWalletOpen) {
+		return false;
+	}
+	// once for a wait, and not again within the minute: a wallet that is running and slow is not opened over and over
+	bWalletOpenedForWait = true;
+	NextWalletOpen = Now + 60.0;
+	return OpenWallet(true);
 }
 
 void USennitePublisher::BuyDBucks(const FString& InEra)

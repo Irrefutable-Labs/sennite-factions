@@ -313,6 +313,15 @@ void ASenniteMenuController::PlayerTick(float DeltaTime)
 			Note.Reset();
 		}
 	}
+	// In the store, what is shown and sold waits on the player's wallet. A wallet that has not answered in a few seconds
+	// is not running: the game opens it, and comes back by itself (USennitePublisher::OpenWalletForWait). Only here:
+	// a match is not left for the wallet.
+	if (Page == ESenniteMenuPage::Heroes || Page == ESenniteMenuPage::Skins || Page == ESenniteMenuPage::Weapons || Page == ESenniteMenuPage::Swap) {
+		const UGameInstance* Game = GetGameInstance();
+		if (USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr) {
+			Server->OpenWalletForWait();
+		}
+	}
 	// the store's swap shows the vaults as they are: they are read again every few seconds while it is open
 	if (Page == ESenniteMenuPage::Swap && FPlatformTime::Seconds() >= NextSwapRead) {
 		const UGameInstance* Game = GetGameInstance();
@@ -908,6 +917,14 @@ void ASenniteMenuController::Act(FName Action)
 #endif
 		}
 	}
+	else if (Name == TEXT("openwallet")) {
+		// the wallet was opened once for this wait and has still not answered: the player opens it, and comes back
+		// when they have done what waits there
+		const UGameInstance* Game = GetGameInstance();
+		if (USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr) {
+			Server->OpenWallet(false);
+		}
+	}
 	else if (Name == TEXT("dbucks")) {
 		// D-bucks for a hero the wallet holds too few for: ERA traded through the publisher's vault, as in the shop
 		const UGameInstance* Game = GetGameInstance();
@@ -1306,6 +1323,14 @@ bool ASenniteMenuHUD::NextStep(const USennitePublisher* Server, const FForSale& 
 	else if (Thing.bOnItsWay) {
 		Button(Thing.Buy, TEXT("ON ITS WAY TO YOUR WALLET"), Left, Y, Wide, 66.0f, false, 14);
 	}
+#if PLATFORM_ANDROID || PLATFORM_IOS
+	else if ((Server->bBusy || !Server->bMaterialsKnown) && Server->WalletOpenedForWait() && Server->WaitingOnWallet() > Server->WalletWaitBeforeOpening + 20.0) {
+		// the game opened the wallet for this and it has still not answered: something waits there for the player
+		Button(TEXT("openwallet"), TEXT("OPEN YOUR WALLET"), Left, Y, Wide, 66.0f, true, 16, true);
+		Hint = TEXT("YOUR DSM WALLET HAS NOT ANSWERED.");
+		Hint2 = TEXT("OPEN IT, APPROVE WHAT WAITS THERE, THEN COME BACK.");
+	}
+#endif
 	else if (Server->bBusy) {
 		Button(Thing.Buy, TEXT("WAITING FOR YOUR WALLET ..."), Left, Y, Wide, 66.0f, false, 14);
 	}

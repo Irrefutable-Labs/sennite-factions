@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  What the game adds to its Android app, for the DSM Wallet app on the same phone.
+
+  The wallet answers what the game asks of it only while it is running, and Android closes it when the game
+  needs the room. So the game opens the wallet itself when it is waiting on it, as Wildstate does (its
+  MainActivity: getLaunchIntentForPackage of the wallet, with the wallet's package in the manifest's queries),
+  and comes to the front again by itself a few seconds later. The owner, 2026-11-19: "It should open it itself,
+  yes, then the user hits the approve button, and it should take it. After that's done, it should go back into
+  the game automatically. That's how Wild State works."
+
+  USennitePublisher::OpenWallet (SennitePublisher.cpp) calls AndroidThunkJava_SenniteOpenWallet.
+-->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+	<androidManifestUpdates>
+		<!-- Android 11 and later: the game may ask for the wallet's launch intent only if it names the wallet here -->
+		<addElements tag="queries">
+			<package android:name="com.dsm.wallet"/>
+		</addElements>
+	</androidManifestUpdates>
+
+	<gameActivityClassAdditions>
+		<insert><![CDATA[
+	/** The DSM Wallet app the game asks: its package on this phone. */
+	private static final String SENNITE_WALLET_PACKAGE = "com.dsm.wallet";
+
+	/**
+	 * Bring the DSM Wallet app to the front, so that it runs and answers what the game asked of it. With
+	 * ComeBackAfterMs above 0 the game comes to the front again by itself that long after: Android lets an app
+	 * that was in front a few seconds ago do so. Answers whether there is a wallet app to open.
+	 */
+	public boolean AndroidThunkJava_SenniteOpenWallet(final int ComeBackAfterMs)
+	{
+		final Intent Wallet = getPackageManager().getLaunchIntentForPackage(SENNITE_WALLET_PACKAGE);
+		if (Wallet == null)
+		{
+			Log.debug("[JAVA] SenniteOpenWallet: no " + SENNITE_WALLET_PACKAGE + " on this phone");
+			return false;
+		}
+		runOnUiThread(new Runnable()
+		{
+			@Override
+			public void run()
+			{
+				try
+				{
+					startActivity(Wallet);
+					Log.debug("[JAVA] SenniteOpenWallet: opened the wallet, to come back after " + ComeBackAfterMs + " ms");
+				}
+				catch (Exception Refused)
+				{
+					Log.debug("[JAVA] SenniteOpenWallet: the wallet did not open: " + Refused);
+					return;
+				}
+				if (ComeBackAfterMs <= 0)
+				{
+					return;
+				}
+				new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable()
+				{
+					@Override
+					public void run()
+					{
+						try
+						{
+							Intent Back = new Intent(GameActivity.this, GameActivity.class);
+							Back.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+							startActivity(Back);
+							Log.debug("[JAVA] SenniteOpenWallet: asked to come back to the game");
+						}
+						catch (Exception Refused)
+						{
+							Log.debug("[JAVA] SenniteOpenWallet: the game did not come back: " + Refused);
+						}
+					}
+				}, ComeBackAfterMs);
+			}
+		});
+		return true;
+	}
+		]]></insert>
+	</gameActivityClassAdditions>
+</root>

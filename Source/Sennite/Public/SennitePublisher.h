@@ -268,6 +268,34 @@ public:
 	 * on a phone it is a link, and the DSM wallet on the same phone opens on it. False with no code yet.
 	 */
 	bool OpenConnectCode() const;
+
+	/**
+	 * The DSM Wallet app answers what the game asks of it only while it is running, and a phone closes it when the
+	 * game needs the room: then a proof or a purchase waits for ever. So on a phone the game opens the wallet itself
+	 * when it has waited on it this long, and comes to the front again by itself this long after. The owner,
+	 * 2026-11-19: "It should open it itself, yes, then the user hits the approve button, and it should take it.
+	 * After that's done, it should go back into the game automatically. That's how Wild State works."
+	 */
+	UPROPERTY(Config)
+	float WalletWaitBeforeOpening = 6.0f;
+
+	UPROPERTY(Config)
+	float WalletComeBackAfter = 5.0f;
+
+	/** How long the game has waited on the wallet for what it asked (a proof of what it holds, or what the player asked of it), in seconds; 0 while it waits on nothing. */
+	double WaitingOnWallet() const { return WalletWaitFrom > 0.0 ? FPlatformTime::Seconds() - WalletWaitFrom : 0.0; }
+	/** Whether the wallet was opened for the wait there is now. */
+	bool WalletOpenedForWait() const { return bWalletOpenedForWait; }
+	/**
+	 * On a phone, bring the DSM Wallet app to the front; with bComeBack the game comes to the front again by itself
+	 * WalletComeBackAfter seconds later, without it the player comes back when they have done what waits there.
+	 * False where there is no wallet app to open: not a phone, or none on it.
+	 */
+	bool OpenWallet(bool bComeBack);
+	/** Open the wallet, to come back, once for the wait there is now and only when it has lasted WalletWaitBeforeOpening. Answers whether it opened. */
+	bool OpenWalletForWait();
+	/** How many times the game opened the wallet, for a check to read. */
+	int32 WalletOpens = 0;
 	/** How much ERA one trade for D-bucks takes from the wallet, in the shop and on the character select. */
 	static const TCHAR* TradeEra() { return TEXT("2"); }
 	bool bConnected = false;
@@ -464,6 +492,10 @@ private:
 	FString MatchSecret;
 	FString PendingRequest;
 	bool bRequestAsked = false;
+	/** When the wait on the wallet there is now began; 0 while the game waits on nothing. */
+	double WalletWaitFrom = 0.0;
+	bool bWalletOpenedForWait = false;
+	double NextWalletOpen = 0.0;
 	/** The wallet's holdings changed with what was just asked: prove them again once it settles. */
 	bool bProveAfter = false;
 	/** A proof is to be asked for as soon as none is in flight. */
