@@ -31,9 +31,10 @@ namespace
 	// the take of each sound played last, so the next is another
 	TMap<FName, int32> LastTake;
 
-	// A hero slower than this is standing; faster than Run it is running.
-	constexpr float Standing = 20.0f;
-	constexpr float Run = 600.0f;
+	// A hero slower than StandingSpeed is standing; faster than RunningSpeed it is running. (Named so that no check's
+	// own Run or Standing hides them where the files are compiled together.)
+	constexpr float StandingSpeed = 20.0f;
+	constexpr float RunningSpeed = 600.0f;
 	// A fall faster than this, in cm a second, is one the hero's voice answers on landing.
 	constexpr float HardLanding = 900.0f;
 	// How long after the wallet connects its D-bucks and passes arriving are not heard as bought: they are what it had.
@@ -416,8 +417,8 @@ void USenniteSounds::HearHero(ASenniteCharacter* Hero, FSeen& Seen, float DeltaT
 	// a step each stride walked on the ground (a hero moved a long way in one frame was put there, not walking)
 	const float Speed = Going.Size2D();
 	const float Went = FVector::Dist2D(At, Seen.At);
-	if (bOnGround && Speed > Standing && Went < 300.0f) {
-		const bool bRunning = Speed > Run;
+	if (bOnGround && Speed > StandingSpeed && Went < 300.0f) {
+		const bool bRunning = Speed > RunningSpeed;
 		const float Stride = bRunning ? RunStride : WalkStride;
 		Seen.Walked += Went;
 		if (Seen.Walked >= Stride) {
@@ -425,7 +426,7 @@ void USenniteSounds::HearHero(ASenniteCharacter* Hero, FSeen& Seen, float DeltaT
 			PlayAt(Hero, FName(*FString::Printf(TEXT("step.%s.%s"), *GroundUnder(Hero).ToString(), bRunning ? TEXT("run") : TEXT("walk"))), Feet);
 		}
 	}
-	else if (Speed <= Standing) {
+	else if (Speed <= StandingSpeed) {
 		// standing: the first step comes half a stride after setting off
 		Seen.Walked = WalkStride * 0.5f;
 	}
