@@ -2,18 +2,17 @@
 <!--
   What the game adds to its Android app, for the DSM Wallet app on the same phone.
 
-  The wallet answers what the game asks of it only while it is running, and Android closes it when the game
-  needs the room. So the game opens the wallet itself when it is waiting on it, as Wildstate does (its
-  MainActivity: getLaunchIntentForPackage of the wallet, with the wallet's package in the manifest's queries),
-  and comes to the front again by itself a few seconds later. The owner, 2026-11-19: "It should open it itself,
-  yes, then the user hits the approve button, and it should take it. After that's done, it should go back into
-  the game automatically. That's how Wild State works."
+  No payment and no trade is granted to the game: each waits in the player's wallet for their approval. So the
+  game opens the wallet itself, as Wildstate does. The owner, 2026-11-19: "It should open it itself, yes, then the
+  user hits the approve button, and it should take it. After that's done, it should go back into the game
+  automatically. That's how Wild State works." The game cannot bring itself back to the front (Android refuses an
+  app that is not in front): the wallet steps back to the game once the player has decided.
 
   For a payment or a trade, which the player approves in the wallet, the game opens the wallet on the connect code
   it is connected by (AndroidThunkJava_SenniteOpenWalletLink): the wallet then shows what waits for the player
   and steps back to the game after.
 
-  USennitePublisher::OpenWallet and OpenWalletToApprove (SennitePublisher.cpp) call these.
+  USennitePublisher::OpenWalletToApprove and OpenWalletPlain (SennitePublisher.cpp) call these.
 -->
 <root xmlns:android="http://schemas.android.com/apk/res/android">
 	<androidManifestUpdates>
@@ -29,12 +28,10 @@
 	private static final String SENNITE_WALLET_PACKAGE = "com.dsm.wallet";
 
 	/**
-	 * Bring the DSM Wallet app to the front, so that it runs and answers what the game asked of it. With
-	 * ComeBackAfterMs above 0 the game comes to the front again by itself that long after: Android lets an app
-	 * that was in front a few seconds ago do so. Answers whether the wallet app was opened: false with none on
-	 * this phone, or one that did not start.
+	 * Bring the DSM Wallet app to the front as it opens by itself: for a game that kept no connect code to open
+	 * it on. Answers whether the wallet app was opened: false with none on this phone, or one that did not start.
 	 */
-	public boolean AndroidThunkJava_SenniteOpenWallet(final int ComeBackAfterMs)
+	public boolean AndroidThunkJava_SenniteOpenWallet()
 	{
 		final Intent Wallet = getPackageManager().getLaunchIntentForPackage(SENNITE_WALLET_PACKAGE);
 		if (Wallet == null)
@@ -45,35 +42,14 @@
 		try
 		{
 			startActivity(Wallet);
-			Log.debug("[JAVA] SenniteOpenWallet: opened the wallet, to come back after " + ComeBackAfterMs + " ms");
+			Log.debug("[JAVA] SenniteOpenWallet: opened the wallet");
+			return true;
 		}
 		catch (Exception Refused)
 		{
 			Log.debug("[JAVA] SenniteOpenWallet: the wallet did not open: " + Refused);
 			return false;
 		}
-		if (ComeBackAfterMs > 0)
-		{
-			new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable()
-			{
-				@Override
-				public void run()
-				{
-					try
-					{
-						Intent Back = new Intent(GameActivity.this, GameActivity.class);
-						Back.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-						startActivity(Back);
-						Log.debug("[JAVA] SenniteOpenWallet: asked to come back to the game");
-					}
-					catch (Exception Refused)
-					{
-						Log.debug("[JAVA] SenniteOpenWallet: the game did not come back: " + Refused);
-					}
-				}
-			}, ComeBackAfterMs);
-		}
-		return true;
 	}
 
 	/**

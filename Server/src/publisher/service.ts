@@ -16,6 +16,7 @@ import { decodeChange, encodeChange, type Change } from "../faction/change.js";
 import type { Funding } from "../dsm/contributions.js";
 import type { Member } from "../faction/state.js";
 import { buildingAt, Publisher, Refused, type Structure } from "./publisher.js";
+import type { Say } from "./shop.js";
 import { leastOf } from "./swap.js";
 import type { Store } from "./store.js";
 import type { World } from "./world.js";
@@ -36,6 +37,10 @@ interface Job {
   message: string;
   /** What else the answer carries, beside whether it was carried out. */
   data: Record<string, unknown>;
+  /** While it is pending: what it is waiting on, in words for the player; empty when the work does not say. */
+  stage: string;
+  /** While it is pending: whether what it waits on is the player, in their wallet. */
+  onWallet: boolean;
 }
 
 class HttpError extends Error {
@@ -345,13 +350,16 @@ export class Service {
   /** Start work a wallet has to answer; the game reads what became of it under the id. */
   private start(
     player: string,
-    work: () => Promise<{ ok: boolean; message: string; data?: Record<string, unknown> }>,
+    work: (say: Say) => Promise<{ ok: boolean; message: string; data?: Record<string, unknown> }>,
     factionId = "",
   ): { request: string } {
     const id = hex(randomBytes(16));
-    const job: Job = { player, state: "pending", ok: false, message: "", data: {} };
+    const job: Job = { player, state: "pending", ok: false, message: "", data: {}, stage: "", onWallet: false };
     this.#jobs.set(id, job);
-    work()
+    work((stage, onWallet) => {
+      job.stage = stage;
+      job.onWallet = onWallet;
+    })
       .then(
         (done) => Object.assign(job, done),
         (e: unknown) => {
@@ -454,10 +462,10 @@ export class Service {
       if (!/^[0-9]{1,6}(\.[0-9]{1,2})?$/.test(era) || Number(era) <= 0) throw new HttpError(400, "the ERA to trade is not an amount above zero");
       return {
         status: 202,
-        body: this.start(player, async () => {
+        body: this.start(player, async (say) => {
           const quoted = await publisher.shop.price(connection, era);
           // the price is the vault's at the time of the trade: a little less than quoted is taken, much less is not
-          const traded = await publisher.shop.buyDbucks(connection, era, Math.floor(quoted * 0.97));
+          const traded = await publisher.shop.buyDbucks(connection, era, Math.floor(quoted * 0.97), say);
           return traded.ok ? { ok: true, message: `${era} ERA traded for D-bucks` } : { ok: false, message: traded.why };
         }),
       };
@@ -497,8 +505,8 @@ export class Service {
       const atLeast = leastOf(BigInt(shown));
       return {
         status: 202,
-        body: this.start(player, async () => {
-          const traded = await publisher.swap.trade(connection, from, to, amount, atLeast);
+        body: this.start(player, async (say) => {
+          const traded = await publisher.swap.trade(connection, from, to, amount, atLeast, say);
           return traded.ok ? { ok: true, message: `${amount} ${from.name} swapped for ${to.name}` } : { ok: false, message: traded.why };
         }),
       };
@@ -511,8 +519,8 @@ export class Service {
       const skin = publisher.shop.skin(text((await body(req)).skinId, "skinId"));
       return {
         status: 202,
-        body: this.start(player, async () => {
-          const sold = await publisher.shop.buySkin(connection, skin.id);
+        body: this.start(player, async (say) => {
+          const sold = await publisher.shop.buySkin(connection, skin.id, say);
           return sold.ok ? { ok: true, message: `${sold.skin.name} #${sold.skin.serial} is the wallet's` } : { ok: false, message: sold.why };
         }),
       };
@@ -525,8 +533,8 @@ export class Service {
       const hero = publisher.shop.hero(text((await body(req)).heroId, "heroId"));
       return {
         status: 202,
-        body: this.start(player, async () => {
-          const sold = await publisher.shop.buyHero(connection, hero.id);
+        body: this.start(player, async (say) => {
+          const sold = await publisher.shop.buyHero(connection, hero.id, say);
           return sold.ok ? { ok: true, message: `${sold.hero.name} #${sold.hero.serial} is the wallet's` } : { ok: false, message: sold.why };
         }),
       };
@@ -539,8 +547,8 @@ export class Service {
       const weapon = publisher.shop.weapon(text((await body(req)).weaponId, "weaponId"));
       return {
         status: 202,
-        body: this.start(player, async () => {
-          const sold = await publisher.shop.buyWeapon(connection, weapon.id);
+        body: this.start(player, async (say) => {
+          const sold = await publisher.shop.buyWeapon(connection, weapon.id, say);
           return sold.ok ? { ok: true, message: `${sold.weapon.name} #${sold.weapon.serial} is the wallet's` } : { ok: false, message: sold.why };
         }),
       };
@@ -772,7 +780,10 @@ export class Service {
     if (is("GET", "requests", null) && b !== undefined) {
       const job = this.#jobs.get(b);
       if (job === undefined || job.player !== this.player(req)) throw new HttpError(404, "no such request");
-      return { status: 200, body: job.state === "pending" ? { state: "pending" } : { ...job.data, state: "done", ok: job.ok, message: job.message } };
+      return {
+        status: 200,
+        body: job.state === "pending" ? { state: "pending", stage: job.stage, onWallet: job.onWallet } : { ...job.data, state: "done", ok: job.ok, message: job.message },
+      };
     }
 
     // The publisher's match server records that a battle destroyed a built structure (spec 7.6).

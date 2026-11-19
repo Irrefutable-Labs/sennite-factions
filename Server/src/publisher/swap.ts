@@ -203,12 +203,22 @@ export class Swap {
    * (in the smallest unit of `to`). The wallet's answer is a notification;
    * what it holds afterwards is what it then proves.
    */
-  async trade(connection: Connection, from: SwapToken, to: SwapToken, amount: string, atLeast: bigint): Promise<{ ok: boolean; why: string }> {
+  async trade(
+    connection: Connection,
+    from: SwapToken,
+    to: SwapToken,
+    amount: string,
+    atLeast: bigint,
+    say: (stage: string, onWallet: boolean) => void = () => {},
+  ): Promise<{ ok: boolean; why: string }> {
     const [paid, got] = [await this.info(from), await this.info(to)];
     const ref = await this.app.request(connection, ask.trade(paid, got, amount, atLeast));
+    // no trade is in the grant: it waits in the wallet for the player
     const answered = await until(async () => {
       const r = await this.app.result(ref);
-      return r.answered && r.outcome !== "awaiting_approval" ? r : undefined;
+      if (r.answered && r.outcome !== "awaiting_approval") return r;
+      say("approve the swap in your DSM wallet", true);
+      return undefined;
     });
     // the reserves moved with the trade: the next reading of the vaults is a new one
     this.#board = undefined;

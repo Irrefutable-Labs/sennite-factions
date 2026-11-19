@@ -313,15 +313,6 @@ void ASenniteMenuController::PlayerTick(float DeltaTime)
 			Note.Reset();
 		}
 	}
-	// In the store, what is shown and sold waits on the player's wallet. A wallet that has not answered in a few seconds
-	// is not running: the game opens it, and comes back by itself (USennitePublisher::OpenWalletForWait). Only here:
-	// a match is not left for the wallet.
-	if (Page == ESenniteMenuPage::Heroes || Page == ESenniteMenuPage::Skins || Page == ESenniteMenuPage::Weapons || Page == ESenniteMenuPage::Swap) {
-		const UGameInstance* Game = GetGameInstance();
-		if (USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr) {
-			Server->OpenWalletForWait();
-		}
-	}
 	// the store's swap shows the vaults as they are: they are read again every few seconds while it is open
 	if (Page == ESenniteMenuPage::Swap && FPlatformTime::Seconds() >= NextSwapRead) {
 		const UGameInstance* Game = GetGameInstance();
@@ -922,7 +913,7 @@ void ASenniteMenuController::Act(FName Action)
 		// when they have done what waits there
 		const UGameInstance* Game = GetGameInstance();
 		if (USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr) {
-			Server->OpenWallet(false);
+			Server->OpenWalletToApprove();
 		}
 	}
 	else if (Name == TEXT("dbucks")) {
@@ -1323,31 +1314,32 @@ bool ASenniteMenuHUD::NextStep(const USennitePublisher* Server, const FForSale& 
 	else if (Thing.bOnItsWay) {
 		Button(Thing.Buy, TEXT("ON ITS WAY TO YOUR WALLET"), Left, Y, Wide, 66.0f, false, 14);
 	}
+	else if (Server->bBusy && Server->bOnWallet) {
+		// what was asked waits in the wallet for the player, who is here: the way back to it, on the approval
 #if PLATFORM_ANDROID || PLATFORM_IOS
-	else if ((Server->bBusy || !Server->bMaterialsKnown) && Server->WalletTriedForWait() && Server->WaitingOnWallet() > Server->WalletWaitBeforeOpening + 20.0) {
-		Hint = TEXT("YOUR DSM WALLET HAS NOT ANSWERED.");
-		if (Server->WalletOpenedForWait()) {
-			// the game opened the wallet for this and it has still not answered: something waits there for the player
+		if (Server->bWalletHere) {
 			Button(TEXT("openwallet"), TEXT("OPEN YOUR WALLET"), Left, Y, Wide, 66.0f, true, 16, true);
-			Hint2 = TEXT("OPEN IT, APPROVE WHAT WAITS THERE, THEN COME BACK.");
+			Hint = TEXT("IT WAITS FOR YOU THERE: APPROVE IT OR DECLINE IT.");
 		}
-		else {
-			// no wallet app on this phone to open: the wallet that was connected is on another device
-			Button(Thing.Buy, TEXT("WAITING FOR YOUR WALLET ..."), Left, Y, Wide, 66.0f, false, 14);
-			Hint2 = TEXT("OPEN IT ON THE DEVICE IT IS ON, AND APPROVE WHAT WAITS THERE.");
-		}
-	}
+		else
 #endif
-	else if (Server->bBusy) {
-		Button(Thing.Buy, TEXT("WAITING FOR YOUR WALLET ..."), Left, Y, Wide, 66.0f, false, 14);
+		{
+			// no wallet app on this device to open: the wallet that was connected is on another
+			Button(Thing.Buy, TEXT("WAITING FOR YOUR WALLET ..."), Left, Y, Wide, 66.0f, false, 14);
+			Hint = TEXT("IT WAITS IN YOUR DSM WALLET, ON THE DEVICE IT IS ON:");
+			Hint2 = TEXT("APPROVE IT OR DECLINE IT THERE.");
+		}
 	}
-	else if (!Server->bMaterialsKnown) {
-		Button(Thing.Buy, TEXT("ASKING YOUR WALLET ..."), Left, Y, Wide, 66.0f, false, 14);
+	else if (Server->bBusy) {
+		// approved, or not yet with the wallet: the shop's own work
+		Button(Thing.Buy, TEXT("WAITING FOR THE SHOP ..."), Left, Y, Wide, 66.0f, false, 14);
 	}
 	else if (!Thing.bListed) {
 		Button(Thing.Buy, TEXT("NOT IN THE SHOP"), Left, Y, Wide, 66.0f, false, 14);
 	}
-	else if (Server->DBucks >= Thing.Price) {
+	else if (!Server->bMaterialsKnown || Server->DBucks >= Thing.Price) {
+		// A wallet that is not running has not said what it holds, and the game does not send the player into it to
+		// find out: BUY takes them to the wallet, on the payment, and the wallet says there whether it can pay.
 		Button(Thing.Buy, FString::Printf(TEXT("BUY  %s D-BUCKS"), *SenniteUi::Grouped(Thing.Price)), Left, Y, Wide, 66.0f, true, 18, true);
 	}
 	else {
@@ -1720,7 +1712,13 @@ void ASenniteMenuHUD::DrawSwap(ASenniteMenuController* Menu)
 	}
 	else {
 		Button(TEXT("price"), TEXT("PRICE"), Left, BY, 210.0f, 66.0f, bAmount && !Server->bBusy, 18, !bPriced);
-		Button(TEXT("trade"), Server->bBusy ? TEXT("WAITING FOR YOUR WALLET ...") : TEXT("SWAP"), Left + 222.0f, BY, Wide - 222.0f, 66.0f, bPriced && !Server->bBusy, Server->bBusy ? 13 : 18, bPriced);
+		if (Server->bBusy && Server->bOnWallet && Server->bWalletHere) {
+			// the swap waits in the wallet for the player, who is here: the way back to it, on the approval
+			Button(TEXT("openwallet"), TEXT("OPEN YOUR WALLET"), Left + 222.0f, BY, Wide - 222.0f, 66.0f, true, 16, true);
+		}
+		else {
+			Button(TEXT("trade"), Server->bBusy ? TEXT("WAITING FOR YOUR WALLET ...") : TEXT("SWAP"), Left + 222.0f, BY, Wide - 222.0f, 66.0f, bPriced && !Server->bBusy, Server->bBusy ? 13 : 18, bPriced);
+		}
 		// the vault that trades the two directly, as it stands
 		if (const FSenniteSwapVault* Vault = Server->FindSwapVault(From->Id, To->Id)) {
 			const FSenniteSwapToken* A = Server->FindSwapToken(Vault->A);

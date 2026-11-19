@@ -58,11 +58,25 @@ export interface Purse {
   weapons: OwnedWeapon[];
 }
 
+/** What a sale is waiting on, said for the game to tell the player: `onWallet` when it is the player's approval in the wallet. */
+export type Say = (stage: string, onWallet: boolean) => void;
+
+/** The first letters of the symbol an item sold is issued under, by its kind. */
+const PREFIX = { skin: "SK", hero: "HR", weapon: "WP" } as const;
+
 export class Shop {
+  /** The payments whose sale is being finished now, so that two looks at one sale do not both issue it. */
+  readonly #finishing = new Set<string>();
+
+  /**
+   * `timing`: how long a sale's own request to the server goes on waiting for the wallet before it answers the
+   * game that it still waits (the sale itself has no end but the player's answer), and how often it looks.
+   */
   constructor(
     private readonly app: AppAccount,
     private readonly store: Store,
     readonly world: ShopWorld,
+    private readonly timing: { waitMs: number; pollMs: number } = { waitMs: 30 * 60_000, pollMs: 700 },
   ) {}
 
   get symbol(): string {
@@ -132,11 +146,14 @@ export class Shop {
    * no less than `atLeast`. The wallet's answer is a notification; what it
    * holds afterwards is what it then proves.
    */
-  async buyDbucks(connection: Connection, era: string, atLeast: number): Promise<{ ok: boolean; why: string }> {
+  async buyDbucks(connection: Connection, era: string, atLeast: number, say: Say = () => {}): Promise<{ ok: boolean; why: string }> {
     const ref = await this.app.request(connection, ask.trade("ERA", this.symbol, era, String(atLeast)));
+    // no trade is in the grant: it waits in the wallet for the player
     const answered = await until(async () => {
       const r = await this.app.result(ref);
-      return r.answered && r.outcome !== "awaiting_approval" ? r : undefined;
+      if (r.answered && r.outcome !== "awaiting_approval") return r;
+      say("approve the trade of ERA for D-bucks in your DSM wallet", true);
+      return undefined;
     });
     if (answered === undefined) return { ok: false, why: "the wallet did not answer the trade" };
     return answered.outcome === "carried_out" ? { ok: true, why: "" } : { ok: false, why: answered.reason || answered.detail || `the wallet's answer is ${answered.outcome}` };
@@ -147,103 +164,181 @@ export class Shop {
    * account has accepted that transfer, and only then, the shop issues the
    * skin and gives it to the wallet. A payment buys one skin, once.
    */
-  async buySkin(connection: Connection, skinId: string): Promise<{ ok: true; skin: OwnedSkin } | { ok: false; why: string }> {
+  async buySkin(connection: Connection, skinId: string, say?: Say): Promise<{ ok: true; skin: OwnedSkin } | { ok: false; why: string }> {
     const skin = this.skin(skinId);
-    const sold = await this.sell(connection, skin, "skin", "SK", (object, serial, symbol) => {
-      this.store.data.shop.skins[object] = { skinId: skin.id, serial, symbol };
-    });
+    const sold = await this.sell(connection, skin, "skin", say);
     return sold.ok ? { ok: true, skin: { skinId: skin.id, name: skin.name, object: sold.object, serial: sold.serial } } : sold;
   }
 
   /** Sell a hero, as a skin is sold: paid for first, then issued, one of it, and given. */
-  async buyHero(connection: Connection, heroId: string): Promise<{ ok: true; hero: OwnedHero } | { ok: false; why: string }> {
+  async buyHero(connection: Connection, heroId: string, say?: Say): Promise<{ ok: true; hero: OwnedHero } | { ok: false; why: string }> {
     const hero = this.hero(heroId);
-    const sold = await this.sell(connection, hero, "hero", "HR", (object, serial, symbol) => {
-      this.store.data.shop.heroes[object] = { heroId: hero.id, serial, symbol };
-    });
+    const sold = await this.sell(connection, hero, "hero", say);
     return sold.ok ? { ok: true, hero: { heroId: hero.id, name: hero.name, object: sold.object, serial: sold.serial } } : sold;
   }
 
   /** Sell a gun, as a hero is sold: paid for first, then issued, one of it, and given. */
-  async buyWeapon(connection: Connection, weaponId: string): Promise<{ ok: true; weapon: OwnedWeapon } | { ok: false; why: string }> {
+  async buyWeapon(connection: Connection, weaponId: string, say?: Say): Promise<{ ok: true; weapon: OwnedWeapon } | { ok: false; why: string }> {
     const weapon = this.weapon(weaponId);
-    const sold = await this.sell(connection, weapon, "weapon", "WP", (object, serial, symbol) => {
-      this.store.data.shop.weapons[object] = { weaponId: weapon.id, serial, symbol };
-    });
+    const sold = await this.sell(connection, weapon, "weapon", say);
     return sold.ok ? { ok: true, weapon: { weaponId: weapon.id, name: weapon.name, object: sold.object, serial: sold.serial } } : sold;
   }
 
   /**
-   * The wallet sends the item's price in D-bucks; once the publisher's account
-   * has accepted that transfer, and only then, the shop issues the item, an
-   * object of which one exists, records it with `keep`, and gives it to the
-   * wallet. A payment buys one item, once.
+   * The wallet is asked to send the item's price in D-bucks. No payment is in
+   * the grant, so the request waits in the wallet until the player approves or
+   * declines it there. Once the publisher's account has accepted that transfer,
+   * and only then, the shop issues the item, an object of which one exists,
+   * records it, and gives it to the wallet. A payment buys one item, once.
    *
    * The account reports the fact "received" only for a transfer that landed
    * paying what was asked: this object, this amount (dsm-app-host's
    * landed_payment). An answer from the wallet saying it paid grants nothing.
    *
-   * The sale is recorded as pending, with its buyer, before anything is issued,
-   * and stays pending until the item is given: a sale cut off part way (the
-   * server stopped, the wallet did not take the item up) is finished the next
-   * time that wallet buys anything (`settle`).
+   * What was asked is recorded, with its buyer and what it is for, before the
+   * shop waits; and the shop does not stop honouring it when it stops waiting.
+   * A player may approve it a minute later or a day later, with the game closed
+   * or the server started anew: `sweep` finds the payment landed and carries
+   * the sale out. Only a decline, a failure or the wallet ending the connection
+   * ends it. The owner, 2026-11-19, of a shop that gave up after four minutes
+   * and let a payment approved later buy nothing: "The late approval: the shop
+   * waits for 4 minutes. That's no good, and you need to fix that."
+   *
+   * A sale paid for is recorded as pending before anything is issued, and
+   * stays pending until the item is given: one cut off part way (the server
+   * stopped, the wallet did not take the item up) is finished by `sweep` too.
+   *
+   * `say` is told what the sale is waiting on, for the game to tell the player:
+   * the wallet (the player's approval) or the shop (its own work).
    */
   private async sell(
     connection: Connection,
     item: { id: string; name: string; price: string },
     kind: "skin" | "hero" | "weapon",
-    prefix: string,
-    keep: (object: string, serial: number, symbol: string) => void,
+    say: Say = () => {},
   ): Promise<{ ok: true; object: string; serial: number } | { ok: false; why: string }> {
     await this.settle(connection);
-    const paid = await this.app.wait(await this.app.request(connection, ask.send(this.symbol, item.price, `${kind}: ${item.name}`)));
-    if (paid.fact !== "received" || paid.received === undefined) {
-      return { ok: false, why: paid.reason || paid.detail || `the wallet's answer is ${paid.outcome}` };
-    }
-    const payment = hex(paid.received);
-    const record = this.store.data.shop;
-    if (Object.hasOwn(record.paid, payment)) return { ok: false, why: `that payment has already bought a ${kind}` };
-
-    // The serial is taken, the payment marked used and the sale recorded as pending, before anything else is awaited.
-    const serial = (record.serial += 1);
-    const symbol = `${prefix}${String(serial).padStart(6, "0")}`;
-    record.paid[payment] = "";
-    record.pending[payment] = { kind, itemId: item.id, serial, symbol, buyer: hex(connection.opponent.signingKey), object: "" };
+    const ref = await this.app.request(connection, ask.send(this.symbol, item.price, `${kind}: ${item.name}`));
+    const key = `${ref.connection}:${ref.seq}`;
+    this.store.data.shop.asked[key] = { connection: ref.connection, seq: String(ref.seq), kind, itemId: item.id, buyer: hex(connection.opponent.signingKey) };
     this.store.save();
-    const object = await this.finish(connection, payment, keep);
+
+    const deadline = Date.now() + this.timing.waitMs;
+    for (;;) {
+      const result = await this.app.result(ref);
+      if (result.fact === "received" && result.received !== undefined) {
+        say(`paid: the shop is issuing your ${kind}`, false);
+        const sold = await this.paid(connection, key, hex(result.received));
+        return sold ?? { ok: false, why: `that payment has already bought a ${kind}` };
+      }
+      if (result.outcome === "declined" || result.outcome === "failed") {
+        delete this.store.data.shop.asked[key];
+        this.store.save();
+        return { ok: false, why: result.reason || result.detail || `the wallet's answer is ${result.outcome}` };
+      }
+      if (result.answered && result.outcome === "carried_out") say("paid: the shop is taking the payment in", false);
+      else say(`approve the payment for the ${kind} in your DSM wallet`, true);
+      if (Date.now() > deadline) {
+        // Not an end: the request still waits in the wallet, and the sale is carried out when it is approved.
+        return { ok: false, why: `the payment for the ${kind} still waits in your DSM wallet: approve it there and the ${kind} is yours` };
+      }
+      await new Promise((resolve) => setTimeout(resolve, this.timing.pollMs));
+    }
+  }
+
+  /**
+   * A payment landed for what was asked under `key`: record the sale as pending
+   * and finish it. Undefined when that asking is no longer open (another look
+   * at it got here first) or the payment has bought something already.
+   */
+  private async paid(connection: Connection, key: string, payment: string): Promise<{ ok: true; object: string; serial: number } | undefined> {
+    const record = this.store.data.shop;
+    const asked = record.asked[key];
+    if (asked === undefined || Object.hasOwn(record.paid, payment)) {
+      delete record.asked[key];
+      this.store.save();
+      return undefined;
+    }
+    // The asking is closed, the serial taken, the payment marked used and the sale recorded as pending, before anything is awaited.
+    delete record.asked[key];
+    const serial = (record.serial += 1);
+    const symbol = `${PREFIX[asked.kind]}${String(serial).padStart(6, "0")}`;
+    record.paid[payment] = "";
+    record.pending[payment] = { kind: asked.kind, itemId: asked.itemId, serial, symbol, buyer: asked.buyer, object: "" };
+    this.store.save();
+    const object = await this.finish(connection, payment);
     return { ok: true, object, serial };
   }
 
   /** Issue a pending sale's item if it is not issued yet, record it, give it to the buyer, and close the sale. */
-  private async finish(connection: Connection, payment: string, keep?: (object: string, serial: number, symbol: string) => void): Promise<string> {
+  private async finish(connection: Connection, payment: string): Promise<string> {
     const record = this.store.data.shop;
     const sale = record.pending[payment];
     if (sale === undefined) throw new Error(`no pending sale for payment ${payment}`);
-    const item = sale.kind === "skin" ? this.skin(sale.itemId) : sale.kind === "hero" ? this.hero(sale.itemId) : this.weapon(sale.itemId);
-    let info: ObjectInfo;
-    if (sale.object === "") {
-      info = await this.app.issue({ symbol: sale.symbol, name: `${item.name} #${sale.serial}`, supply: "1", description: `Sennite: Factions ${sale.kind} ${item.id}` });
-      sale.object = info.id;
-      if (keep !== undefined) keep(info.id, sale.serial, sale.symbol);
-      else if (sale.kind === "skin") record.skins[info.id] = { skinId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
-      else if (sale.kind === "hero") record.heroes[info.id] = { heroId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
-      else record.weapons[info.id] = { weaponId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
-      record.paid[payment] = info.id;
+    if (this.#finishing.has(payment)) throw new Refused("that sale is being finished now");
+    this.#finishing.add(payment);
+    try {
+      const item = sale.kind === "skin" ? this.skin(sale.itemId) : sale.kind === "hero" ? this.hero(sale.itemId) : this.weapon(sale.itemId);
+      let info: ObjectInfo;
+      if (sale.object === "") {
+        info = await this.app.issue({ symbol: sale.symbol, name: `${item.name} #${sale.serial}`, supply: "1", description: `Sennite: Factions ${sale.kind} ${item.id}` });
+        sale.object = info.id;
+        if (sale.kind === "skin") record.skins[info.id] = { skinId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
+        else if (sale.kind === "hero") record.heroes[info.id] = { heroId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
+        else record.weapons[info.id] = { weaponId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
+        record.paid[payment] = info.id;
+        this.store.save();
+      } else {
+        info = await this.app.object(sale.object);
+      }
+      await this.deliver(connection, info);
+      delete record.pending[payment];
       this.store.save();
-    } else {
-      info = await this.app.object(sale.object);
+      return info.id;
+    } finally {
+      this.#finishing.delete(payment);
     }
-    await this.deliver(connection, info);
-    delete record.pending[payment];
-    this.store.save();
-    return info.id;
   }
 
   /** Finish every sale to this wallet that was paid for and cut off before its item was given. */
   async settle(connection: Connection): Promise<void> {
     const buyer = hex(connection.opponent.signingKey);
     for (const [payment, sale] of Object.entries(this.store.data.shop.pending)) {
-      if (sale.buyer === buyer) await this.finish(connection, payment);
+      if (sale.buyer === buyer && !this.#finishing.has(payment)) await this.finish(connection, payment);
+    }
+  }
+
+  /**
+   * Look at everything the shop asked a wallet to pay for and has not seen the
+   * end of, and at every sale paid for and not given: carry out what has been
+   * paid, forget what was declined, failed, or asked of a wallet that has since
+   * ended its connection. The server runs this every few seconds, so a payment
+   * approved at any time buys what it was for.
+   */
+  async sweep(): Promise<void> {
+    const record = this.store.data.shop;
+    for (const [key, asked] of Object.entries(record.asked)) {
+      try {
+        const result = await this.app.result({ connection: asked.connection, seq: BigInt(asked.seq) });
+        if (result.fact === "received" && result.received !== undefined) {
+          await this.paid(await this.app.connection(asked.connection), key, hex(result.received));
+        } else if (result.outcome === "declined" || result.outcome === "failed" || !(await this.app.connection(asked.connection)).connected) {
+          delete record.asked[key];
+          this.store.save();
+        }
+      } catch (e) {
+        console.error(`[publisher] the shop's look at what it asked (${asked.kind} ${asked.itemId}): ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    const connections = Object.keys(record.pending).length > 0 ? await this.app.connections() : [];
+    for (const [payment, sale] of Object.entries(record.pending)) {
+      const connection = connections.find((c) => c.connected && hex(c.opponent.signingKey) === sale.buyer);
+      if (connection === undefined || this.#finishing.has(payment)) continue;
+      try {
+        await this.finish(connection, payment);
+      } catch (e) {
+        console.error(`[publisher] finishing a ${sale.kind} paid for (${sale.itemId}): ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
   }
 

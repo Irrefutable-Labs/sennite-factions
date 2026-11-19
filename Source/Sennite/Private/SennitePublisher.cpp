@@ -258,17 +258,6 @@ bool USennitePublisher::Tick(float)
 	if (!bMeAsked && Now >= NextMe) {
 		AskMe();
 	}
-	// how long the wallet has been waited on, for what the game asked it or the player did
-	if (bConnected && (bProving || bBusy)) {
-		if (WalletWaitFrom <= 0.0) {
-			WalletWaitFrom = Now;
-		}
-	}
-	else {
-		WalletWaitFrom = 0.0;
-		bWalletOpenedForWait = false;
-		bWalletTriedForWait = false;
-	}
 	if (!bShop && !bShopAsked) {
 		AskShop();
 	}
@@ -589,36 +578,21 @@ FString USennitePublisher::DBucksLine(bool& bKnown) const
 	return FString(ProofPending() ? TEXT("ASKING YOUR WALLET ...") : TEXT("NOT PROVED YET"));
 }
 
-bool USennitePublisher::OpenWallet(bool bComeBack)
+bool USennitePublisher::OpenWalletPlain()
 {
 	bool bOpened = false;
 #if PLATFORM_ANDROID
-	// Sennite_UPL.xml: the wallet's launch intent, and the game to the front again after
+	// Sennite_UPL.xml: the wallet's launch intent
 	if (JNIEnv* Env = FAndroidApplication::GetJavaEnv()) {
-		static jmethodID Open = FJavaWrapper::FindMethod(Env, FJavaWrapper::GameActivityClassID, "AndroidThunkJava_SenniteOpenWallet", "(I)Z", true);
+		static jmethodID Open = FJavaWrapper::FindMethod(Env, FJavaWrapper::GameActivityClassID, "AndroidThunkJava_SenniteOpenWallet", "()Z", true);
 		if (Open != nullptr) {
-			bOpened = FJavaWrapper::CallBooleanMethod(Env, FJavaWrapper::GameActivityThis, Open, static_cast<jint>(bComeBack ? FMath::RoundToInt(WalletComeBackAfter * 1000.0f) : 0));
+			bOpened = FJavaWrapper::CallBooleanMethod(Env, FJavaWrapper::GameActivityThis, Open);
 		}
 	}
 #endif
 	WalletOpens += bOpened ? 1 : 0;
-	UE_LOG(LogSennitePublisher, Display, TEXT("The game %s the DSM wallet after waiting %.1f s on it%s"), bOpened ? TEXT("opened") : TEXT("could not open"),
-		WaitingOnWallet(), bOpened && bComeBack ? TEXT(", to come back by itself") : TEXT(""));
+	UE_LOG(LogSennitePublisher, Display, TEXT("The game %s the DSM wallet"), bOpened ? TEXT("opened") : TEXT("could not open"));
 	return bOpened;
-}
-
-bool USennitePublisher::OpenWalletForWait()
-{
-	const double Now = FPlatformTime::Seconds();
-	if (bWalletTriedForWait || WaitingOnWallet() < WalletWaitBeforeOpening || Now < NextWalletOpen) {
-		return false;
-	}
-	// once for a wait, and not again within the minute: a wallet that is running and slow is not opened over and over
-	bWalletTriedForWait = true;
-	NextWalletOpen = Now + 60.0;
-	// opened is opened: with no wallet app on this device (the wallet is on another), nothing here says one was
-	bWalletOpenedForWait = OpenWallet(true);
-	return bWalletOpenedForWait;
 }
 
 void USennitePublisher::BuyDBucks(const FString& InEra)
@@ -908,6 +882,7 @@ void USennitePublisher::AskRequest()
 			if (Status == 404) {
 				PendingRequest.Reset();
 				bBusy = false;
+				bOnWallet = false;
 				bPricing = false;
 				bSwapping = false;
 				bLastOk = false;
@@ -916,10 +891,18 @@ void USennitePublisher::AskRequest()
 			return;
 		}
 		if (Json->GetStringField(TEXT("state")) != TEXT("done")) {
+			// what it is waiting on, as the server says: the player in their wallet, or the shop's own work
+			FString Stage;
+			if (Json->TryGetStringField(TEXT("stage"), Stage) && !Stage.IsEmpty()) {
+				Message = Stage;
+				bool bOn = false;
+				bOnWallet = Json->TryGetBoolField(TEXT("onWallet"), bOn) && bOn;
+			}
 			return;
 		}
 		PendingRequest.Reset();
 		bBusy = false;
+		bOnWallet = false;
 		bLastOk = Json->GetBoolField(TEXT("ok"));
 		UE_LOG(LogSennitePublisher, Display, TEXT("What was asked of the wallet is done, %s: %s"), bLastOk ? TEXT("carried out") : TEXT("not carried out"), *Json->GetStringField(TEXT("message")));
 		if (!BuyingSkin.IsEmpty()) {
@@ -992,8 +975,8 @@ void USennitePublisher::Ask(const FString& Path, const TSharedPtr<FJsonObject>& 
 				// the server has the request: now the wallet, where the player approves it
 				bOpenWalletWhenAsked = false;
 				Message = WordsWhenAsked;
-				bWalletTriedForWait = true;
-				bWalletOpenedForWait = OpenWalletToApprove();
+				bOnWallet = true;
+				OpenWalletToApprove();
 			}
 			return;
 		}
@@ -1040,10 +1023,13 @@ bool USennitePublisher::OpenWalletToApprove()
 	if (bOpened) {
 		++WalletOpens;
 		UE_LOG(LogSennitePublisher, Display, TEXT("The game opened the DSM wallet on its connect code, for the player to approve what it asked"));
-		return true;
 	}
-	// no code kept, or a wallet that does not take the link: the wallet as it opens by itself
-	return OpenWallet(false);
+	else {
+		// no code kept, or a wallet that does not take the link: the wallet as it opens by itself
+		bOpened = OpenWalletPlain();
+	}
+	bWalletHere = bOpened;
+	return bOpened;
 }
 
 void USennitePublisher::ProveMaterials()

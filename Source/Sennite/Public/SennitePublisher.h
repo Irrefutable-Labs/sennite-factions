@@ -270,32 +270,19 @@ public:
 	bool OpenConnectCode() const;
 
 	/**
-	 * The DSM Wallet app answers what the game asks of it only while it is running, and a phone closes it when the
-	 * game needs the room: then a proof or a purchase waits for ever. So on a phone the game opens the wallet itself
-	 * when it has waited on it this long, and comes to the front again by itself this long after. The owner,
-	 * 2026-11-19: "It should open it itself, yes, then the user hits the approve button, and it should take it.
-	 * After that's done, it should go back into the game automatically. That's how Wild State works."
+	 * On a phone, open the DSM Wallet app on what this game asked and is waiting for the player to approve. It is
+	 * opened on the connect code this game is connected by: a wallet that is connected by that code shows what the
+	 * game asked, for the player to approve or decline, and steps back to the game by itself once the player has
+	 * (the wallet's own doing, for any app). With no code kept, the wallet is opened as it opens by itself. False
+	 * where there is no wallet app to open: not a phone, or none on it. The owner, 2026-11-19: "when you hit
+	 * fucking buy, it goes to the wallet, and it goes to where it asks you to approve" and, of a wallet opened on
+	 * its home screen: "it should take you right to the approval screen. That's what the Wild state does".
 	 */
-	UPROPERTY(Config)
-	float WalletWaitBeforeOpening = 6.0f;
-
-	UPROPERTY(Config)
-	float WalletComeBackAfter = 5.0f;
-
-	/** How long the game has waited on the wallet for what it asked (a proof of what it holds, or what the player asked of it), in seconds; 0 while it waits on nothing. */
-	double WaitingOnWallet() const { return WalletWaitFrom > 0.0 ? FPlatformTime::Seconds() - WalletWaitFrom : 0.0; }
-	/** Whether the wallet app was opened for the wait there is now: it was there to open, and it started. */
-	bool WalletOpenedForWait() const { return bWalletOpenedForWait; }
-	/** Whether opening the wallet was tried for the wait there is now, opened or not. */
-	bool WalletTriedForWait() const { return bWalletTriedForWait; }
-	/**
-	 * On a phone, bring the DSM Wallet app to the front; with bComeBack the game comes to the front again by itself
-	 * WalletComeBackAfter seconds later, without it the player comes back when they have done what waits there.
-	 * False where there is no wallet app to open: not a phone, or none on it.
-	 */
-	bool OpenWallet(bool bComeBack);
-	/** Open the wallet, to come back, once for the wait there is now and only when it has lasted WalletWaitBeforeOpening. Answers whether it opened. */
-	bool OpenWalletForWait();
+	bool OpenWalletToApprove();
+	/** Whether what the player asked is waiting on the player, in their wallet: it is there for them to approve. */
+	bool bOnWallet = false;
+	/** Whether the last opening of the wallet found a wallet app on this device to open. */
+	bool bWalletHere = false;
 	/** How many times the game opened the wallet app. */
 	int32 WalletOpens = 0;
 	/** How much ERA one trade for D-bucks takes from the wallet, in the shop and on the character select. */
@@ -494,22 +481,13 @@ private:
 	FString MatchSecret;
 	FString PendingRequest;
 	bool bRequestAsked = false;
-	/** When the wait on the wallet there is now began; 0 while the game waits on nothing. */
-	double WalletWaitFrom = 0.0;
-	bool bWalletOpenedForWait = false;
-	bool bWalletTriedForWait = false;
 	/** Ask the wallet for a payment or a trade: as Ask, and on a phone the wallet app is opened for the player to approve it, once the server has the request. */
 	void AskToPay(const FString& Path, const TSharedPtr<FJsonObject>& Body, const TCHAR* Waiting);
 	bool bOpenWalletWhenAsked = false;
 	/** What is said once the server has taken that request: that it waits in the wallet for the player. */
 	FString WordsWhenAsked;
-	/**
-	 * On a phone, open the DSM Wallet app for the player to approve what was just asked: on the connect code this game
-	 * is connected by, which a wallet that knows it opens on what waits, stepping back to the game after; with no code
-	 * kept, the wallet as it opens by itself. False where there is no wallet app to open.
-	 */
-	bool OpenWalletToApprove();
-	double NextWalletOpen = 0.0;
+	/** On a phone, the DSM Wallet app as it opens by itself: for a game that kept no connect code. */
+	bool OpenWalletPlain();
 	/** The wallet's holdings changed with what was just asked: prove them again once it settles. */
 	bool bProveAfter = false;
 	/** A proof is to be asked for as soon as none is in flight. */
