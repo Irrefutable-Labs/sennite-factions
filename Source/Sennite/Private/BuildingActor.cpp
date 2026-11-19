@@ -386,7 +386,8 @@ void ABuildingActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// It fell: on the server because its health ran out, on another machine because the server took
 	// it away. A player's own first copy of a piece, replaced by the server's, did not fall.
-	const bool bFell = EndPlayReason == EEndPlayReason::Destroyed && !IsPreview
+	// One a player of its side took away whole did not fall either.
+	const bool bFell = EndPlayReason == EEndPlayReason::Destroyed && !IsPreview && !bTakenAway
 		&& (HasAuthority() ? Health <= 0.0f : GetLocalRole() == ROLE_SimulatedProxy);
 	if (bFell && GetNetMode() != NM_DedicatedServer && GetWorld() != nullptr && PieceMesh->GetInstanceCount() > 0) {
 		TArray<FTransform> Laid;

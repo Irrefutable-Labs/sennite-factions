@@ -283,6 +283,26 @@ public:
 	/** On the server: whether this player's edit of a piece would be made. */
 	bool MayEditPiece(const ABuildingActor* Piece, int32 NewCut) const;
 
+	/** While editing a piece: take the whole piece away (the reload button, while editing). */
+	void RemoveEditedPiece();
+
+	/**
+	 * On the server: take a piece away whole, if this player may: a piece of the player's own side, within
+	 * reach, as for an edit. Nothing is given back for it, and what it alone held up falls as after any piece.
+	 */
+	UFUNCTION(Server, Reliable, WithValidation)
+	void ServerRemovePiece(ABuildingActor* Piece);
+
+	/** On the server: whether this player may take a piece away. */
+	bool MayRemovePiece(const ABuildingActor* Piece) const;
+
+	/** On every machine: a piece was taken away. It goes at once, heard as taken away, and does not fall apart. */
+	UFUNCTION(NetMulticast, Reliable)
+	void NetMulticastPieceTakenAway(ABuildingActor* Piece);
+
+	/** How long after a piece is taken away the server ends it: time for every machine to be told first. */
+	static constexpr float PieceTakenAwaySeconds = 0.2f;
+
 	/** The server refused an edit: show the piece as it is. */
 	UFUNCTION(Client, Reliable)
 	void ClientEditRefused(ABuildingActor* Piece);

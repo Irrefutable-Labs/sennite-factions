@@ -60,10 +60,12 @@ public:
 
 	/**
 	 * The sound of a menu's button, from the action it does: every menu's buttons, the in-game menu's
-	 * too. Each kind of button has its own: one of the first screen or the in-game menu (ui.press); a
+	 * too. Each kind of button has its own name: one of the first screen or the in-game menu (ui.press); a
 	 * section of the store (ui.tab); the arrows that turn to the next hero, skin or gun (ui.turn); one of
 	 * a row along the bottom (ui.pick); back (ui.back); a thing done, as choose, buy, swap, start
-	 * (ui.confirm); a digit of a keypad (ui.key); a setting a step less or more (ui.step).
+	 * (ui.confirm); a digit of a keypad (ui.key); a setting a step less or more (ui.step). Which
+	 * recording each name is, is the list's to say (DefaultGame.ini): the owner's three, a press, a
+	 * smaller tick and one that cancels.
 	 */
 	static FName ButtonSound(FName Action);
 

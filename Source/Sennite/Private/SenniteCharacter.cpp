@@ -996,6 +996,11 @@ void ASenniteCharacter::UseHealingItem() {
 }
 
 void ASenniteCharacter::Reload() {
+	// while editing a piece the reload button takes the whole piece away
+	if (EditingPiece.IsValid()) {
+		RemoveEditedPiece();
+		return;
+	}
 	ServerReloadWeapons();
 }
 
@@ -2641,6 +2646,56 @@ bool ASenniteCharacter::MayEditPiece(const ABuildingActor* Piece, int32 NewCut) 
 		}
 	}
 	return true;
+}
+
+void ASenniteCharacter::RemoveEditedPiece() {
+	ABuildingActor* Piece = EditingPiece.Get();
+	// the edit ends with nothing cut: the piece goes whole, or the server refuses and it stands as it was
+	CancelEdit();
+	if (Piece != nullptr) {
+		ServerRemovePiece(Piece);
+	}
+}
+
+bool ASenniteCharacter::MayRemovePiece(const ABuildingActor* Piece) const {
+	// a standing piece of the player's own side, within reach: what the player may edit, the player may take away
+	return IsValid(Piece) && !Piece->IsPreview && !Piece->IsActorBeingDestroyed() && !Piece->bTakenAway && Health > 0.0f
+		&& Piece->MayBeEditedBy(GetPlayerState())
+		&& FVector::Dist(Piece->GetActorLocation(), GetActorLocation()) <= MaxBuildReach + ABuildingActor::Cell;
+}
+
+void ASenniteCharacter::ServerRemovePiece_Implementation(ABuildingActor* Piece) {
+	if (!MayRemovePiece(Piece)) {
+		if (IsValid(Piece)) {
+			ClientEditRefused(Piece);
+		}
+		return;
+	}
+	// Every machine is told first, so none sees it break; then it ends, and what it alone held up falls
+	// a moment later, as after any piece (ABuildingActor::EndPlay). Nothing is given back for it.
+	NetMulticastPieceTakenAway(Piece);
+	Piece->SetLifeSpan(PieceTakenAwaySeconds);
+}
+
+bool ASenniteCharacter::ServerRemovePiece_Validate(ABuildingActor* Piece) {
+	return true;
+}
+
+void ASenniteCharacter::NetMulticastPieceTakenAway_Implementation(ABuildingActor* Piece) {
+	if (!IsValid(Piece)) {
+		return;
+	}
+	Piece->bTakenAway = true;
+	Piece->EditingHere = nullptr;
+	Piece->SetActorHiddenInGame(true);
+	Piece->SetActorEnableCollision(false);
+	// the player who took it hears it wherever the piece is; anyone else from where it stood
+	if (IsLocallyControlled()) {
+		USenniteSounds::Play(this, TEXT("piece.remove"));
+	}
+	else {
+		USenniteSounds::PlayAt(this, TEXT("piece.remove"), Piece->GetActorLocation());
+	}
 }
 
 void ASenniteCharacter::ServerEditPiece_Implementation(ABuildingActor* Piece, int32 NewCut) {

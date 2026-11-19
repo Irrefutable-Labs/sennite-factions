@@ -140,9 +140,13 @@ namespace
 						Heard.Add(Takes[0].ToString());
 					}
 				}
-				// a button pressed and a thing done are the owner's one recording; the other six kinds each have their own
+				// the owner's three recordings: a button pressed and a thing done; every smaller tick; back
 				Test->TestTrue(TEXT("A menu button and a thing done sound alike"), USenniteSounds::Takes(USenniteSounds::ButtonSound(TEXT("play"))) == USenniteSounds::Takes(USenniteSounds::ButtonSound(TEXT("choose"))));
-				Test->TestEqual(TEXT("A menu button, a section, an arrow, one of a row, back, a digit and a setting each sound their own"), Heard.Num(), 7);
+				Test->TestEqual(TEXT("The menus' buttons have three sounds: a press, a smaller tick, and back"), Heard.Num(), 3);
+				for (const TCHAR* Action : { TEXT("next"), TEXT("hero:1"), TEXT("num:1"), TEXT("music+") }) {
+					Test->TestTrue(FString::Printf(TEXT("The button %s sounds like a section of the store: a smaller tick"), Action), USenniteSounds::Takes(USenniteSounds::ButtonSound(Action)) == USenniteSounds::Takes(USenniteSounds::ButtonSound(TEXT("tab:skins"))));
+				}
+				Test->TestTrue(TEXT("A smaller tick does not sound like a button pressed"), USenniteSounds::Takes(USenniteSounds::ButtonSound(TEXT("tab:skins"))) != USenniteSounds::Takes(USenniteSounds::ButtonSound(TEXT("play"))));
 				Test->TestTrue(TEXT("Back does not sound like a button pressed"), USenniteSounds::Takes(USenniteSounds::ButtonSound(TEXT("back"))) != USenniteSounds::Takes(USenniteSounds::ButtonSound(TEXT("play"))));
 				Test->TestEqual(TEXT("The two arrows sound alike"), USenniteSounds::ButtonSound(TEXT("prev")), USenniteSounds::ButtonSound(TEXT("next")));
 			}

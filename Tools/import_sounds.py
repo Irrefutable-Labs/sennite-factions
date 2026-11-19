@@ -5,17 +5,16 @@
 
 Most of them are cut by Tools/cut_sounds.py out of the owner's two sound packs (the Sonniss GDC 2024
 bundle and the NOX SOUND Essentials series) and his own recordings (a button pressed, a button that
-cancels, a piece placed, a piece taken away) into Saved/SoundSource/cut, with a list of them
+cancels, a smaller tick, a piece placed, a piece taken away) into Saved/SoundSource/cut, with a list of them
 (sounds.json): every one in the list is imported under its name, and an ambience is set to go round.
 
-The rest are from the Fab pack "Cyberpunk UI SFX Pack - 78 Sci-Fi Sound Effects": a crate opening and
-the menus' smaller buttons (a section, an arrow, one of a row, a digit, a setting's step); no gun's shot
-is from it. That pack's files are numbered, not named (sfx_001.wav
-to sfx_078.wav, in folders by kind), so which file is which sound was chosen from each file's length,
-how sharply it starts and how high or low it is; nobody listened to them when this was written. It is
-looked for in the Fab library folder the launcher downloads into, or SOUND_SOURCE; where it is not
-found those are left as they are in the project.
-SOUND_ONLY=SW_UiTab,SW_UiPress (any of that pack's names below, or of the cut sounds in the list)
+One is from the Fab pack "Cyberpunk UI SFX Pack - 78 Sci-Fi Sound Effects": a crate opening; no gun's
+shot and no button is from it. That pack's files are numbered, not named (sfx_001.wav to sfx_078.wav, in
+folders by kind), so which file is which sound was chosen from each file's length, how sharply it starts
+and how high or low it is; nobody listened to it when this was written. It is looked for in the Fab
+library folder the launcher downloads into, or SOUND_SOURCE; where it is not found it is left as it is in
+the project.
+SOUND_ONLY=SW_CrateOpen,SW_UiPress (any of that pack's names below, or of the cut sounds in the list)
 imports those and leaves the rest and the falloffs as they are.
 
 What plays each sound is named in Config/DefaultGame.ini (SenniteSounds, and each gun's FireSound).
@@ -35,12 +34,6 @@ CUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
 # asset name: (the Cyberpunk pack's folder, the file's number), and why that file
 NUMBERED = {
     "SW_CrateOpen": ("04_Powerups", 61),      # 0.28 s, mid: something given
-    # the menus' smaller buttons (Config/DefaultGame.ini, ui.tab and the rest in the list of sounds)
-    "SW_UiTab": ("01_UI_Buttons", 23),        # 0.05 s, high tick: a section of the store
-    "SW_UiTurn": ("01_UI_Buttons", 22),       # 0.08 s, mid-high: the arrows that turn to the next hero, skin or gun
-    "SW_UiPick": ("01_UI_Buttons", 21),       # 0.09 s, the highest and softest: one of a row along the bottom
-    "SW_UiKey": ("01_UI_Buttons", 32),        # 0.05 s, high and thin: a digit of the keypads
-    "SW_UiStep": ("01_UI_Buttons", 29),       # 0.06 s, low tick: a setting a step less or more
 }
 ONLY = [each for each in os.environ.get("SOUND_ONLY", "").split(",") if each]
 # name: (full strength within, gone by) in cm
