@@ -2513,6 +2513,7 @@ void ASenniteCharacter::EditPiece() {
 	EditDragLast = INDEX_NONE;
 	Piece->EditingHere = this;
 	Piece->ShowCut(EditCut, EditCut);
+	USenniteSounds::Play(this, TEXT("piece.edit"));
 }
 
 void ASenniteCharacter::MarkEditTile(int32 Tile, bool bCut) {
@@ -2524,6 +2525,9 @@ void ASenniteCharacter::MarkEditTile(int32 Tile, bool bCut) {
 	// at least one tile stays
 	if (Next == Piece->AllTiles()) {
 		return;
+	}
+	if (Next != EditCut) {
+		USenniteSounds::Play(this, TEXT("piece.edit"));
 	}
 	EditCut = Next;
 	Piece->ShowCut(EditCut, EditCut);
@@ -2540,6 +2544,7 @@ void ASenniteCharacter::FinishEdit() {
 	// shown at once as it will be; the server makes it so for everyone, or refuses and it goes back
 	Piece->ShowCut(EditCut, 0);
 	if (EditCut != Piece->Cut) {
+		USenniteSounds::PlayAt(this, TEXT("piece.place"), Piece->GetActorLocation());
 		ServerEditPiece(Piece, EditCut);
 	}
 }
