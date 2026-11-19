@@ -806,6 +806,9 @@ public:
 	UFUNCTION()
 	void OnRepSetSkin();
 
+	/** Put a mesh on the hero's body, its own or a skin of it, drawn with that mesh's own materials and none left from the mesh before. */
+	void WearMesh(USkeletalMesh* Mesh);
+
 private:
 	/** Dress the character as HeroId's hero: the mesh, its animation Blueprint, its capsule and its hands. */
 	void ApplyHero();

@@ -262,6 +262,19 @@ void ASenniteCharacter::PossessedBy(AController* NewController)
 	}
 }
 
+void ASenniteCharacter::WearMesh(USkeletalMesh* Mesh)
+{
+	USkeletalMeshComponent* Body = GetMesh();
+	if (Body == nullptr || Mesh == nullptr) {
+		return;
+	}
+	// A hero's animation makes its own copies of its mesh's materials and sets them on the body. They are
+	// the old mesh's: left there, the new mesh is drawn with them, place for place, and a skin whose parts
+	// are in another order has its arms in its mask's material and its legs in its gun's.
+	Body->EmptyOverrideMaterials();
+	Body->SetSkeletalMeshAsset(Mesh);
+}
+
 void ASenniteCharacter::ApplyHero()
 {
 	const FSenniteHero& Hero = USenniteHeroes::FindOrDefault(HeroId);
@@ -287,7 +300,7 @@ void ASenniteCharacter::ApplyHero()
 	}
 
 	if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(HeroMesh.TryLoad())) {
-		Body->SetSkeletalMeshAsset(Mesh);
+		WearMesh(Mesh);
 	}
 	else {
 		UE_LOG(LogSenniteCharacter, Error, TEXT("Hero mesh '%s' did not load; the character has no body"), *HeroMesh.ToString());
