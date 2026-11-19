@@ -20,6 +20,7 @@
 #include "SenniteCharacter.h"
 #include "SennitePlayerController.h"
 #include "SennitePlayerState.h"
+#include "SenniteSounds.h"
 #include "SenniteTouch.h"
 #include "SenniteWeapons.h"
 #include "WeaponActor.h"
@@ -317,6 +318,9 @@ namespace
 			Test->TestTrue(TEXT("JUMP lifts the hero off the ground"), TopZ > Mark.Z + 40.0);
 			Test->TestTrue(TEXT("She is back on the ground"), Hero->GetCharacterMovement()->IsMovingOnGround());
 			Test->TestEqual(TEXT("A touch on JUMP fires no shot"), Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->CurrentBulletCount : -1, ClipMark);
+			// every tap of a button is heard: the slots tapped above as one of a row, OPEN and JUMP as a press
+			Test->TestTrue(FString::Printf(TEXT("The taps of the slots are heard (%d)"), USenniteSounds::Heard(World, TEXT("ui.pick"))), USenniteSounds::Heard(World, TEXT("ui.pick")) >= 5);
+			Test->TestTrue(FString::Printf(TEXT("The taps of OPEN and JUMP are heard (%d)"), USenniteSounds::Heard(World, TEXT("ui.press"))), USenniteSounds::Heard(World, TEXT("ui.press")) >= 2);
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK jump: rose %.0f cm"), TopZ - Mark.Z);
 			Press(TEXT("FIRE"));
 			Enter(EPhase::HoldFire, World);
@@ -353,6 +357,7 @@ namespace
 			}
 			Test->TestEqual(TEXT("RELOAD takes the rounds it loads from those the crate gave"), State->EquippedWeaponsAmmunition[1],
 				GetDefault<ASenniteRifle>()->CrateRounds - (Hero->CurrentWeapon->MagazineSize - CountMark));
+			Test->TestTrue(TEXT("The reload is heard"), USenniteSounds::HeardBeginning(World, TEXT("reload.")) >= 1);
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK reload: clip %d -> %d, %d to spare"), CountMark, Hero->CurrentWeapon->CurrentBulletCount, State->EquippedWeaponsAmmunition[1]);
 			CountMark = Built(World);
 			Enter(EPhase::Build, World);
