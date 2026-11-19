@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { AppAccount, Connection, ObjectInfo, RequestRef, Result } from "dsm-app-client";
-import { Shop } from "../../src/publisher/shop.js";
+import { plainly, Shop } from "../../src/publisher/shop.js";
 import { Store } from "../../src/publisher/store.js";
 import type { ShopWorld } from "../../src/publisher/world.js";
 
@@ -196,9 +196,15 @@ describe("a sale", () => {
     await soon(20);
     account.answer("declined", false);
     const sold = await selling;
-    expect(sold.ok).toBe(false);
+    expect(sold).toEqual({ ok: false, why: "you declined it in your wallet" });
     expect(store.data.shop.asked).toEqual({});
     await shop.sweep();
     expect(account.issued).toHaveLength(0);
+  });
+
+  it("says in plain words that the wallet holds too little", () => {
+    const failed = { outcome: "failed", reason: "wallet.send: local state update failed: Invalid operation: advance: balance underflow on debit (insufficient funds)", detail: "" };
+    expect(plainly(failed, "the 1200 D-bucks the hero costs")).toBe("your wallet does not hold the 1200 D-bucks the hero costs");
+    expect(plainly({ outcome: "failed", reason: "", detail: "the relay did not answer" }, "x")).toBe("the relay did not answer");
   });
 });

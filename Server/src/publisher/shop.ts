@@ -58,6 +58,17 @@ export interface Purse {
   weapons: OwnedWeapon[];
 }
 
+/**
+ * Why the wallet did not carry out what it was asked, for the player to read: the two answers a player brings
+ * about themselves in plain words, anything else as the wallet put it.
+ */
+export function plainly(result: { outcome: string; reason: string; detail: string }, what: string): string {
+  const said = result.reason || result.detail;
+  if (result.outcome === "declined") return "you declined it in your wallet";
+  if (/insufficient funds|balance underflow/i.test(said)) return `your wallet does not hold ${what}`;
+  return said || `the wallet's answer is ${result.outcome}`;
+}
+
 /** What a sale is waiting on, said for the game to tell the player: `onWallet` when it is the player's approval in the wallet. */
 export type Say = (stage: string, onWallet: boolean) => void;
 
@@ -167,7 +178,7 @@ export class Shop {
       return undefined;
     });
     if (answered === undefined) return { ok: false, why: "the wallet did not answer the trade" };
-    return answered.outcome === "carried_out" ? { ok: true, why: "" } : { ok: false, why: answered.reason || answered.detail || `the wallet's answer is ${answered.outcome}` };
+    return answered.outcome === "carried_out" ? { ok: true, why: "" } : { ok: false, why: plainly(answered, `the ${era} ERA to trade`) };
   }
 
   /**
@@ -267,7 +278,7 @@ export class Shop {
       if (result.outcome === "declined" || result.outcome === "failed") {
         delete this.store.data.shop.asked[key];
         this.store.save();
-        return { ok: false, why: result.reason || result.detail || `the wallet's answer is ${result.outcome}` };
+        return { ok: false, why: plainly(result, `the ${item.price} D-bucks the ${kind} costs`) };
       }
       if (result.answered && result.outcome === "carried_out") say("paid: the shop is taking the payment in", false);
       else say(`approve the payment for the ${kind} in your DSM wallet`, true);
