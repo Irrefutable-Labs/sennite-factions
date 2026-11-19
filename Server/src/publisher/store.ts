@@ -127,6 +127,8 @@ export interface AskedSale {
   itemId: string;
   /** The buyer's wallet: its signing key (lowercase hex). */
   buyer: string;
+  /** When it was asked, on the server's clock (milliseconds). */
+  at?: number;
 }
 
 /** The shop's own record (spec 10.5). Who owns what is never here: a wallet proves that. */

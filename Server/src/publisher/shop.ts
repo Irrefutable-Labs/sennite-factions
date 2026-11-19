@@ -12,7 +12,7 @@
 // The shop records what it issued and which payment bought it. It never
 // records who owns a skin: that is what a wallet proves.
 
-import { ask, type AppAccount, type Connection, type Grant, type ObjectInfo } from "dsm-app-client";
+import { ask, type AppAccount, type Connection, type Grant, type ObjectInfo, type RequestRef } from "dsm-app-client";
 import { hex } from "../faction/canonical.js";
 import { Refused } from "./refused.js";
 import type { Store } from "./store.js";
@@ -61,8 +61,11 @@ export interface Purse {
 /** What a sale is waiting on, said for the game to tell the player: `onWallet` when it is the player's approval in the wallet. */
 export type Say = (stage: string, onWallet: boolean) => void;
 
-/** How many payments the shop may have open in one wallet, waiting for the player, at once. */
+/** How many payments the shop may have open in one wallet, waiting for the player, at once: those asked within COUNTED_FOR_MS. */
 const MAX_OPEN_PER_WALLET = 3;
+const COUNTED_FOR_MS = 60 * 60_000;
+/** An asking nobody answered in this long is forgotten: thirty days. One approved after that buys nothing. */
+const FORGOTTEN_AFTER_MS = 30 * 24 * 60 * 60_000;
 
 /** The first letters of the symbol an item sold is issued under, by its kind. */
 const PREFIX = { skin: "SK", hero: "HR", weapon: "WP" } as const;
@@ -71,6 +74,8 @@ export class Shop {
   /** The payments whose sale is being finished now, so that two looks at one sale do not both issue it. */
   readonly #finishing = new Set<string>();
   #sweeping = false;
+  /** How many sales to each wallet are at the point of asking it, between taking a place and recording what was asked. */
+  readonly #asking = new Map<string, number>();
 
   /**
    * `timing`: how long a sale's own request to the server goes on waiting for the wallet before it answers the
@@ -203,8 +208,8 @@ export class Shop {
    * shop waits; and the shop does not stop honouring it when it stops waiting.
    * A player may approve it a minute later or a day later, with the game closed
    * or the server started anew: `sweep` finds the payment landed and carries
-   * the sale out. Only a decline, a failure or the wallet ending the connection
-   * ends it. The owner, 2026-11-19, of a shop that gave up after four minutes
+   * the sale out. Only a decline, a failure, the wallet ending the connection or
+   * thirty days with no answer ends it. The owner, 2026-11-19, of a shop that gave up after four minutes
    * and let a payment approved later buy nothing: "The late approval: the shop
    * waits for 4 minutes. That's no good, and you need to fix that."
    *
@@ -224,14 +229,28 @@ export class Shop {
     await this.settle(connection);
     // What is asked stays open until the player answers it, so a wallet may have only a few open at once: what it
     // is asked for cannot be piled up without end by a game asking again and again.
+    // Only what was asked lately counts: an asking the wallet never shows its player must not shut that wallet
+    // out of the shop for good. The place is taken before anything is awaited, so two sales begun together
+    // cannot both take the last one.
     const buyer = hex(connection.opponent.signingKey);
-    if (Object.values(this.store.data.shop.asked).filter((a) => a.buyer === buyer).length >= MAX_OPEN_PER_WALLET) {
+    const lately = Date.now() - COUNTED_FOR_MS;
+    const open = Object.values(this.store.data.shop.asked).filter((a) => a.buyer === buyer && (a.at ?? 0) > lately).length;
+    if (open + (this.#asking.get(buyer) ?? 0) >= MAX_OPEN_PER_WALLET) {
       return { ok: false, why: "payments already wait in your DSM wallet: approve or decline them there first" };
     }
-    const ref = await this.app.request(connection, ask.send(this.symbol, item.price, `${kind}: ${item.name}`));
-    const key = `${ref.connection}:${ref.seq}`;
-    this.store.data.shop.asked[key] = { connection: ref.connection, seq: String(ref.seq), kind, itemId: item.id, buyer };
-    this.store.save();
+    this.#asking.set(buyer, (this.#asking.get(buyer) ?? 0) + 1);
+    let ref: RequestRef;
+    let key: string;
+    try {
+      ref = await this.app.request(connection, ask.send(this.symbol, item.price, `${kind}: ${item.name}`));
+      key = `${ref.connection}:${ref.seq}`;
+      this.store.data.shop.asked[key] = { connection: ref.connection, seq: String(ref.seq), kind, itemId: item.id, buyer, at: Date.now() };
+      this.store.save();
+    } finally {
+      const left = (this.#asking.get(buyer) ?? 1) - 1;
+      if (left > 0) this.#asking.set(buyer, left);
+      else this.#asking.delete(buyer);
+    }
 
     const deadline = Date.now() + this.timing.waitMs;
     for (;;) {
@@ -296,7 +315,9 @@ export class Shop {
       if (sale.object === "") {
         // The symbol is the sale's own, taken with its serial. If the server stopped after the object was issued and
         // before that was written down, the account holds it already: it is that object, and none is issued again.
-        const issued = (await this.app.owned()).find((o) => o.object.symbol === sale.symbol)?.object;
+        // Only one the account still holds, and that no sale is recorded for: an object sold before is never the one.
+        const sold = (id: string): boolean => Object.hasOwn(record.skins, id) || Object.hasOwn(record.heroes, id) || Object.hasOwn(record.weapons, id);
+        const issued = (await this.app.owned()).find((o) => o.object.symbol === sale.symbol && o.amount > 0n && !sold(o.object.id))?.object;
         info = issued ?? (await this.app.issue({ symbol: sale.symbol, name: `${item.name} #${sale.serial}`, supply: "1", description: `Sennite: Factions ${sale.kind} ${item.id}` }));
         sale.object = info.id;
         if (sale.kind === "skin") record.skins[info.id] = { skinId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
@@ -340,13 +361,25 @@ export class Shop {
       for (const [key, asked] of Object.entries(record.asked)) {
         try {
           const result = await this.app.result({ connection: asked.connection, seq: BigInt(asked.seq) });
-          const connection = await this.app.connection(asked.connection);
-          if (result.fact === "received" && result.received !== undefined) {
-            await this.paid(connection, key, hex(result.received));
-          } else if (result.outcome === "declined" || result.outcome === "failed" || !connection.connected) {
+          const ended = (): void => {
             delete record.asked[key];
             this.store.save();
+          };
+          if (result.outcome === "declined" || result.outcome === "failed") {
+            ended();
+            continue;
           }
+          if (result.fact === "received" && result.received !== undefined) {
+            await this.paid(await this.app.connection(asked.connection), key, hex(result.received));
+            continue;
+          }
+          // Not answered. It is over if its wallet ended the connection, or the account no longer knows the
+          // connection, or it is older than a wallet can be thought to still show its player.
+          const connected = await this.app.connection(asked.connection).then(
+            (c) => c.connected,
+            () => false,
+          );
+          if (!connected || Date.now() - (asked.at ?? 0) > FORGOTTEN_AFTER_MS) ended();
         } catch (e) {
           console.error(`[publisher] the shop's look at what it asked (${asked.kind} ${asked.itemId}): ${e instanceof Error ? e.message : String(e)}`);
         }
