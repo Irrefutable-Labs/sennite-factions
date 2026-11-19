@@ -4,7 +4,7 @@
 # Exit status 0 only if all of them passed.
 cd "$(dirname "$0")"
 failed=0
-for check in check_first_playable.sh check_weapons.sh check_building.sh check_editing.sh check_hud.sh check_storm.sh check_healing.sh check_touch.sh check_game_menu.sh check_two_players.sh check_menu.sh check_lobby.sh check_hero_hands.sh check_combat.sh check_arena.sh check_match.sh check_skins.sh check_sky.sh; do
+for check in check_first_playable.sh check_weapons.sh check_building.sh check_editing.sh check_hud.sh check_storm.sh check_healing.sh check_touch.sh check_game_menu.sh check_two_players.sh check_menu.sh check_lobby.sh check_hero_hands.sh check_combat.sh check_arena.sh check_match.sh check_sounds.sh check_skins.sh check_sky.sh; do
   if ./$check > /dev/null 2>&1; then
     echo "passed  $check"
   else

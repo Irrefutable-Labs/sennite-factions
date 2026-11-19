@@ -7,6 +7,7 @@ library folder, into /Game/Scenery.
   Asphalt  Asphalt Road (Quixel Megascans, a 2 m scan)                 the traffic deck and the bridge spans
   Dirt     Ground (ambientCG Ground024, a tileable forest floor)       under trees and round the plots' rocks
   Gravel   Terrain Textures - FREE ("Gravel 01" of MicroVerse Extras)  the paths from each pad to its ways out
+  Sand     Sandstone Rocky Ground (Quixel Megascans)                   the level ground of a canyon
 
 Each one's colour and normal maps come in at 1024, a phone's size, and the roughness map where the
 set has one (Gravel's smoothness hardly varies, so the ground material uses one number for it).
@@ -27,9 +28,15 @@ The Megascans and MicroVerse normal maps point green up (the OpenGL way, measure
 own height map); Unreal reads green down, so theirs are imported with green flipped. Ground024's
 already point green down.
 
+A connector that is land itself has a ground of its own: M_Ground_Canyon is M_Ground with a canyon's
+ground over it where the arena paints blue. Level ground there is sand (Sandstone Rocky Ground, read
+at two sizes); ground that stands steep is the red rock of the Desert Western Cliff (its picture,
+imported by Tools/import_scenery.py, laid along the wall and up it), in bands by height, as layered
+rock is. Where nothing is painted blue it draws exactly what M_Ground draws, so the two meet unseen.
+
 The library folder is SCENERY_SOURCE. GROUND names what to make ("Grass", "Asphalt", "Dirt",
-"Gravel", "Ground"; several, space-separated); left out, all of them. "Ground" is M_Ground, made
-from the Grass, Dirt and Gravel textures already imported."""
+"Gravel", "Sand", "Ground"; several, space-separated); left out, all of them. "Ground" is M_Ground
+and the grounds of the land connectors, made from the textures already imported."""
 import glob
 import os
 import subprocess
@@ -71,6 +78,21 @@ SETS = {
     "Gravel": {
         "unity": {kind: GRAVEL % kind for kind in ("BaseColor", "Normal")},
         "green_up": True,
+    },
+    "Sand": {
+        "maps": {kind: "Sandstone_Rocky_Ground-*/fbx/mid/*/*_%s.jpg" % kind for kind in ("BaseColor", "Normal")},
+        "green_up": True,
+    },
+}
+# The ground of each connector that is land: the set its level ground is drawn with, how much ground
+# one copy covers close up and for the wider variation, and its tint; the set its steep ground is
+# drawn with (already imported, under /Game/Scenery), how much wall one copy covers, and its tint;
+# how thick its bands of rock are, in cm; and how rough it all is.
+OWN = {
+    "Canyon": {
+        "flat": "Sand", "flat_near": 420.0, "flat_far": 2300.0, "flat_tint": (1.30, 0.92, 0.62),
+        "steep": "Cliff", "steep_size": 1400.0, "steep_tint": (1.10, 0.95, 0.85),
+        "band": 55.0, "rough": 0.9,
     },
 }
 # Where M_Ground reads each layer, in cm of ground per copy of its maps.
@@ -305,10 +327,60 @@ return saturate(W + (h / %.4f - 1.0) * 0.6 * between);
     return edge
 
 
-def ground():
-    """M_Ground: grass, with dirt and gravel where the ground's paint asks for them."""
+def custom(mat, code, output, pins, x, y, what):
+    made = node(mat, unreal.MaterialExpressionCustom, x, y)
+    made.set_editor_property("code", code)
+    made.set_editor_property("output_type", output)
+    made.set_editor_property("description", what)
+    inputs = []
+    for pin_name in pins:
+        pin = unreal.CustomInput()
+        pin.set_editor_property("input_name", pin_name)
+        inputs.append(pin)
+    made.set_editor_property("inputs", inputs)
+    return made
+
+
+def own_ground(mat, flat, paint, colour, normal, rough, spec):
+    """A land connector's own ground laid over the land's by the paint's blue: its level ground from
+    one set, read at two sizes; its steep ground from another, laid along the wall and up it, in bands
+    by height. Returns the colour, normal and roughness with it laid over."""
+    near = sample(mat, imported(spec["flat"], "BaseColor"), S.SAMPLERTYPE_COLOR, at(mat, flat, spec["flat_near"], 1300), 1300)
+    far = sample(mat, imported(spec["flat"], "BaseColor"), S.SAMPLERTYPE_COLOR, at(mat, flat, spec["flat_far"], 1450), 1500)
+    level_normal = sample(mat, imported(spec["flat"], "Normal"), S.SAMPLERTYPE_NORMAL, at(mat, flat, spec["flat_near"], 1650), 1700)
+    where = node(mat, unreal.MaterialExpressionWorldPosition, -1700, 1900)
+    facing = node(mat, unreal.MaterialExpressionVertexNormalWS, -1700, 2100)
+    up_wall = custom(mat, "return float2(P.x + P.y, -P.z) / %.1f;" % spec["steep_size"], unreal.CustomMaterialOutputType.CMOT_FLOAT2, ("P",), -1300, 1900,
+                     "along the wall and up it")
+    wire(where, "", up_wall, "P")
+    wall = sample(mat, imported(spec["steep"], "BaseColor"), S.SAMPLERTYPE_COLOR, up_wall, 1900)
+    steep = custom(mat, "return saturate((0.82 - N.z) / 0.24);", unreal.CustomMaterialOutputType.CMOT_FLOAT1, ("N",), -1050, 2100, "how steep the ground stands")
+    wire(facing, "", steep, "N")
+    mixed = custom(mat, """
+float3 level = lerp(Near, Far, 0.5) * float3(%.3f, %.3f, %.3f);
+float band = 0.78 + 0.22 * sin(P.z / %.1f + 2.5 * sin(P.z / %.1f) + 0.004 * (P.x + P.y));
+float3 rock = Wall * float3(%.3f, %.3f, %.3f) * band;
+return lerp(level, rock, Steep);
+""" % (spec["flat_tint"] + (spec["band"], spec["band"] * 4.3) + spec["steep_tint"]), unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                   ("Near", "Far", "Wall", "Steep", "P"), -750, 1600, "a land connector's own ground: level, and steep in bands")
+    wire(near, "RGB", mixed, "Near")
+    wire(far, "RGB", mixed, "Far")
+    wire(wall, "RGB", mixed, "Wall")
+    wire(steep, "", mixed, "Steep")
+    wire(where, "", mixed, "P")
+    straight = node(mat, unreal.MaterialExpressionConstant3Vector, -750, 1800)
+    straight.set_editor_property("constant", unreal.LinearColor(0.0, 0.0, 1.0, 1.0))
+    own_normal = lerp(mat, level_normal, "RGB", straight, "", steep, "", -550, 1750)
+    return (lerp(mat, colour, "", mixed, "", paint, "B", 50, -500),
+            lerp(mat, normal, "", own_normal, "", paint, "B", 50, 400),
+            lerp(mat, rough, "", constant(mat, spec["rough"], -150, 900), "", paint, "B", 50, 760))
+
+
+def ground(name="M_Ground", own=None):
+    """M_Ground: grass, with dirt and gravel where the ground's paint asks for them. With own, the
+    ground of a connector that is land, laid over it where the paint is blue."""
     folder = DEST + "/Ground"
-    mat = fresh_material(folder, "M_Ground")
+    mat = fresh_material(folder, name)
     flat = world_place(mat)
     grass_colour = imported("Grass", "BaseColor")
     grass_near = sample(mat, grass_colour, S.SAMPLERTYPE_COLOR, at(mat, flat, GRASS_NEAR, -600), -700)
@@ -352,11 +424,17 @@ def ground():
     normal = lerp(mat, lerp(mat, grass_normal, "RGB", dirt_normal, "RGB", dirt_weight, "", -350, 300), "", gravel_normal, "RGB", gravel_weight, "", -150, 400)
     rough = lerp(mat, lerp(mat, constant(mat, GRASS_ROUGH, -550, 700), "", constant(mat, DIRT_ROUGH, -550, 760), "", dirt_weight, "", -350, 720), "",
                  constant(mat, GRAVEL_ROUGH, -350, 800), "", gravel_weight, "", -150, 760)
+    if own is not None:
+        colour, normal, rough = own_ground(mat, flat, paint, colour, normal, rough, own)
     for src, prop in ((colour, P.MP_BASE_COLOR), (normal, P.MP_NORMAL), (rough, P.MP_ROUGHNESS)):
         if not mel.connect_material_property(src, "", prop):
-            raise RuntimeError("could not connect M_Ground's outputs")
+            raise RuntimeError("could not connect %s's outputs" % name)
     mel.recompile_material(mat)
     eal.save_loaded_asset(mat)
+    if own is not None:
+        lines.append("%s: %s/%s: M_Ground, with %s on the level (one copy over %.0f and %.0f cm) and %s on the steep (one copy over %.0f cm, bands %.0f cm) by vertex blue"
+                     % (name, folder, name, own["flat"], own["flat_near"], own["flat_far"], own["steep"], own["steep_size"], own["band"]))
+        return
     lines.append("M_Ground: %s/M_Ground: grass at %.0f and %.0f cm, dirt at %.0f cm by vertex green (mean light %.3f), gravel at %.0f cm by vertex red (mean light %.3f), dry grass by vertex alpha"
                  % (folder, GRASS_NEAR, GRASS_FAR, DIRT_SIZE, dirt_light, GRAVEL_SIZE, gravel_light))
 
@@ -375,6 +453,8 @@ for wanted in WANTED:
         surface(wanted, maps, *SETS[wanted]["material"])
 if "Ground" in WANTED:
     ground()
+    for kind, spec in OWN.items():
+        ground("M_Ground_" + kind, spec)
 
 with open(os.path.join(ROOT, "Saved", "import_ground.txt"), "w") as fh:
     fh.write("\n".join(lines) + "\n")

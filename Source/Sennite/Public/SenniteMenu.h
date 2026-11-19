@@ -1,6 +1,6 @@
 // The game's first screen, its character select and its lobby, on the Menu map (Tools/build_menu.py).
 //
-// MENU: PLAY opens the test range on this machine; STORE opens the store; BASE EDITOR opens the test
+// MENU: PLAY opens the arena, a freshly seeded one, on this machine; STORE opens the store; BASE EDITOR opens the test
 // range on the planning view of the player's base (where there is a publisher's server, and so bases);
 // HOST opens a lobby others on the network can join; JOIN takes an address, typed on the screen's own
 // keypad or the keyboard; QUIT.
@@ -32,7 +32,7 @@
 //
 // LOBBY: the Menu map hosted with ?listen?game=lobby. Every player's hero stands on the stage, and
 // the list says who is in and as which hero. Anyone can change hero (HEROES, the store's section); the host starts, and
-// everyone travels to the test range together.
+// everyone travels to an arena together.
 //
 // Everything is drawn on the canvas, sized to the screen as the HUD is, and every button works by a
 // tap or a click; the arrow keys, Enter and Escape work too.
@@ -164,37 +164,6 @@ public:
 	/** The map PLAY opens: the land the game is played on. */
 	UPROPERTY(Config)
 	FString PlayMap = TEXT("/Game/Maps/Arena");
-
-	/**
-	 * What a button sounds like, by what kind of button it is (Tools/import_sounds.py): one of the first
-	 * screen or the in-game menu; a section of the store; the arrows that turn to the next hero, skin or
-	 * gun; one of a row along the bottom; back; a thing done (choose, buy, swap, start); a digit of a
-	 * keypad; a setting a step less or more. ButtonVolume is how loud they are, of the game's own loudness:
-	 * over the songs, which play at the player's own MUSIC VOLUME.
-	 */
-	UPROPERTY(Config)
-	FSoftObjectPath PressSound;
-	UPROPERTY(Config)
-	FSoftObjectPath TabSound;
-	UPROPERTY(Config)
-	FSoftObjectPath TurnSound;
-	UPROPERTY(Config)
-	FSoftObjectPath PickSound;
-	UPROPERTY(Config)
-	FSoftObjectPath BackSound;
-	UPROPERTY(Config)
-	FSoftObjectPath ConfirmSound;
-	UPROPERTY(Config)
-	FSoftObjectPath KeySound;
-	UPROPERTY(Config)
-	FSoftObjectPath StepSound;
-	UPROPERTY(Config)
-	float ButtonVolume = 0.6f;
-
-	/** The sound the button for Action makes: every menu's buttons, the in-game menu's too. */
-	static FSoftObjectPath ButtonSoundOf(FName Action);
-	/** Make it heard. */
-	static void PlayButtonSound(const UObject* WorldContext, FName Action);
 
 	/** SETTINGS, over the first screen: the in-game menu's own page, or none while it is closed. */
 	USenniteGameMenu* SettingsIfOpen() const;

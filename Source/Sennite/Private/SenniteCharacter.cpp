@@ -1,6 +1,7 @@
 // Copyright 1998-2018 Epic Games, Inc. All Rights Reserved.
 
 #include "SenniteCharacter.h"
+#include "SenniteSounds.h"
 #include "SennitePlayerController.h"
 #include "SennitePlayerState.h"
 #include "ThirdPersonAnimInstance.h"
@@ -46,6 +47,10 @@ ASenniteCharacter::ASenniteCharacter(const FObjectInitializer& ObjectInitializer
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<USenniteHeroMesh>(ACharacter::MeshComponentName))
 {
 	bReplicates = true;
+	// A hero is sent to the players within a kilometre of it. The engine's own limit is 150 m, and the
+	// middles of two neighbouring plots are 720 m apart over open ground: a hero across it was unseen.
+	// Not every hero to everyone: a player's game is not told where heroes are that it could never see.
+	SetNetCullDistanceSquared(FMath::Square(100000.0f));
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
 
@@ -2315,13 +2320,7 @@ void ASenniteCharacter::NetMulticastOwnAttack_Implementation() {
 	if (OwnAttack != nullptr) {
 		PlayAnimMontage(OwnAttack);
 	}
-	// and is heard, where the hero's own weapon is, as a gun's shot is
-	if (GetNetMode() != NM_DedicatedServer) {
-		if (USoundBase* Shot = Cast<USoundBase>(GetDefault<AWeaponActor>()->OwnAttackSound.TryLoad())) {
-			USoundAttenuation* Fades = Cast<USoundAttenuation>(GetDefault<AWeaponActor>()->FireFalloff.TryLoad());
-			UGameplayStatics::PlaySoundAtLocation(this, Shot, OwnWeaponTip(), 1.0f, 1.0f, 0.0f, Fades);
-		}
-	}
+	USenniteSounds::PlayAt(this, TEXT("attack.own"), OwnWeaponTip());
 }
 
 FVector ASenniteCharacter::OwnWeaponTip() const {
@@ -2337,6 +2336,7 @@ FVector ASenniteCharacter::OwnWeaponTip() const {
 
 void ASenniteCharacter::NetMulticastPlayPickaxeSwingAnimation_Implementation() {
 	PlayAnimMontage(PickaxeSwingingAnimation, 1.f, NAME_None);
+	USenniteSounds::PlayAt(this, TEXT("swing"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastGunFired_Implementation() {
@@ -2352,25 +2352,31 @@ void ASenniteCharacter::NetMulticastGunFired_Implementation() {
 
 void ASenniteCharacter::NetMulticastPlayUseHealingItemAnimation_Implementation() {
 	PlayAnimMontage(HealingAnimation);
+	USenniteSounds::PlayAt(this, CurrentHealingItemType == 1 ? TEXT("heal.potion") : TEXT("heal.bandage"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastPlayReloadRifleAnimation_Implementation() {
 	PlayAnimMontage(RifleHipReloadAnimation);
+	USenniteSounds::PlayAt(this, TEXT("reload.rifle"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastPlayReloadRifleIronsightsAnimation_Implementation() {
 	PlayAnimMontage(RifleIronsightsReloadAnimation);
+	USenniteSounds::PlayAt(this, TEXT("reload.rifle"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastPlayReloadShotgunAnimation_Implementation() {
 	PlayAnimMontage(ShotgunHipReloadAnimation);
+	USenniteSounds::PlayAt(this, TEXT("reload.shotgun"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastPlayReloadShotgunIronsightsAnimation_Implementation() {
 	PlayAnimMontage(ShotgunIronsightsReloadAnimation);
+	USenniteSounds::PlayAt(this, TEXT("reload.shotgun"), GetActorLocation());
 }
 
 void ASenniteCharacter::ClientDrawHitMarker_Implementation() {
+	USenniteSounds::Play(this, TEXT("hit.marker"));
 	if (GetController()) {
 		APlayerController* PlayerController = Cast<APlayerController>(GetController());
 		if (PlayerController->GetHUD()) {
@@ -2594,6 +2600,7 @@ bool ASenniteCharacter::ServerEditPiece_Validate(ABuildingActor* Piece, int32 Ne
 }
 
 void ASenniteCharacter::ClientEditRefused_Implementation(ABuildingActor* Piece) {
+	USenniteSounds::Play(this, TEXT("ui.denied"));
 	if (IsValid(Piece) && !Piece->EditingHere.IsValid()) {
 		Piece->ShowCut(Piece->Cut, 0);
 	}

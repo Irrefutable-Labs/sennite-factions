@@ -1,4 +1,5 @@
 #include "SenniteMenu.h"
+#include "SenniteSounds.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/SkeletalMeshActor.h"
 #include "Camera/CameraActor.h"
@@ -515,43 +516,6 @@ USenniteGameMenu* ASenniteMenuController::SettingsIfOpen() const
 	return Settings != nullptr && Settings->IsOpen() ? Settings.Get() : nullptr;
 }
 
-FSoftObjectPath ASenniteMenuController::ButtonSoundOf(FName Action)
-{
-	const ASenniteMenuController* Sounds = GetDefault<ASenniteMenuController>();
-	const FString Name = Action.ToString();
-	if (Name == TEXT("prev") || Name == TEXT("next")) {
-		return Sounds->TurnSound;
-	}
-	if (Name.StartsWith(TEXT("tab:"))) {
-		return Sounds->TabSound;
-	}
-	if (Name.StartsWith(TEXT("hero:")) || Name.StartsWith(TEXT("gun:")) || Name.StartsWith(TEXT("skinsof:")) || Name.StartsWith(SkinOnStage) || Name == TEXT("swap:from") || Name == TEXT("swap:to")) {
-		return Sounds->PickSound;
-	}
-	if (Name == TEXT("back") || Name == TEXT("leave") || Name == TEXT("stay") || Name == TEXT("resume")) {
-		return Sounds->BackSound;
-	}
-	if (Name.StartsWith(TEXT("num:")) || Name.StartsWith(TEXT("key:"))) {
-		return Sounds->KeySound;
-	}
-	if (Name.EndsWith(TEXT("-")) || Name.EndsWith(TEXT("+")) || Name == TEXT("invert") || Name == TEXT("swap:flip")) {
-		return Sounds->StepSound;
-	}
-	for (const TCHAR* Done : { TEXT("choose"), TEXT("buy"), TEXT("buygun"), TEXT("buyskin"), TEXT("wear"), TEXT("takeoff"), TEXT("dbucks"), TEXT("wallet"), TEXT("price"), TEXT("trade"), TEXT("connect"), TEXT("start") }) {
-		if (Name == Done) {
-			return Sounds->ConfirmSound;
-		}
-	}
-	return Sounds->PressSound;
-}
-
-void ASenniteMenuController::PlayButtonSound(const UObject* WorldContext, FName Action)
-{
-	if (USoundBase* Sound = Cast<USoundBase>(ButtonSoundOf(Action).TryLoad())) {
-		UGameplayStatics::PlaySound2D(WorldContext, Sound, GetDefault<ASenniteMenuController>()->ButtonVolume);
-	}
-}
-
 bool ASenniteMenuController::InputTouch(const FTouchId TouchId, const ETouchType::Type Type, const FVector2D& TouchLocation, const float Force, const uint64 Timestamp)
 {
 	// SETTINGS, while it is open, takes every touch
@@ -687,10 +651,10 @@ void ASenniteMenuController::Release(const FVector2D& Where)
 
 void ASenniteMenuController::Act(FName Action)
 {
+	USenniteSounds::Button(this, Action);
 	const FString Name = Action.ToString();
 	const TArray<FSenniteHero>& Heroes = USenniteHeroes::All();
 	USenniteProfile& Profile = USenniteProfile::Get();
-	PlayButtonSound(this, Action);
 	if (Name == TEXT("play")) {
 		UGameplayStatics::OpenLevel(this, FName(*PlayMap));
 	}

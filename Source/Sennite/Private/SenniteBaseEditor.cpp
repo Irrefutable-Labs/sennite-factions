@@ -1,4 +1,5 @@
 #include "SenniteBaseEditor.h"
+#include "SenniteSounds.h"
 
 #include "BuildingActor.h"
 #include "Camera/CameraActor.h"
@@ -195,6 +196,7 @@ void ASenniteBaseEditor::ChooseParcel(const FString& Id)
 
 void ASenniteBaseEditor::Open()
 {
+	USenniteSounds::Play(this, TEXT("ui.open"));
 	USennitePublisher* Server = Publisher();
 	APlayerController* Controller = GetWorld()->GetFirstPlayerController();
 	if (Server == nullptr || Controller == nullptr || bEditing) {
@@ -264,6 +266,7 @@ void ASenniteBaseEditor::Close()
 	if (!bEditing) {
 		return;
 	}
+	USenniteSounds::Play(this, TEXT("ui.back"));
 	bEditing = false;
 	bPeople = false;
 	bShop = false;
@@ -297,6 +300,7 @@ void ASenniteBaseEditor::EndPlay(const EEndPlayReason::Type Reason)
 
 void ASenniteBaseEditor::Move(int32 DX, int32 DY)
 {
+	USenniteSounds::Play(this, TEXT("ui.tick"));
 	const USennitePublisher* Server = Publisher();
 	const FSenniteParcel* Found = Server != nullptr ? Server->FindParcel(Parcel) : nullptr;
 	if (Found == nullptr || Found->Boundary.Num() == 0) {
@@ -351,6 +355,7 @@ void ASenniteBaseEditor::MoveRight() { Move(0, 1); }
 
 void ASenniteBaseEditor::NextPrefab()
 {
+	USenniteSounds::Play(this, TEXT("ui.select"));
 	const USennitePublisher* Server = Publisher();
 	if (Server != nullptr && Server->Prefabs.Num() > 0) {
 		PrefabIndex = (PrefabIndex + 1) % Server->Prefabs.Num();
@@ -359,6 +364,7 @@ void ASenniteBaseEditor::NextPrefab()
 
 void ASenniteBaseEditor::PreviousPrefab()
 {
+	USenniteSounds::Play(this, TEXT("ui.select"));
 	const USennitePublisher* Server = Publisher();
 	if (Server != nullptr && Server->Prefabs.Num() > 0) {
 		PrefabIndex = (PrefabIndex + Server->Prefabs.Num() - 1) % Server->Prefabs.Num();
@@ -367,11 +373,13 @@ void ASenniteBaseEditor::PreviousPrefab()
 
 void ASenniteBaseEditor::Turn()
 {
+	USenniteSounds::Play(this, TEXT("ui.select"));
 	Rotation = (Rotation + 90) % 360;
 }
 
 void ASenniteBaseEditor::Place()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	if (bInventory) {
 		// in the inventory the same key wears a skin and takes it off
 		InventoryAct();
@@ -395,6 +403,7 @@ void ASenniteBaseEditor::Place()
 
 void ASenniteBaseEditor::Found()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	USennitePublisher* Server = Publisher();
 	const FSenniteBaseView* View = Base();
 	if (Server != nullptr && View != nullptr && !View->bAssigned) {
@@ -404,6 +413,7 @@ void ASenniteBaseEditor::Found()
 
 void ASenniteBaseEditor::NextParcel()
 {
+	USenniteSounds::Play(this, TEXT("ui.select"));
 	const USennitePublisher* Server = Publisher();
 	if (Server == nullptr || Server->Parcels.Num() == 0) {
 		return;
@@ -436,6 +446,7 @@ bool ASenniteBaseEditor::CommitChoice(FString& Resource, int32& Amount) const
 
 void ASenniteBaseEditor::Commit()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	USennitePublisher* Server = Publisher();
 	const FSenniteStructureView* Structure = Selected();
 	FString Resource;
@@ -450,6 +461,7 @@ void ASenniteBaseEditor::NextAmount() { AmountIndex = (AmountIndex + 1) % UE_ARR
 
 void ASenniteBaseEditor::TakeBack()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	USennitePublisher* Server = Publisher();
 	if (const FSenniteStructureView* Structure = Selected(); Server != nullptr && Structure != nullptr) {
 		Server->Withdraw(Structure->InstanceId);
@@ -458,6 +470,7 @@ void ASenniteBaseEditor::TakeBack()
 
 void ASenniteBaseEditor::ReplaceSelected()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	USennitePublisher* Server = Publisher();
 	const FSennitePrefab* Prefab = Chosen();
 	if (const FSenniteStructureView* Structure = Selected(); Server != nullptr && Structure != nullptr && Prefab != nullptr && Prefab->Id != Structure->PrefabId) {
@@ -467,6 +480,7 @@ void ASenniteBaseEditor::ReplaceSelected()
 
 void ASenniteBaseEditor::Dismantle()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	USennitePublisher* Server = Publisher();
 	if (bPeople) {
 		// on the people page the same key withdraws an invitation
@@ -483,6 +497,7 @@ void ASenniteBaseEditor::Dismantle()
 
 void ASenniteBaseEditor::Rebuild()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	USennitePublisher* Server = Publisher();
 	if (const FSenniteStructureView* Structure = Selected(); Server != nullptr && Structure != nullptr && Structure->bDestroyed) {
 		Server->Confirm(Structure->InstanceId);
@@ -491,6 +506,7 @@ void ASenniteBaseEditor::Rebuild()
 
 void ASenniteBaseEditor::CopyCode()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	USennitePublisher* Server = Publisher();
 	if (Server == nullptr || !Server->OpenConnectCode()) {
 		return;
@@ -500,6 +516,7 @@ void ASenniteBaseEditor::CopyCode()
 
 void ASenniteBaseEditor::ProveMaterials()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	if (USennitePublisher* Server = Publisher()) {
 		Server->ProveMaterials();
 	}
@@ -540,6 +557,7 @@ bool ASenniteBaseEditor::ChosenPerson(FPersonRow& Row) const
 
 void ASenniteBaseEditor::TogglePeople()
 {
+	USenniteSounds::Play(this, TEXT("ui.page"));
 	const FSenniteBaseView* View = Base();
 	// a faction's people are its members' to see
 	bPeople = !bPeople && View != nullptr && View->bMember;
@@ -550,6 +568,7 @@ void ASenniteBaseEditor::TogglePeople()
 
 void ASenniteBaseEditor::ToggleShop()
 {
+	USenniteSounds::Play(this, TEXT("ui.page"));
 	const USennitePublisher* Server = Publisher();
 	// the shop sells to a connected wallet
 	bShop = !bShop && Server != nullptr && Server->bConnected;
@@ -560,6 +579,7 @@ void ASenniteBaseEditor::ToggleShop()
 
 void ASenniteBaseEditor::ToggleInventory()
 {
+	USenniteSounds::Play(this, TEXT("ui.page"));
 	const USennitePublisher* Server = Publisher();
 	// an inventory is a connected wallet's
 	bInventory = !bInventory && Server != nullptr && Server->bConnected;
@@ -570,6 +590,7 @@ void ASenniteBaseEditor::ToggleInventory()
 
 void ASenniteBaseEditor::InventoryAct()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	USennitePublisher* Server = Publisher();
 	if (Server == nullptr || !Server->Inventory.IsValidIndex(InventoryIndex)) {
 		return;
@@ -581,6 +602,7 @@ void ASenniteBaseEditor::InventoryAct()
 
 void ASenniteBaseEditor::ShopAct()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	USennitePublisher* Server = Publisher();
 	if (Server == nullptr || !Server->bConnected) {
 		return;
@@ -598,6 +620,7 @@ void ASenniteBaseEditor::ShopAct()
 
 void ASenniteBaseEditor::DressHero()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	const USennitePublisher* Server = Publisher();
 	const APlayerController* Controller = GetWorld()->GetFirstPlayerController();
 	ASenniteCharacter* Hero = Controller != nullptr ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
@@ -638,6 +661,7 @@ void ASenniteBaseEditor::DressHero()
 
 void ASenniteBaseEditor::Join()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	USennitePublisher* Server = Publisher();
 	const FSenniteBaseView* View = Base();
 	if (Server != nullptr && View != nullptr && View->bInvited) {
@@ -647,6 +671,7 @@ void ASenniteBaseEditor::Join()
 
 void ASenniteBaseEditor::InvitePerson()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	if (!bPeople) {
 		// off the people page the same key opens the inventory
 		ToggleInventory();
@@ -661,6 +686,7 @@ void ASenniteBaseEditor::InvitePerson()
 
 void ASenniteBaseEditor::VotePerson()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	USennitePublisher* Server = Publisher();
 	FPersonRow Row;
 	if (Server != nullptr && ChosenPerson(Row) && Row.Kind == FPersonRow::EKind::Member && !Row.Person->bYou && !Row.Person->bVoted) {
@@ -670,6 +696,7 @@ void ASenniteBaseEditor::VotePerson()
 
 void ASenniteBaseEditor::UnvotePerson()
 {
+	USenniteSounds::Play(this, TEXT("ui.click"));
 	USennitePublisher* Server = Publisher();
 	FPersonRow Row;
 	if (Server != nullptr && ChosenPerson(Row) && Row.Kind == FPersonRow::EKind::Member && Row.Person->bVoted) {
