@@ -55,7 +55,7 @@ public:
 	/** Play a sound at a place in the world: nearer is louder. */
 	static void PlayAt(const UObject* In, FName Name, const FVector& Where);
 
-	/** A hero's own voice (Kind: attack, hit, jump, land, pain), for the heroes that have a human one. */
+	/** A hero's own voice (Kind: hit, jump, land, pain), for the heroes that have a human one. It says nothing when the hero attacks or shoots. */
 	static void Voice(const ASenniteCharacter* Hero, FName Kind);
 
 	/** The sound of a menu's button, from the action it does. */

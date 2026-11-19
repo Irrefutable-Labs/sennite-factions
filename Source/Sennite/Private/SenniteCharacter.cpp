@@ -2292,7 +2292,6 @@ void ASenniteCharacter::NetMulticastOwnAttack_Implementation() {
 		PlayAnimMontage(OwnAttack);
 	}
 	USenniteSounds::PlayAt(this, TEXT("attack.own"), OwnWeaponTip());
-	USenniteSounds::Voice(this, TEXT("attack"));
 }
 
 FVector ASenniteCharacter::OwnWeaponTip() const {

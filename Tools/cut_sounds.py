@@ -91,8 +91,7 @@ for ground, walk, run, jump, land in (
     TAKES += [("SW_Step%sWalk" % ground, walk, 6), ("SW_Step%sRun" % ground, run, 6),
               ("SW_Jump%s" % ground, jump, 2), ("SW_Land%s" % ground, land, 2)]
 for who, name in (("F", "Female"), ("M", "Male")):
-    TAKES += [("SW_Voice%sAttack" % who, "Voice_%s_V1_Attack_Mono_%%02d.wav" % name, 4),
-              ("SW_Voice%sHit" % who, "Voice_%s_V1_Hit_Short_Mono_%%02d.wav" % name, 4),
+    TAKES += [("SW_Voice%sHit" % who, "Voice_%s_V1_Hit_Short_Mono_%%02d.wav" % name, 4),
               ("SW_Voice%sJump" % who, "Voice_%s_V1_Jump_Mono_%%02d.wav" % name, 3),
               ("SW_Voice%sLand" % who, "Voice_%s_V1_Land_Mono_%%02d.wav" % name, 3),
               ("SW_Voice%sPain" % who, "Voice_%s_V1_Pain_Mono_%%02d.wav" % name, 3)]
