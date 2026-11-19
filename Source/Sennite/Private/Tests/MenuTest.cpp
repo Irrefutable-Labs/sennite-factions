@@ -259,6 +259,18 @@ namespace
 			}
 			Test->TestEqual(TEXT("It opens on the player's own hero"), Heroes[Menu->Browse].Id, USenniteProfile::Get().PlayingHero(Menu));
 			Test->TestTrue(TEXT("The player's own hero is marked chosen"), MenuCheck::Has(Menu, TEXT("chosen")));
+			{
+				// CHOSEN is greyed out: a tap on it does nothing, and is heard to do nothing
+				bool bChosenLive = true;
+				MenuCheck::Has(Menu, TEXT("chosen"), &bChosenLive);
+				Test->TestFalse(TEXT("CHOSEN is greyed out"), bChosenLive);
+				const int32 Refused = USenniteSounds::Heard(World, TEXT("ui.denied"));
+				const int32 Any = USenniteSounds::HeardBeginning(World, TEXT("ui."));
+				Test->TestTrue(TEXT("CHOSEN can be tapped"), MenuCheck::Tap(Menu, TEXT("chosen")));
+				Test->TestEqual(TEXT("A tap on a greyed-out button is heard refused"), USenniteSounds::Heard(World, TEXT("ui.denied")) - Refused, 1);
+				Test->TestEqual(TEXT("and as nothing else"), USenniteSounds::HeardBeginning(World, TEXT("ui.")) - Any, 1);
+				Test->TestTrue(TEXT("and the store stays where it was"), Menu->Page == ESenniteMenuPage::Heroes);
+			}
 			Test->TestTrue(TEXT("A game with no shop shows no wallet balance"), MenuCheck::Line(Menu, TEXT("balance")).IsEmpty());
 			MenuCheck::Tap(Menu, TEXT("tab:skins"));
 			Enter(EPhase::Skins);

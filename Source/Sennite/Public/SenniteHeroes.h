@@ -56,6 +56,10 @@ struct FSenniteHero
 	UPROPERTY()
 	bool bMelee = false;
 
+	/** The sound its own attack is heard as, by name (USenniteSounds): a swing for a melee hero, a shot for the rest, if none is named. */
+	UPROPERTY()
+	FName AttackSound;
+
 	/** The hero floats over the ground: its going is not heard as steps. */
 	UPROPERTY()
 	bool bFloats = false;

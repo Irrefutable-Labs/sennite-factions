@@ -327,6 +327,7 @@ void ASenniteCharacter::ApplyHero()
 	HeroCastBone = Hero.CastBone;
 	bHeroMelee = Hero.bMelee;
 	bHeroFloats = Hero.bFloats;
+	HeroAttackSound = !Hero.AttackSound.IsNone() ? Hero.AttackSound : bHeroMelee ? FName(TEXT("swing")) : FName(TEXT("attack.own"));
 	// the hero's own attack, for when it has no gun in hand
 	OwnAttack = HeroAttackMontage.IsNull() ? nullptr : Cast<UAnimMontage>(HeroAttackMontage.TryLoad());
 	if (!HeroAttackMontage.IsNull() && OwnAttack == nullptr) {
@@ -2399,8 +2400,8 @@ void ASenniteCharacter::NetMulticastOwnAttack_Implementation() {
 	if (OwnAttack != nullptr) {
 		PlayAnimMontage(OwnAttack);
 	}
-	// a blow is heard as a swing, never as a shot
-	USenniteSounds::PlayAt(this, bHeroMelee ? TEXT("swing") : TEXT("attack.own"), OwnWeaponTip());
+	// as the hero's own (a blow is heard as a swing or a punch, never as a shot)
+	USenniteSounds::PlayAt(this, HeroAttackSound, OwnWeaponTip());
 }
 
 void ASenniteCharacter::LandBlow() {

@@ -161,11 +161,11 @@ bool USenniteGameMenu::Touch(ETouchType::Type Type, const FVector2D& Where)
 	return true;
 }
 
-FName USenniteGameMenu::ButtonAt(const FVector2D& Where) const
+FName USenniteGameMenu::ButtonAt(const FVector2D& Where, bool bGreyedOut) const
 {
 	// Where is on the screen; the buttons are where the canvas drew them
 	for (const FSenniteMenuButton& Each : Buttons) {
-		if (Each.bEnabled && Each.Box.IsInside(Where - Origin)) {
+		if (Each.bEnabled != bGreyedOut && Each.Box.IsInside(Where - Origin)) {
 			return Each.Action;
 		}
 	}
@@ -186,6 +186,7 @@ bool USenniteGameMenu::Centre(FName Action, FVector2D& Out) const
 void USenniteGameMenu::Press(const FVector2D& Where)
 {
 	Pressed = ButtonAt(Where);
+	PressedGreyedOut = Pressed.IsNone() ? ButtonAt(Where, true) : NAME_None;
 }
 
 void USenniteGameMenu::Release(const FVector2D& Where)
@@ -197,6 +198,11 @@ void USenniteGameMenu::Release(const FVector2D& Where)
 	if (!Action.IsNone() && Action == Began) {
 		Act(Action);
 	}
+	// a greyed-out button does nothing, and is heard to do nothing
+	else if (!PressedGreyedOut.IsNone() && ButtonAt(Where, true) == PressedGreyedOut && Controller != nullptr) {
+		USenniteSounds::Play(Controller, TEXT("ui.denied"));
+	}
+	PressedGreyedOut = NAME_None;
 }
 
 void USenniteGameMenu::Act(FName Action)
