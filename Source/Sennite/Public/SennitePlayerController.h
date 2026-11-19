@@ -112,4 +112,7 @@ private:
 	UPROPERTY()
 	TObjectPtr<USenniteTouchControls> TouchControls;
 
+	/** Whether this machine's world has been put under its match's sky (SenniteSky.h). */
+	bool bSkySettled = false;
+
 };

@@ -5,6 +5,7 @@
 #include "SenniteCharacter.h"
 #include "SenniteSpectator.h"
 #include "SenniteMatch.h"
+#include "SenniteSky.h"
 #include "SenniteTouch.h"
 #include "SenniteGameMenu.h"
 #include "SenniteHeroes.h"
@@ -110,6 +111,10 @@ void ASennitePlayerController::PlayerTick(float DeltaTime) {
 		TouchControls->Tick();
 	}
 	Super::PlayerTick(DeltaTime);
+	// the match's own sky, once its arena is built: on this player's machine, as on every other's
+	if (!bSkySettled && IsLocalController()) {
+		bSkySettled = USenniteSky::SetFor(GetWorld());
+	}
 }
 
 void ASennitePlayerController::Tick(float DeltaTime) {
