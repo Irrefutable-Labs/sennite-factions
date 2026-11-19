@@ -1,6 +1,6 @@
 // The game's first screen, its character select and its lobby, on the Menu map (Tools/build_menu.py).
 //
-// MENU: PLAY opens the test range on this machine; STORE opens the store; BASE EDITOR opens the test
+// MENU: PLAY opens the arena, a freshly seeded one, on this machine; STORE opens the store; BASE EDITOR opens the test
 // range on the planning view of the player's base (where there is a publisher's server, and so bases);
 // HOST opens a lobby others on the network can join; JOIN takes an address, typed on the screen's own
 // keypad or the keyboard; QUIT.
@@ -32,7 +32,7 @@
 //
 // LOBBY: the Menu map hosted with ?listen?game=lobby. Every player's hero stands on the stage, and
 // the list says who is in and as which hero. Anyone can change hero (HEROES, the store's section); the host starts, and
-// everyone travels to the test range together.
+// everyone travels to an arena together.
 //
 // Everything is drawn on the canvas, sized to the screen as the HUD is, and every button works by a
 // tap or a click; the arrow keys, Enter and Escape work too.
@@ -46,6 +46,9 @@
 #include "SenniteMenu.generated.h"
 
 class ACameraActor;
+class UAudioComponent;
+class USenniteGameMenu;
+class USoundBase;
 class ASkeletalMeshActor;
 class AStaticMeshActor;
 class ASennitePlayerState;
@@ -114,6 +117,9 @@ public:
 	/** The gun turning on the stage now, by the shop's id; empty when a hero stands there. What a check reads. */
 	FString StageWeapon() const { return StageGunId; }
 
+	/** The gun on the stage, or none: where a check sees that it turns whole between the store's arrows. */
+	const AStaticMeshActor* GunOnStage() const { return StageGun; }
+
 	/** The store's swap: what is paid and what is got, by their places among what the publisher's vaults hold, and the amount typed. */
 	int32 SwapFrom = 0;
 	int32 SwapTo = 1;
@@ -151,6 +157,26 @@ public:
 	/** The local addresses others on this network can join this machine at (host only). */
 	TArray<FString> LocalAddresses() const;
 
+	/** The songs the menu plays, one after the other and round again (Tools/import_music.py). */
+	UPROPERTY(Config)
+	TArray<FSoftObjectPath> Songs;
+
+	/** The map PLAY opens: the land the game is played on. */
+	UPROPERTY(Config)
+	FString PlayMap = TEXT("/Game/Maps/Arena");
+
+	/** SETTINGS, over the first screen: the in-game menu's own page, or none while it is closed. */
+	USenniteGameMenu* SettingsIfOpen() const;
+
+	/** The song the menu is playing now, or none where it has no songs. */
+	const USoundBase* SongNow() const { return Song; }
+
+	/** Whether the song is heard: a game run without sound plays to nobody. */
+	bool SongIsHeard() const;
+
+	/** The next song begins, as it does when one ends. */
+	void PlayNextSong();
+
 private:
 	/** The button a press began on, by tap or click; it acts when the press ends on the same button. */
 	FName Pressed;
@@ -182,9 +208,28 @@ private:
 	TObjectPtr<AStaticMeshActor> StageGun;
 
 	FString StageGunId;
+	/** The gun's model as it ships: where its middle is, how far it reaches from the upright line through its middle, and how far above and below it. */
+	FVector StageGunMiddle = FVector::ZeroVector;
+	float StageGunReach = 1.0f;
+	float StageGunHalfHigh = 1.0f;
 	void StandGun(const FString& WeaponId);
 
 	TArray<FName> FigureHeroes;
+
+	/** The song playing, and what plays it. */
+	UPROPERTY()
+	TObjectPtr<USoundBase> Song;
+
+	UPROPERTY()
+	TObjectPtr<UAudioComponent> Music;
+
+	bool bSongChanging = false;
+	/** How loud the song was last set: the player's MUSIC VOLUME, followed as it is changed. */
+	float SongLoud = -1.0f;
+	void SongEnded(UAudioComponent* Played);
+
+	UPROPERTY()
+	TObjectPtr<USenniteGameMenu> Settings;
 };
 
 /** The menu's pages, drawn on the canvas. */

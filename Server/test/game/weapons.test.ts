@@ -57,7 +57,9 @@ describe("a gun bought in the game", () => {
     for (const stale of [CODE_FILE, PLAYER_FILE, PROFILE]) rmSync(stale, { force: true });
     const game = spawn(
       join(REPO, "Tools", "run_game_check.sh"),
-      ["Sennite.GunShop.BuyAndOwn", "BuyAndOwn", "WeaponShop", `-PublisherUrl=${url}`, `-PublisherPlayerFile=${PLAYER_FILE}`, "-ProfileSlot=WeaponShopCheck"],
+      ["Sennite.GunShop.BuyAndOwn", "BuyAndOwn", "WeaponShop", `-PublisherUrl=${url}`, `-PublisherPlayerFile=${PLAYER_FILE}`, "-ProfileSlot=WeaponShopCheck",
+        // PLAY opens the arena; this check opens the test range's crate
+        "-ini:Game:[/Script/Sennite.SenniteMenuController]:PlayMap=/Game/Maps/TestRange"],
       { cwd: REPO, env: { ...process.env, SENNITE_MAP: "/Game/Maps/Menu" } },
     );
     let output = "";

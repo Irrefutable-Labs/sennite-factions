@@ -7,7 +7,8 @@
 // leaves the game for the first screen; QUIT GAME. Leaving and quitting ask once more first.
 //
 // SETTINGS: how far the mouse or a finger turns the view, whether up looks down, how loud the game
-// is, and the graphics quality. Each takes effect as it is changed and is kept on this machine
+// is, how loud the menu's songs are in it, and the graphics quality. The first screen's SETTINGS is
+// this page, opened on its own. Each takes effect as it is changed and is kept on this machine
 // between runs (USenniteProfile).
 //
 // Drawn on the canvas in the menus' style (SenniteUi.h), sized to the screen as the HUD is; every
@@ -48,6 +49,8 @@ public:
 
 	void Open();
 	void Close();
+	/** Open on SETTINGS alone, as the first screen does: BACK closes it. */
+	void OpenSettings();
 
 	/**
 	 * A key, a mouse button or an axis of the player's. True if the menu took it: the keys that open
@@ -94,6 +97,8 @@ private:
 	TObjectPtr<APlayerController> Controller;
 
 	bool bOpen = false;
+	/** Opened on SETTINGS from the first screen: there is no menu of the game's behind it to go back to. */
+	bool bSettingsOnly = false;
 	/** The button a press began on, by tap or click; it acts when the press ends on the same button. */
 	FName Pressed;
 	FName Hovered;

@@ -1,6 +1,7 @@
 // Copyright 1998-2018 Epic Games, Inc. All Rights Reserved.
 
 #include "SenniteCharacter.h"
+#include "SenniteSounds.h"
 #include "SennitePlayerController.h"
 #include "SennitePlayerState.h"
 #include "ThirdPersonAnimInstance.h"
@@ -46,6 +47,10 @@ ASenniteCharacter::ASenniteCharacter(const FObjectInitializer& ObjectInitializer
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<USenniteHeroMesh>(ACharacter::MeshComponentName))
 {
 	bReplicates = true;
+	// A hero is sent to the players within a kilometre of it. The engine's own limit is 150 m, and the
+	// middles of two neighbouring plots are 720 m apart over open ground: a hero across it was unseen.
+	// Not every hero to everyone: a player's game is not told where heroes are that it could never see.
+	SetNetCullDistanceSquared(FMath::Square(100000.0f));
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
 
@@ -261,6 +266,19 @@ void ASenniteCharacter::PossessedBy(AController* NewController)
 	}
 }
 
+void ASenniteCharacter::WearMesh(USkeletalMesh* Mesh)
+{
+	USkeletalMeshComponent* Body = GetMesh();
+	if (Body == nullptr || Mesh == nullptr) {
+		return;
+	}
+	// A hero's animation makes its own copies of its mesh's materials and sets them on the body. They are
+	// the old mesh's: left there, the new mesh is drawn with them, place for place, and a skin whose parts
+	// are in another order has its arms in its mask's material and its legs in its gun's.
+	Body->EmptyOverrideMaterials();
+	Body->SetSkeletalMeshAsset(Mesh);
+}
+
 void ASenniteCharacter::ApplyHero()
 {
 	const FSenniteHero& Hero = USenniteHeroes::FindOrDefault(HeroId);
@@ -286,7 +304,7 @@ void ASenniteCharacter::ApplyHero()
 	}
 
 	if (USkeletalMesh* Mesh = Cast<USkeletalMesh>(HeroMesh.TryLoad())) {
-		Body->SetSkeletalMeshAsset(Mesh);
+		WearMesh(Mesh);
 	}
 	else {
 		UE_LOG(LogSenniteCharacter, Error, TEXT("Hero mesh '%s' did not load; the character has no body"), *HeroMesh.ToString());
@@ -1645,7 +1663,7 @@ void ASenniteCharacter::ServerFireWeapon_Implementation() {
 		// No gun in hand: the hero attacks with its own weapon (a staff, a fist, a hammer). It plays its
 		// own attack and a bolt leaves the weapon, good up close and at a distance; there is nothing to
 		// load and nothing to run out of, only OwnAttackSeconds between one and the next.
-		if (CurrentWeapon != nullptr || State->InBuildMode || State->AimedIn || State->JustSwungPickaxe || State->JustUsedHealingItem) {
+		if (CurrentWeapon != nullptr || State->InBuildMode || State->JustSwungPickaxe || State->JustUsedHealingItem) {
 			return;
 		}
 		NetMulticastOwnAttack();
@@ -1932,6 +1950,12 @@ void ASenniteCharacter::ServerAimDownSights_Implementation() {
 			//ServerSetAimedInSpeed();
 			State->AimedIn = true;
 		}
+		else if (State && State->CurrentWeapon == 0 && !State->InBuildMode && CurrentHealingItem == nullptr) {
+			// the hero's own weapon is aimed as a gun is: the view closes in on where its bolt will go
+			AimedIn = true;
+			ClientCameraAimIn();
+			State->AimedIn = true;
+		}
 	}
 }
 
@@ -1947,6 +1971,12 @@ void ASenniteCharacter::ServerAimHipFire_Implementation() {
 			HoldingWeaponType = 1;
 			ClientCameraAimOut();
 			//ServerSetWalkingSpeed();
+			State->AimedIn = false;
+		}
+		else if (State && (AimedIn || State->AimedIn)) {
+			// aiming its own weapon, or whatever it took in hand since
+			AimedIn = false;
+			ClientCameraAimOut();
 			State->AimedIn = false;
 		}
 	}
@@ -2290,6 +2320,7 @@ void ASenniteCharacter::NetMulticastOwnAttack_Implementation() {
 	if (OwnAttack != nullptr) {
 		PlayAnimMontage(OwnAttack);
 	}
+	USenniteSounds::PlayAt(this, TEXT("attack.own"), OwnWeaponTip());
 }
 
 FVector ASenniteCharacter::OwnWeaponTip() const {
@@ -2305,6 +2336,7 @@ FVector ASenniteCharacter::OwnWeaponTip() const {
 
 void ASenniteCharacter::NetMulticastPlayPickaxeSwingAnimation_Implementation() {
 	PlayAnimMontage(PickaxeSwingingAnimation, 1.f, NAME_None);
+	USenniteSounds::PlayAt(this, TEXT("swing"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastGunFired_Implementation() {
@@ -2320,25 +2352,31 @@ void ASenniteCharacter::NetMulticastGunFired_Implementation() {
 
 void ASenniteCharacter::NetMulticastPlayUseHealingItemAnimation_Implementation() {
 	PlayAnimMontage(HealingAnimation);
+	USenniteSounds::PlayAt(this, CurrentHealingItemType == 1 ? TEXT("heal.potion") : TEXT("heal.bandage"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastPlayReloadRifleAnimation_Implementation() {
 	PlayAnimMontage(RifleHipReloadAnimation);
+	USenniteSounds::PlayAt(this, TEXT("reload.rifle"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastPlayReloadRifleIronsightsAnimation_Implementation() {
 	PlayAnimMontage(RifleIronsightsReloadAnimation);
+	USenniteSounds::PlayAt(this, TEXT("reload.rifle"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastPlayReloadShotgunAnimation_Implementation() {
 	PlayAnimMontage(ShotgunHipReloadAnimation);
+	USenniteSounds::PlayAt(this, TEXT("reload.shotgun"), GetActorLocation());
 }
 
 void ASenniteCharacter::NetMulticastPlayReloadShotgunIronsightsAnimation_Implementation() {
 	PlayAnimMontage(ShotgunIronsightsReloadAnimation);
+	USenniteSounds::PlayAt(this, TEXT("reload.shotgun"), GetActorLocation());
 }
 
 void ASenniteCharacter::ClientDrawHitMarker_Implementation() {
+	USenniteSounds::Play(this, TEXT("hit.marker"));
 	if (GetController()) {
 		APlayerController* PlayerController = Cast<APlayerController>(GetController());
 		if (PlayerController->GetHUD()) {
@@ -2475,6 +2513,7 @@ void ASenniteCharacter::EditPiece() {
 	EditDragLast = INDEX_NONE;
 	Piece->EditingHere = this;
 	Piece->ShowCut(EditCut, EditCut);
+	USenniteSounds::Play(this, TEXT("piece.edit"));
 }
 
 void ASenniteCharacter::MarkEditTile(int32 Tile, bool bCut) {
@@ -2486,6 +2525,9 @@ void ASenniteCharacter::MarkEditTile(int32 Tile, bool bCut) {
 	// at least one tile stays
 	if (Next == Piece->AllTiles()) {
 		return;
+	}
+	if (Next != EditCut) {
+		USenniteSounds::Play(this, TEXT("piece.edit"));
 	}
 	EditCut = Next;
 	Piece->ShowCut(EditCut, EditCut);
@@ -2502,6 +2544,7 @@ void ASenniteCharacter::FinishEdit() {
 	// shown at once as it will be; the server makes it so for everyone, or refuses and it goes back
 	Piece->ShowCut(EditCut, 0);
 	if (EditCut != Piece->Cut) {
+		USenniteSounds::PlayAt(this, TEXT("piece.place"), Piece->GetActorLocation());
 		ServerEditPiece(Piece, EditCut);
 	}
 }
@@ -2562,6 +2605,7 @@ bool ASenniteCharacter::ServerEditPiece_Validate(ABuildingActor* Piece, int32 Ne
 }
 
 void ASenniteCharacter::ClientEditRefused_Implementation(ABuildingActor* Piece) {
+	USenniteSounds::Play(this, TEXT("ui.denied"));
 	if (IsValid(Piece) && !Piece->EditingHere.IsValid()) {
 		Piece->ShowCut(Piece->Cut, 0);
 	}

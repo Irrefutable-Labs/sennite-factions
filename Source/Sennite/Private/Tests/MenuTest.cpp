@@ -1,12 +1,15 @@
 // Menu check. Run in the game on the Menu map, with a profile of its own (-ProfileSlot=), by taps on
 // the screen as a phone gives them:
 // - the menu is the first thing shown: no hero to play, the player's hero turning on the stage;
+// - the menu has its songs: a game just started is on the first, and after each comes the next, round again;
 // - STORE opens the store on its heroes, with SKINS and SWAP beside them: on a game with no shop
 //   neither sells anything, and says so; BASE EDITOR is dimmed there too, and says why;
 // - in the heroes the arrows go through the heroes, each one standing and turning on the stage as itself;
 // - a hero bought with D-bucks cannot be chosen on a game with no shop;
 // - CHOOSE makes a free hero the player's, kept in the profile on disk;
-// - PLAY opens the test range, and the player is that hero there.
+// - SETTINGS opens over the first screen with a music volume of its own, below everything else's, and a
+//   tap turns it down; each kind of button has a sound of its own;
+// - PLAY opens the arena, the land the game is played on, and the player is that hero there.
 //
 // Tools/check_menu.sh runs this and reads the result.
 
@@ -15,8 +18,10 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "MenuCheck.h"
+#include "SenniteGameMenu.h"
 #include "SenniteCharacter.h"
 #include "SenniteHeroes.h"
+#include "SenniteSounds.h"
 #include "SennitePlayerState.h"
 #include "Animation/SkeletalMeshActor.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -27,6 +32,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "Sound/SoundBase.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogMenuCheck, Log, All);
 
@@ -56,7 +62,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForMenu, MenuShot, Heroes, Skins, Weapons, DBucks, HeroesAgain, ToWraith, Turning, ToLocked, Locked, BackToWraith, Chosen, Play, Done };
+		enum class EPhase { WaitForMenu, MenuShot, Settings, SettingsQuieter, SettingsBack, Heroes, Skins, Weapons, DBucks, HeroesAgain, ToWraith, Turning, ToLocked, Locked, BackToWraith, Chosen, Play, Done };
 
 		void Enter(EPhase Next) { Phase = Next; PhaseStart = FPlatformTime::Seconds(); }
 		double Elapsed() const { return FPlatformTime::Seconds() - PhaseStart; }
@@ -69,6 +75,7 @@ namespace
 		double YawBefore = 0.0;
 		FName Free;
 		FName Locked;
+		float MusicBefore = 0.0f;
 	};
 
 	bool FMenuRun::Update()
@@ -103,7 +110,40 @@ namespace
 			Test->TestEqual(TEXT("A new profile's hero is the default hero"), USenniteProfile::Get().PlayingHero(Menu), Default);
 			Test->TestEqual(TEXT("The menu names the player's hero"), MenuCheck::Line(Menu, TEXT("hero")), USenniteHeroes::FindOrDefault(Default).Name);
 			Test->TestEqual(TEXT("The player's hero stands on the stage"), StageMesh(World), USenniteHeroes::FindOrDefault(Default).Mesh.ToString());
-			for (const TCHAR* Action : { TEXT("play"), TEXT("store"), TEXT("base"), TEXT("host"), TEXT("join"), TEXT("quit") }) {
+			// the menu's songs: a game just started is on the first, and when one ends the next begins, round again
+			{
+				const TArray<FSoftObjectPath>& Songs = GetDefault<ASenniteMenuController>()->Songs;
+				Test->TestTrue(TEXT("The menu has songs to go round"), Songs.Num() >= 2);
+				for (const FSoftObjectPath& Each : Songs) {
+					const USoundBase* Sound = Cast<USoundBase>(Each.TryLoad());
+					Test->TestTrue(FString::Printf(TEXT("%s is a song, a minute long or more"), *Each.ToString()), Sound != nullptr && Sound->GetDuration() > 60.0f);
+				}
+				const auto Playing = [&]() { return Songs.IndexOfByKey(FSoftObjectPath(Menu->SongNow())); };
+				Test->TestEqual(TEXT("A game just started opens on the first song"), Playing(), 0);
+				const bool bHeard = Menu->SongIsHeard();
+				for (int32 Next = 1; Next <= Songs.Num(); ++Next) {
+					Menu->PlayNextSong();
+					Test->TestEqual(TEXT("After a song comes the one after it, and after the last the first"), Playing(), Next % Songs.Num());
+					Test->TestEqual(TEXT("It is heard where the first was"), Menu->SongIsHeard(), bHeard);
+				}
+				UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK songs: %d, on %s; %s"), Songs.Num(), Menu->SongNow() != nullptr ? *Menu->SongNow()->GetName() : TEXT("none"),
+					bHeard ? TEXT("heard") : TEXT("this run has no sound device"));
+			}
+			// each kind of button has a sound of its own
+			{
+				TSet<FString> Heard;
+				for (const TCHAR* Action : { TEXT("play"), TEXT("tab:skins"), TEXT("next"), TEXT("hero:1"), TEXT("back"), TEXT("choose"), TEXT("num:1"), TEXT("music+") }) {
+					const TArray<FSoftObjectPath> Takes = USenniteSounds::Takes(USenniteSounds::ButtonSound(Action));
+					Test->TestEqual(FString::Printf(TEXT("The button %s has one sound"), Action), Takes.Num(), 1);
+					if (Takes.Num() == 1) {
+						Test->TestNotNull(FString::Printf(TEXT("The sound of the button %s loads"), Action), Cast<USoundBase>(Takes[0].TryLoad()));
+						Heard.Add(Takes[0].ToString());
+					}
+				}
+				Test->TestEqual(TEXT("A menu button, a section, an arrow, one of a row, back, a thing done, a digit and a setting each sound their own"), Heard.Num(), 8);
+				Test->TestEqual(TEXT("The two arrows sound alike"), USenniteSounds::ButtonSound(TEXT("prev")), USenniteSounds::ButtonSound(TEXT("next")));
+			}
+			for (const TCHAR* Action : { TEXT("play"), TEXT("store"), TEXT("base"), TEXT("host"), TEXT("join"), TEXT("settings"), TEXT("quit") }) {
 				Test->TestTrue(FString::Printf(TEXT("The menu has %s"), Action), MenuCheck::Has(Menu, Action));
 			}
 			{
@@ -144,6 +184,56 @@ namespace
 			if (Elapsed() < 0.3) {
 				return false;
 			}
+			MenuCheck::Tap(Menu, TEXT("settings"));
+			Enter(EPhase::Settings);
+			return false;
+
+		case EPhase::Settings: {
+			// SETTINGS opens over the first screen: the music has its own volume, apart from everything's
+			USenniteGameMenu* Open = Menu->SettingsIfOpen();
+			FVector2D Quieter;
+			if ((Open == nullptr || !Open->Centre(TEXT("music-"), Quieter)) && Elapsed() < 3.0) {
+				return false;
+			}
+			if (Open == nullptr || !Open->Centre(TEXT("music-"), Quieter)) {
+				return Fail(TEXT("A tap on SETTINGS did not open the settings with a music volume"));
+			}
+			for (const TCHAR* Action : { TEXT("sens-"), TEXT("sens+"), TEXT("invert"), TEXT("vol-"), TEXT("vol+"), TEXT("music-"), TEXT("music+"), TEXT("quality-"), TEXT("quality+"), TEXT("back") }) {
+				FVector2D At;
+				Test->TestTrue(FString::Printf(TEXT("SETTINGS has %s"), Action), Open->Centre(Action, At));
+			}
+			Test->TestFalse(TEXT("The first screen's own buttons are not under it"), MenuCheck::Has(Menu, TEXT("play")));
+			MusicBefore = USenniteProfile::Get().MusicVolume;
+			Test->TestTrue(TEXT("The music starts below everything else, so a button is heard over it"), MusicBefore > 0.0f && MusicBefore < 0.5f);
+			GameCheck::Shot(TEXT("Menu"), TEXT("settings.png"));
+			GameCheck::Tap(Quieter);
+			Enter(EPhase::SettingsQuieter);
+			return false;
+		}
+
+		case EPhase::SettingsQuieter: {
+			USenniteGameMenu* Open = Menu->SettingsIfOpen();
+			if (USenniteProfile::Get().MusicVolume == MusicBefore && Elapsed() < 3.0) {
+				return false;
+			}
+			Test->TestTrue(TEXT("A tap on less turns the music down a step"), FMath::IsNearlyEqual(USenniteProfile::Get().MusicVolume, MusicBefore - 0.1f, 0.051f) && USenniteProfile::Get().MusicVolume < MusicBefore);
+			Test->TestEqual(TEXT("Everything else is as loud as it was"), USenniteProfile::Get().Volume, 1.0f);
+			UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK settings: music %.2f -> %.2f, everything %.2f"), MusicBefore, USenniteProfile::Get().MusicVolume, USenniteProfile::Get().Volume);
+			FVector2D Back;
+			if (Open == nullptr || !Open->Centre(TEXT("back"), Back)) {
+				return Fail(TEXT("SETTINGS has no BACK"));
+			}
+			GameCheck::Tap(Back);
+			Enter(EPhase::SettingsBack);
+			return false;
+		}
+
+		case EPhase::SettingsBack:
+			if ((Menu->SettingsIfOpen() != nullptr || !MenuCheck::Has(Menu, TEXT("store"))) && Elapsed() < 3.0) {
+				return false;
+			}
+			Test->TestNull(TEXT("BACK closes SETTINGS"), Menu->SettingsIfOpen());
+			Test->TestTrue(TEXT("The first screen is back"), MenuCheck::Has(Menu, TEXT("store")));
 			MenuCheck::Tap(Menu, TEXT("store"));
 			Enter(EPhase::Heroes);
 			return false;
@@ -345,16 +435,17 @@ namespace
 			APlayerController* Controller = World != nullptr ? World->GetFirstPlayerController() : nullptr;
 			ASenniteCharacter* Hero = Controller != nullptr ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
 			if (Hero == nullptr || !Hero->GetCharacterMovement()->IsMovingOnGround() || Elapsed() < 3.0) {
-				return Elapsed() > 60.0 ? Fail(TEXT("PLAY did not bring the player to the test range with a hero in 60 s")) : false;
+				return Elapsed() > 90.0 ? Fail(TEXT("PLAY did not bring the player to the land with a hero in 90 s")) : false;
 			}
 			const FSenniteHero& Want = USenniteHeroes::FindOrDefault(Free);
-			Test->TestEqual(TEXT("PLAY opens the test range"), UGameplayStatics::GetCurrentLevelName(World), FString(TEXT("TestRange")));
+			Test->TestEqual(TEXT("PLAY opens the land the game is played on, not the bare test range"), UGameplayStatics::GetCurrentLevelName(World), FString(TEXT("Arena")));
 			Test->TestEqual(TEXT("The player's state is the hero chosen"), Controller->GetPlayerState<ASennitePlayerState>()->HeroId, Free);
 			Test->TestEqual(TEXT("The character is the hero chosen"), Hero->HeroId, Free);
 			Test->TestEqual(TEXT("It wears the hero's mesh"), FSoftObjectPath(Hero->GetMesh()->GetSkeletalMeshAsset()).ToString(), Want.Mesh.ToString());
 			Test->TestEqual(TEXT("It runs the hero's own animation Blueprint"), FSoftClassPath(Hero->GetMesh()->GetAnimInstance()->GetClass()).ToString(), Want.AnimClass.ToString());
 			GameCheck::Shot(TEXT("Menu"), TEXT("play.png"));
-			UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK play: %s on %s"), *Hero->HeroId.ToString(), *UGameplayStatics::GetCurrentLevelName(World));
+			UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK play: %s on %s, looking %s from %s"), *Hero->HeroId.ToString(), *UGameplayStatics::GetCurrentLevelName(World),
+				*Controller->GetControlRotation().ToCompactString(), *Hero->GetActorLocation().ToCompactString());
 			UE_LOG(LogMenuCheck, Display, TEXT("GAMECHECK finished"));
 			Phase = EPhase::Done;
 			return true;

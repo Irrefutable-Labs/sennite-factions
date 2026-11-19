@@ -2,9 +2,12 @@
 
   the rifle         "Free Sci-Fi Rifle": one .obj of 1.5 million triangles, with no textures in the pack;
   the energy rifle  "sci-fi Enrgy Rifle (3D Static Model, Game Ready, No Animations)": one .glb of half
-                    a million triangles in two materials, a brushed black metal and glowing rings (the
-                    pack's own materials drew as black-and-white speckle in the game, so it is painted
-                    as the others are: dark metal, its rings glowing pink);
+                    a million triangles in two materials, a brushed black metal and glowing rings. Its
+                    triangles come apart from each other (41,667 loose pieces), so they are joined at
+                    their shared corners first: cut down as they come, each piece shrinks on its own and
+                    the gun is a cloud of shards. The pack's own materials draw it flat black with white
+                    rings in the game, so it is painted as the others are: dark metal, its rings pink
+                    with a glow soft enough that each ring is still seen;
   the shotgun       "Scifi Gun": one .fbx in 41 flat colours, some glowing;
   the sniper        "Sci-Fi Weapon Sniper Gun": the gun in parts, each .fbx one placeholder colour (the
                     pack has no textures);
@@ -15,8 +18,10 @@
 
 Each gun becomes one static mesh a phone can draw: cut down to a few thousand triangles, no Nanite,
 turned so its muzzle is along +X and its top along +Z, its middle at the origin, and scaled to its
-length in cm. The energy rifle keeps the pack's materials, its textures drawn at 1024. The sci-fi
-rifle has no textures to keep, so it is one dark metal all over (M_SciFiRifle).
+length in cm. The sci-fi rifle has no textures to keep, so it is one dark metal all over (M_SciFiRifle).
+
+WEAPON_ONLY=SM_EnergyRifle (any one name below) makes that weapon again and leaves the others, and
+the material the painted ones share, as they are.
 
 Where each gun's grip, foregrip and muzzle are is in Config/DefaultGame.ini; this script prints a
 side view of each finished gun (Saved/import_weapons.txt) to read them off.
@@ -33,18 +38,20 @@ DEST = "/Game/Weapons"
 
 # Each weapon: where its parts are in the library, how the source is turned to put its muzzle (or its
 # blade's point) along +X and its top along +Z (roll, pitch, yaw), how long it is made in cm, how many
-# triangles it is cut down to, and how it is painted:
+# triangles it is cut down to, how near two corners are joined as one where its triangles come apart
+# (weld, as a share of its length; left out where they come joined), and how it is painted:
 #   "pack"   the pack's own materials and textures, drawn at 1024;
 #   "metal"  one dark metal all over (the pack has no textures and one material);
 #   "paint"  each of the pack's flat-coloured materials baked into the model's vertex colours and drawn
-#            with one material (M_GunPaint); a material that glows keeps its glow. A material the pack
+#            with one material (M_GunPaint); a material that glows keeps its glow (a colour's fourth
+#            number is how strongly it glows, 0 not at all and 1 fully). A material the pack
 #            draws with a texture, or a part that has only a placeholder colour, is given its colour here.
 GUNS = {
     "SM_SciFiRifle": dict(parts=["Free_Sci-Fi_Rifle-*/obj/*/Free-Rifle/Free_Rifle/Rifle.obj"], folder="SciFiRifle",
                           turn=(90.0, 0.0, 90.0), length=78.0, triangles=30000, look="metal"),
     "SM_EnergyRifle": dict(parts=["sci-fi_Enrgy_Rifle*/glb/energy_weapon.glb"], folder="EnergyRifle",
-                           turn=(0.0, 0.0, 180.0), length=62.0, triangles=14000, look="paint",
-                           colours={"Brushed_black_metal_brass": (0.07, 0.07, 0.08, 0.0), "Luminous_Edge": (1.0, 0.2, 0.75, 1.0)}),
+                           turn=(0.0, 0.0, 180.0), length=62.0, triangles=14000, look="paint", weld=1e-5,
+                           colours={"Brushed_black_metal_brass": (0.07, 0.07, 0.08, 0.0), "Luminous_Edge": (1.0, 0.2, 0.75, 0.15)}),
     "SM_SciFiShotgun": dict(parts=["Scifi_Gun-*/fbx/*/source/scifi gun 2.fbx"], folder="SciFiShotgun",
                             turn=(0.0, 0.0, -90.0), length=70.0, triangles=12000, look="paint", colours={}),
     "SM_Sniper": dict(parts=["Sci-Fi_Weapon_Sniper_Gun-*/fbx/source_extracted/SM_Weapon_Sniper_%d.fbx" % n for n in (1, 2, 3, 4, 6)], folder="Sniper",
@@ -114,6 +121,12 @@ def plain_metal():
     return mat
 
 
+ONLY = os.environ.get("WEAPON_ONLY")
+if ONLY:
+    if ONLY not in GUNS:
+        raise RuntimeError("WEAPON_ONLY names %s, which is not one of %s" % (ONLY, ", ".join(GUNS)))
+    GUNS = {ONLY: GUNS[ONLY]}
+
 for old in OLD:
     if eal.does_asset_exist(DEST + "/" + old):
         eal.delete_asset(DEST + "/" + old)
@@ -122,6 +135,9 @@ for old in OLD:
 def paint_material():
     """What a painted weapon is drawn with: its vertex colours, glowing where their alpha says."""
     path = DEST + "/M_GunPaint"
+    if ONLY and eal.does_asset_exist(path):
+        # the other painted weapons are drawn with it as it is
+        return eal.load_asset(path)
     if eal.does_asset_exist(path):
         eal.delete_asset(path)
     mat = tools.create_asset("M_GunPaint", DEST, unreal.Material, unreal.MaterialFactoryNew())
@@ -172,8 +188,16 @@ def paint(dyn, materials, colours, name):
         reach = unreal.GeometryScript_MeshSelectionQueries.get_mesh_selection_bounding_box(dyn, picked)
         reach = [each for each in reach if isinstance(each, unreal.Box)][0] if isinstance(reach, tuple) else reach
         log("  paint %-24s (%.2f, %.2f, %.2f)%s  spans (%.0f, %.0f, %.0f) to (%.0f, %.0f, %.0f)" % (
-            slot, r, g, b, " glows" if a > 0.5 else "", reach.min.x, reach.min.y, reach.min.z, reach.max.x, reach.max.y, reach.max.z))
+            slot, r, g, b, " glows %.2f" % a if a > 0.0 else "", reach.min.x, reach.min.y, reach.min.z, reach.max.x, reach.max.y, reach.max.z))
     unreal.GeometryScript_Materials.set_all_triangle_material_i_ds(dyn, unreal.GeometryScript_List.convert_array_to_index_list([0] * dyn.get_triangle_count()))
+
+
+def pieces(dyn):
+    return unreal.GeometryScript_MeshQueries.get_num_connected_components(dyn)
+
+
+def open_edges(dyn):
+    return unreal.GeometryScript_MeshQueries.get_num_open_border_edges(dyn)
 
 
 painted = None
@@ -215,6 +239,14 @@ for name, gun in GUNS.items():
 
     # every triangle of the source, painted, cut down, turned, centred and scaled
     before = dyn.get_triangle_count()
+    log("%s: source %d triangles, %d vertices, %s pieces, %s open edges" % (name, before, dyn.get_vertex_count(), pieces(dyn), open_edges(dyn)))
+    if gun.get("weld"):
+        size = unreal.GeometryScript_MeshQueries.get_mesh_bounding_box(dyn)
+        weld = unreal.GeometryScriptWeldEdgesOptions()
+        weld.set_editor_property("tolerance", (size.max.x - size.min.x) * gun["weld"])
+        weld.set_editor_property("only_unique_pairs", False)
+        unreal.GeometryScript_MeshRepair.weld_mesh_edges(dyn, weld)
+        log("%s: welded, %d vertices, %s pieces, %s open edges" % (name, dyn.get_vertex_count(), pieces(dyn), open_edges(dyn)))
     if gun["look"] == "paint":
         paint(dyn, materials, gun.get("colours", {}), name)
     if before > gun["triangles"]:
