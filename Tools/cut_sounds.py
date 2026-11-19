@@ -44,10 +44,18 @@ ONE_SHOTS = [
     ("SW_UiTick", "Bluezone_BC0301_tiny_gears_small_mechanism_click_003.wav", "start", None),
     ("SW_WalletConnected", "CREAMisc_Creature Power On 14_DDUMAIS_MCSFX.wav", "start", 1.5),
     # weapons
-    ("SW_RifleShot", "Bluezone_BC0295_sci_fi_weapon_gun_shot_008.wav", "start", 0.7),
+    # The guns are recordings of guns. The rifle and the sniper are one real rifle's shot, made full for a
+    # game: the rifle its crack alone (the pack's other rifle recording is from 30 m off, thin and quiet
+    # beside the rest), the sniper the whole of it with its long tail. The shotgun is a real shotgun's. The
+    # energy rifle and a hero's own weapon are no real guns, so theirs are made-up gun shots, not a UI
+    # pack's zaps; the own weapon's starts at its bang, 0.19 s in, after the click of its mechanism. The
+    # owner, 2026-11-18, of a build whose guns had the UI pack's zaps: "Voices you pick for the guns are
+    # fucking awful."
+    ("SW_RifleShot", "GUNRif_SVD Dragunov 7.62×54R DESIGNED Single Shot Core Long_DRCA_DRAG_Stereo_05.wav", "start", 0.55),
+    ("SW_EnergyShot", "Bluezone_BC0295_sci_fi_weapon_gun_shot_008.wav", "start", 0.45),
     ("SW_ShotgunShot", "GUNShotg_Saiga 12 Cal.12 DESIGNED Single Shot Core Long_DRCA_SG12_Stereo.wav", "start", 1.6),
     ("SW_SniperShot", "GUNRif_SVD Dragunov 7.62×54R DESIGNED Single Shot Core Long_DRCA_DRAG_Stereo_05.wav", "start", 2.2),
-    ("SW_OwnBolt", "Bluezone_BC0299_electricity_surge_discharge_electrical_arc_crackling_002_01.wav", "start", 0.7),
+    ("SW_OwnBolt", "Bluezone_BC0296_steampunk_weapon_gun_shot_026_02.wav", 0.19, 0.7),
     ("SW_Swing", "WHOOSH PASS SF LOW.wav", "peak", 0.55),
     ("SW_ReloadRifle", "GUNMech_SVD Dragunov 7.62×54R SOURCE Magazine Insert Slow_DRCA_DRAG_CO-100K.wav", "start", 1.3),
     ("SW_ReloadShotgun", "GUNMech_Saiga 12 Cal.12 SOURCE Chamber Eject Bullet_DRCA_SG12_MKH416.wav", "start", 1.3),
@@ -89,8 +97,7 @@ for ground, walk, run, jump, land in (
     TAKES += [("SW_Step%sWalk" % ground, walk, 6), ("SW_Step%sRun" % ground, run, 6),
               ("SW_Jump%s" % ground, jump, 2), ("SW_Land%s" % ground, land, 2)]
 for who, name in (("F", "Female"), ("M", "Male")):
-    TAKES += [("SW_Voice%sAttack" % who, "Voice_%s_V1_Attack_Mono_%%02d.wav" % name, 4),
-              ("SW_Voice%sHit" % who, "Voice_%s_V1_Hit_Short_Mono_%%02d.wav" % name, 4),
+    TAKES += [("SW_Voice%sHit" % who, "Voice_%s_V1_Hit_Short_Mono_%%02d.wav" % name, 4),
               ("SW_Voice%sJump" % who, "Voice_%s_V1_Jump_Mono_%%02d.wav" % name, 3),
               ("SW_Voice%sLand" % who, "Voice_%s_V1_Land_Mono_%%02d.wav" % name, 3),
               ("SW_Voice%sPain" % who, "Voice_%s_V1_Pain_Mono_%%02d.wav" % name, 3)]

@@ -77,7 +77,7 @@ namespace
 				TEXT("piece.break.steel"), TEXT("pickup.item"), TEXT("pickup.weapon"), TEXT("pickup.rounds"), TEXT("heal.bandage"), TEXT("heal.potion"),
 				TEXT("match.start"), TEXT("match.won"), TEXT("match.lost"), TEXT("storm.alarm"), TEXT("air.menu"), TEXT("air.field"), TEXT("air.storm"),
 				TEXT("step.grass.walk"), TEXT("step.grass.run"), TEXT("jump.grass"), TEXT("land.grass"), TEXT("step.wood.walk"), TEXT("step.rock.walk"),
-				TEXT("step.metal.walk"), TEXT("voice.f.attack"), TEXT("voice.f.hit"), TEXT("voice.f.pain"), TEXT("voice.m.attack"), TEXT("voice.m.hit"), TEXT("voice.m.pain") }) {
+				TEXT("step.metal.walk"), TEXT("voice.f.hit"), TEXT("voice.f.pain"), TEXT("voice.m.hit"), TEXT("voice.m.pain") }) {
 				Test->TestTrue(FString::Printf(TEXT("The game has a sound called %s"), Name), Names.Contains(FName(Name)));
 			}
 			Test->TestEqual(TEXT("No sound goes round in the background"), USenniteSounds::HeardBeginning(World, TEXT("air.")), 0);

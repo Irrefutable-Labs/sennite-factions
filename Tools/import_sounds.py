@@ -7,8 +7,8 @@ Most of them are cut by Tools/cut_sounds.py out of the owner's two sound packs (
 bundle and the NOX SOUND Essentials series) into Saved/SoundSource/cut, with a list of them
 (sounds.json): every one in the list is imported under its name, and an ambience is set to go round.
 
-The rest are from the Fab pack "Cyberpunk UI SFX Pack - 78 Sci-Fi Sound Effects": the energy rifle's
-shot, a crate opening and the menus' buttons. That pack's files are numbered, not named (sfx_001.wav
+The rest are from the Fab pack "Cyberpunk UI SFX Pack - 78 Sci-Fi Sound Effects": a crate opening and
+the menus' buttons; no gun's shot is from it. That pack's files are numbered, not named (sfx_001.wav
 to sfx_078.wav, in folders by kind), so which file is which sound was chosen from each file's length,
 how sharply it starts and how high or low it is; nobody listened to them when this was written. It is
 looked for in the Fab library folder the launcher downloads into, or SOUND_SOURCE; where it is not
@@ -32,7 +32,6 @@ DEST = "/Game/Sounds"
 CUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Saved", "SoundSource", "cut")
 # asset name: (the Cyberpunk pack's folder, the file's number), and why that file
 NUMBERED = {
-    "SW_EnergyShot": ("03_Weapons", 46),      # 0.18 s, the highest: a bright zap that can repeat ten times a second
     "SW_CrateOpen": ("04_Powerups", 61),      # 0.28 s, mid: something given
     # the menus' buttons, each kind its own (Config/DefaultGame.ini, ui.press and the rest in the list of sounds)
     "SW_UiPress": ("01_UI_Buttons", 20),      # 0.13 s, mid and full: a button of the first screen or the in-game menu
