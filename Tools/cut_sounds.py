@@ -10,11 +10,12 @@ The packs are "Sonniss.com-GDC2024-GameAudioBundle1of9" (royalty-free for games,
 "License - GDC Game Audio.pdf") and "Essentials_Series_NOX_SOUND" (CC0: its README). They are looked
 for in ~/Downloads, or in the folders named; a file is found by its name, wherever it lies under them.
 
-Five are the owner's own recordings (2026-11-19), which lie loose in ~/Downloads or in a folder named:
+Six are the owner's own recordings (2026-11-19), which lie loose in ~/Downloads or in a folder named:
 menu-button-push.m4a, "the main button press sound in the menus and just throughout the game ... for
 approving or going through"; menu-button-press-2.m4a, "more of a lower register ... For canceling";
 placing-build-piece.m4a, "for placing build pieces"; Removing-build-piece.m4a, the "removing one"; and
-small-ticks.m4a, "use this for smaller ticks, like checking something off".
+small-ticks.m4a, "use this for smaller ticks, like checking something off"; and laser-gun-shot.m4a,
+"use it for all lasers": the energy rifle's shot and every hero's own.
 
 Every sound is named for what it is in the packs, so which file is which sound was chosen from the
 names and each file's length; nobody listened to them when this was written. To change a sound, change
@@ -63,15 +64,15 @@ ONE_SHOTS = [
     # The guns are recordings of guns. The rifle and the sniper are one real rifle's shot, made full for a
     # game: the rifle its crack alone (the pack's other rifle recording is from 30 m off, thin and quiet
     # beside the rest), the sniper the whole of it with its long tail. The shotgun is a real shotgun's. The
-    # energy rifle and a hero's own weapon are no real guns, so theirs are made-up gun shots, not a UI
-    # pack's zaps; the own weapon's starts at its bang, 0.19 s in, after the click of its mechanism. The
     # owner, 2026-11-18, of a build whose guns had the UI pack's zaps: "Voices you pick for the guns are
     # fucking awful."
+    # Every laser, the energy rifle's shot and a hero's own, is the owner's own recording. The owner,
+    # 2026-11-19, of her staff's shot, then a made-up gun shot: "it shouldn't sound like a fucking gun";
+    # then "it's laser-gun-shot.m4a use it for all lasers".
+    ("SW_LaserShot", "laser-gun-shot.m4a", "start", None),
     ("SW_RifleShot", "GUNRif_SVD Dragunov 7.62×54R DESIGNED Single Shot Core Long_DRCA_DRAG_Stereo_05.wav", "start", 0.55),
-    ("SW_EnergyShot", "Bluezone_BC0295_sci_fi_weapon_gun_shot_008.wav", "start", 0.45),
     ("SW_ShotgunShot", "GUNShotg_Saiga 12 Cal.12 DESIGNED Single Shot Core Long_DRCA_SG12_Stereo.wav", "start", 1.6),
     ("SW_SniperShot", "GUNRif_SVD Dragunov 7.62×54R DESIGNED Single Shot Core Long_DRCA_DRAG_Stereo_05.wav", "start", 2.2),
-    ("SW_OwnBolt", "Bluezone_BC0296_steampunk_weapon_gun_shot_026_02.wav", 0.19, 0.7),
     ("SW_Swing", "WHOOSH PASS SF LOW.wav", "peak", 0.55),
     ("SW_ReloadRifle", "GUNMech_SVD Dragunov 7.62×54R SOURCE Magazine Insert Slow_DRCA_DRAG_CO-100K.wav", "start", 1.3),
     ("SW_ReloadShotgun", "GUNMech_Saiga 12 Cal.12 SOURCE Chamber Eject Bullet_DRCA_SG12_MKH416.wav", "start", 1.3),
