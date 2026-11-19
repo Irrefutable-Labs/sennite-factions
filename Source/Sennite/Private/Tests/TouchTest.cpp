@@ -147,7 +147,6 @@ namespace
 		FVector Mark = FVector::ZeroVector;
 		int32 ClipMark = 0;
 		int32 CountMark = 0;
-		int32 PressMark = 0;
 		int32 JumpMark = 0;
 		double BehindMark = 0.0;
 		float ShieldMark = 0.0f;
@@ -310,7 +309,6 @@ namespace
 				ClipMark = Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->CurrentBulletCount : 0;
 				TopZ = Hero->GetActorLocation().Z;
 				Mark = Hero->GetActorLocation();
-				PressMark = USenniteSounds::Heard(World, TEXT("ui.press"));
 				JumpMark = USenniteSounds::HeardBeginning(World, TEXT("jump."));
 				Press(TEXT("JUMP"));
 				Enter(EPhase::Jump, World);
@@ -326,10 +324,11 @@ namespace
 			Test->TestTrue(TEXT("JUMP lifts the hero off the ground"), TopZ > Mark.Z + 40.0);
 			Test->TestTrue(TEXT("She is back on the ground"), Hero->GetCharacterMovement()->IsMovingOnGround());
 			Test->TestEqual(TEXT("A touch on JUMP fires no shot"), Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->CurrentBulletCount : -1, ClipMark);
-			// every tap of a button is heard: the slots tapped above as one of a row; JUMP as the jump, with no button's press over it
-			Test->TestTrue(FString::Printf(TEXT("The taps of the slots are heard (%d)"), USenniteSounds::Heard(World, TEXT("ui.pick"))), USenniteSounds::Heard(World, TEXT("ui.pick")) >= 5);
+			// in play a button is heard as what it does, never as a menu's button: JUMP as the jump, and of all the taps above
+			// (the slots, OPEN, JUMP) not one as a press or as one of a row
 			Test->TestEqual(TEXT("The tap of JUMP is heard as the jump"), USenniteSounds::HeardBeginning(World, TEXT("jump.")) - JumpMark, 1);
-			Test->TestEqual(TEXT("and not as a button's press"), USenniteSounds::Heard(World, TEXT("ui.press")) - PressMark, 0);
+			Test->TestEqual(TEXT("No tap in play is heard as a menu's press"), USenniteSounds::Heard(World, TEXT("ui.press")), 0);
+			Test->TestEqual(TEXT("nor as one of a menu's row"), USenniteSounds::Heard(World, TEXT("ui.pick")), 0);
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK jump: rose %.0f cm"), TopZ - Mark.Z);
 			Press(TEXT("FIRE"));
 			Enter(EPhase::HoldFire, World);

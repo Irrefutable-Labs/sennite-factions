@@ -496,23 +496,20 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 		if (New.Use == EUse::Button) {
 			const bool bAlreadyDown = Fingers.ContainsByPredicate([&New](const FFinger& Each) { return Each.Use == EUse::Button && Each.Button == New.Button; });
 			if (!bAlreadyDown) {
-				// Every tap of a button is heard: a slot as one of a row, or as refused where the player has not got
-				// what it names; any other button as a press. A button whose own doing is heard has no press over
-				// it: FIRE is heard as its shot, MENU as the menu opening, JUMP as the jump, RELOAD as the reload
-				// and OPEN as the crate. The owner, 2026-11-19, of the press on JUMP: "The jump button makes an
-				// awful sound. It doesn't sound like a jump."
+				// In play a button is heard as what it does (the shot, the jump, the reload, the crate, the menu opening),
+				// never as a menu's button: no press and no pick is played over it. The owner, 2026-11-19: "The jump
+				// button makes an awful sound. It doesn't sound like a jump." and "The one that you're using for button
+				// presses in the game, it sounds awful." A slot that names what the player has not got does nothing,
+				// so that one tap is still heard, as refused.
 				const FButton& Tapped = All[New.Button];
-				const bool bHeardAsWhatItDoes = !Tapped.bCell && (Tapped.Key == EKeys::LeftMouseButton || Tapped.Key == EKeys::Escape || Tapped.Key == EKeys::SpaceBar
-					|| Tapped.Key == EKeys::R || Tapped.Key == EKeys::E);
 				const ASennitePlayerState* Has = Controller->GetPlayerState<ASennitePlayerState>();
 				if (Tapped.bSlot) {
 					const int32 Gun = GunOfSlot(Tapped.Key);
 					const int32 Heal = Tapped.Key == EKeys::Four ? 0 : 1;
 					const bool bHas = Has != nullptr && (Gun != 0 ? Has->EquippedWeapons.Contains(Gun) : Has->HealingItemCounts.IsValidIndex(Heal) && Has->HealingItemCounts[Heal] > 0);
-					USenniteSounds::Play(Controller, bHas ? TEXT("ui.pick") : TEXT("ui.denied"));
-				}
-				else if (!bHeardAsWhatItDoes) {
-					USenniteSounds::Play(Controller, TEXT("ui.press"));
+					if (!bHas) {
+						USenniteSounds::Play(Controller, TEXT("ui.denied"));
+					}
 				}
 			}
 			if (AimLatches(All[New.Button])) {
