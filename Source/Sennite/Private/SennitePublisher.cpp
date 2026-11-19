@@ -919,6 +919,7 @@ void USennitePublisher::AskRequest()
 		PendingRequest.Reset();
 		bBusy = false;
 		bLastOk = Json->GetBoolField(TEXT("ok"));
+		UE_LOG(LogSennitePublisher, Display, TEXT("What was asked of the wallet is done, %s: %s"), bLastOk ? TEXT("carried out") : TEXT("not carried out"), *Json->GetStringField(TEXT("message")));
 		if (!BuyingSkin.IsEmpty()) {
 			// bought and given: it is the wallet's once the wallet has taken it in and proves it
 			if (bLastOk) {
@@ -988,6 +989,7 @@ void USennitePublisher::Ask(const FString& Path, const TSharedPtr<FJsonObject>& 
 			if (bOpenWalletWhenAsked) {
 				// the server has the request: now the wallet, where the player approves it
 				bOpenWalletWhenAsked = false;
+				Message = WordsWhenAsked;
 				bWalletTriedForWait = true;
 				bWalletOpenedForWait = OpenWalletToApprove();
 			}
@@ -1001,6 +1003,7 @@ void USennitePublisher::Ask(const FString& Path, const TSharedPtr<FJsonObject>& 
 		BuyingSkin.Reset();
 		BuyingHero.Reset();
 		Message = ErrorOf(Status, Json);
+		UE_LOG(LogSennitePublisher, Warning, TEXT("The shop did not take what was asked: %s"), *Message);
 	});
 }
 
@@ -1009,11 +1012,14 @@ void USennitePublisher::AskToPay(const FString& Path, const TSharedPtr<FJsonObje
 	if (bBusy) {
 		return;
 	}
-	Ask(Path, Body, Waiting);
+	// Until the server has taken the request nothing waits in the wallet, so nothing says it does: a request the
+	// server refuses (no wallet connected, the server not reached) never sent the player to their wallet for nothing.
+	Ask(Path, Body, TEXT("asking the shop..."));
 	// No payment and no trade is in the grant: each waits in the wallet for the player's approval. So the game goes to
 	// the wallet with it, as soon as the server has taken the request (Ask), and the player approves it there. The
 	// owner, 2026-11-19: "when you hit fucking buy, it goes to the wallet, and it goes to where it asks you to approve".
 	bOpenWalletWhenAsked = bBusy;
+	WordsWhenAsked = Waiting;
 }
 
 bool USennitePublisher::OpenWalletToApprove()

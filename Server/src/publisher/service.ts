@@ -134,6 +134,8 @@ export class Service {
   readonly #tickets = new Map<string, Ticket>();
   /** The heroes each wallet (by signing key) proved it owns at its last proof here, and when. Kept in memory, oldest first: a game proves again on connecting. */
   readonly #provenHeroes = new Map<string, { heroes: string[]; at: number }>();
+  /** The last answer each game was given to each read, so that only a change is written down (said). */
+  readonly #saidLast = new Map<string, number>();
   /** Hero passes: pass -> the wallet it speaks for, the one game that may ask with it, and until when. One live pass per wallet. */
   readonly #passes = new Map<string, { signingKey: string; wallet: string; audience: string; until: number }>();
 
@@ -148,15 +150,34 @@ export class Service {
     });
   }
 
+  /**
+   * What a game asked and what it was answered, one line each on the server's output: everything that is not a
+   * read, and a read whose answer changed since that game last made it (a game reads the same things every
+   * second). A game is named by the first six characters of its token, which give nobody the token.
+   */
+  private said(req: IncomingMessage, status: number, why = ""): void {
+    const game = this.bearer(req).slice(0, 6) || "-";
+    const path = (req.url ?? "").replace(/\/requests\/[0-9a-f]+/, "/requests/…");
+    const key = `${game} ${req.method} ${path}`;
+    if (req.method === "GET") {
+      if (this.#saidLast.get(key) === status) return;
+      if (this.#saidLast.size > 4096) this.#saidLast.clear();
+      this.#saidLast.set(key, status);
+    }
+    console.log(`[publisher] ${new Date().toISOString().slice(11, 19)}Z game ${game} ${req.method} ${path} -> ${status}${why === "" ? "" : `: ${why}`}`);
+  }
+
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
       const answer = await this.route(req);
       const bytes = Buffer.from(JSON.stringify(answer.body));
       res.writeHead(answer.status, { "content-type": "application/json", "content-length": bytes.length });
       res.end(bytes);
+      this.said(req, answer.status, typeof (answer.body as { request?: unknown }).request === "string" ? `request ${String((answer.body as { request: string }).request).slice(0, 6)}` : "");
     } catch (e) {
       const status = e instanceof HttpError ? e.status : e instanceof Refused ? 409 : 500;
       const message = e instanceof Error ? e.message : String(e);
+      this.said(req, status, message);
       if (status === 500) console.error(`[publisher] ${req.method} ${req.url}: ${message}`);
       const bytes = Buffer.from(JSON.stringify({ error: status === 500 ? "the publisher's server could not answer" : message }));
       res.writeHead(status, { "content-type": "application/json", "content-length": bytes.length });
@@ -220,10 +241,19 @@ export class Service {
   private async connection(player: string): Promise<Connection | undefined> {
     const record = this.options.store.data.players[player];
     if (record === undefined) return undefined;
-    const found = (await this.options.publisher.app.connections()).find((c) => c.connected && hex(c.raw.offerDigest) === record.offer);
+    const all = await this.options.publisher.app.connections();
+    const found = all.find((c) => c.connected && hex(c.raw.offerDigest) === record.offer);
     if (found !== undefined && record.approved !== true) {
       record.approved = true;
       this.options.store.save();
+    }
+    if (found === undefined && all.some((c) => !c.connected && hex(c.raw.offerDigest) === record.offer)) {
+      // The wallet that approved this player's offer ended the connection. An offer is approved once: its code
+      // cannot connect a wallet again (the account refuses a second approval of it). So the player is over, and
+      // the game starts again as a new player with a new code for the wallet to approve.
+      delete this.options.store.data.players[player];
+      this.options.store.save();
+      throw new HttpError(401, "the wallet ended its connection to the game: connect it again");
     }
     return found;
   }
@@ -319,6 +349,7 @@ export class Service {
       .finally(() => {
         job.state = "done";
         this.#bases.delete(factionId);
+        console.log(`[publisher] ${new Date().toISOString().slice(11, 19)}Z request ${id.slice(0, 6)} of game ${player.slice(0, 6)} is done: ${job.ok ? "carried out" : "not carried out"}: ${job.message}`);
       });
     return { request: id };
   }

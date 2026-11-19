@@ -501,6 +501,8 @@ private:
 	/** Ask the wallet for a payment or a trade: as Ask, and on a phone the wallet app is opened for the player to approve it, once the server has the request. */
 	void AskToPay(const FString& Path, const TSharedPtr<FJsonObject>& Body, const TCHAR* Waiting);
 	bool bOpenWalletWhenAsked = false;
+	/** What is said once the server has taken that request: that it waits in the wallet for the player. */
+	FString WordsWhenAsked;
 	/**
 	 * On a phone, open the DSM Wallet app for the player to approve what was just asked: on the connect code this game
 	 * is connected by, which a wallet that knows it opens on what waits, stepping back to the game after; with no code

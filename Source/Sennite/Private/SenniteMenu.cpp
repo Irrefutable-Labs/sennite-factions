@@ -1368,7 +1368,9 @@ bool ASenniteMenuHUD::NextStep(const USennitePublisher* Server, const FForSale& 
 
 void ASenniteMenuHUD::ShopWord(const USennitePublisher* Server, bool bOnItsWay, float X, float Y)
 {
-	if (Server != nullptr && Server->IsOn() && !Server->Message.IsEmpty() && (Server->bBusy || bOnItsWay)) {
+	// what is being asked of the wallet, what is on its way, and what the last thing asked came to when it was not
+	// carried out: a purchase that failed says why, where the player tapped
+	if (Server != nullptr && Server->IsOn() && !Server->Message.IsEmpty() && (Server->bBusy || bOnItsWay || !Server->bLastOk)) {
 		Text(TEXT("shop"), Server->Message.ToUpper(), X, Y, 12, SenniteUi::Gold, 0.0f, false);
 	}
 }
