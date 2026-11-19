@@ -18,6 +18,7 @@
 #include "Serialization/JsonWriter.h"
 #if PLATFORM_ANDROID
 #include "Android/AndroidApplication.h"
+#include "Android/AndroidJavaEnv.h"
 #include "Android/AndroidJNI.h"
 #endif
 
@@ -984,8 +985,15 @@ void USennitePublisher::Ask(const FString& Path, const TSharedPtr<FJsonObject>& 
 		if (Status == 202 && Json.IsValid() && Json->TryGetStringField(TEXT("request"), Request)) {
 			PendingRequest = Request;
 			NextRequest = 0.0;
+			if (bOpenWalletWhenAsked) {
+				// the server has the request: now the wallet, where the player approves it
+				bOpenWalletWhenAsked = false;
+				bWalletTriedForWait = true;
+				bWalletOpenedForWait = OpenWalletToApprove();
+			}
 			return;
 		}
+		bOpenWalletWhenAsked = false;
 		bBusy = false;
 		bPricing = false;
 		bSwapping = false;
@@ -1003,10 +1011,31 @@ void USennitePublisher::AskToPay(const FString& Path, const TSharedPtr<FJsonObje
 	}
 	Ask(Path, Body, Waiting);
 	// No payment and no trade is in the grant: each waits in the wallet for the player's approval. So the game goes to
-	// the wallet with it at once, and the player comes back when they have approved it there. The owner, 2026-11-19:
-	// "when you hit fucking buy, it goes to the wallet, and it goes to where it asks you to approve".
-	bWalletTriedForWait = true;
-	bWalletOpenedForWait = OpenWallet(false);
+	// the wallet with it, as soon as the server has taken the request (Ask), and the player approves it there. The
+	// owner, 2026-11-19: "when you hit fucking buy, it goes to the wallet, and it goes to where it asks you to approve".
+	bOpenWalletWhenAsked = bBusy;
+}
+
+bool USennitePublisher::OpenWalletToApprove()
+{
+	bool bOpened = false;
+#if PLATFORM_ANDROID
+	// Sennite_UPL.xml: the wallet, opened on the connect code it is connected to this game by
+	if (JNIEnv* Env = !ConnectCode.IsEmpty() ? FAndroidApplication::GetJavaEnv() : nullptr) {
+		static jmethodID Open = FJavaWrapper::FindMethod(Env, FJavaWrapper::GameActivityClassID, "AndroidThunkJava_SenniteOpenWalletLink", "(Ljava/lang/String;)Z", true);
+		if (Open != nullptr) {
+			auto Link = FJavaHelper::ToJavaString(Env, ConnectCode);
+			bOpened = FJavaWrapper::CallBooleanMethod(Env, FJavaWrapper::GameActivityThis, Open, *Link);
+		}
+	}
+#endif
+	if (bOpened) {
+		++WalletOpens;
+		UE_LOG(LogSennitePublisher, Display, TEXT("The game opened the DSM wallet on its connect code, for the player to approve what it asked"));
+		return true;
+	}
+	// no code kept, or a wallet that does not take the link: the wallet as it opens by itself
+	return OpenWallet(false);
 }
 
 void USennitePublisher::ProveMaterials()

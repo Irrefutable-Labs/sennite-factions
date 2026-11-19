@@ -9,7 +9,11 @@
   yes, then the user hits the approve button, and it should take it. After that's done, it should go back into
   the game automatically. That's how Wild State works."
 
-  USennitePublisher::OpenWallet (SennitePublisher.cpp) calls AndroidThunkJava_SenniteOpenWallet.
+  For a payment or a trade, which the player approves in the wallet, the game opens the wallet on the connect code
+  it is connected by (AndroidThunkJava_SenniteOpenWalletLink): the wallet then shows what waits for the player
+  and steps back to the game after.
+
+  USennitePublisher::OpenWallet and OpenWalletToApprove (SennitePublisher.cpp) call these.
 -->
 <root xmlns:android="http://schemas.android.com/apk/res/android">
 	<androidManifestUpdates>
@@ -70,6 +74,29 @@
 			}, ComeBackAfterMs);
 		}
 		return true;
+	}
+
+	/**
+	 * Open the DSM Wallet app on a link: the connect code the player's wallet connected to this game by. A wallet
+	 * that is connected by that code opens on what this game asked and is waiting for the player, and steps back
+	 * to the game by itself once the player has approved or declined it; that is the wallet's own doing, for any
+	 * app, and nothing here is about this game. Answers whether the wallet was opened.
+	 */
+	public boolean AndroidThunkJava_SenniteOpenWalletLink(String Link)
+	{
+		try
+		{
+			Intent View = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(Link));
+			View.setPackage(SENNITE_WALLET_PACKAGE);
+			startActivity(View);
+			Log.debug("[JAVA] SenniteOpenWalletLink: opened the wallet on the game's connect code");
+			return true;
+		}
+		catch (Exception Refused)
+		{
+			Log.debug("[JAVA] SenniteOpenWalletLink: the wallet did not open: " + Refused);
+			return false;
+		}
 	}
 		]]></insert>
 	</gameActivityClassAdditions>

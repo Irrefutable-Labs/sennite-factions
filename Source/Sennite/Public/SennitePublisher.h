@@ -498,8 +498,15 @@ private:
 	double WalletWaitFrom = 0.0;
 	bool bWalletOpenedForWait = false;
 	bool bWalletTriedForWait = false;
-	/** Ask the wallet for a payment or a trade: as Ask, and on a phone the wallet app is opened for the player to approve it. */
+	/** Ask the wallet for a payment or a trade: as Ask, and on a phone the wallet app is opened for the player to approve it, once the server has the request. */
 	void AskToPay(const FString& Path, const TSharedPtr<FJsonObject>& Body, const TCHAR* Waiting);
+	bool bOpenWalletWhenAsked = false;
+	/**
+	 * On a phone, open the DSM Wallet app for the player to approve what was just asked: on the connect code this game
+	 * is connected by, which a wallet that knows it opens on what waits, stepping back to the game after; with no code
+	 * kept, the wallet as it opens by itself. False where there is no wallet app to open.
+	 */
+	bool OpenWalletToApprove();
 	double NextWalletOpen = 0.0;
 	/** The wallet's holdings changed with what was just asked: prove them again once it settles. */
 	bool bProveAfter = false;
