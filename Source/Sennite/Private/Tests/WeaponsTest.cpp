@@ -19,6 +19,7 @@
 #include "SenniteHeroMesh.h"
 #include "SennitePlayerState.h"
 #include "SenniteWeapons.h"
+#include "SenniteSounds.h"
 #include "Sound/SoundAttenuation.h"
 #include "Sound/SoundBase.h"
 #include "Animation/AnimInstance.h"
@@ -141,6 +142,10 @@ namespace
 				Test->TestTrue(FString::Printf(TEXT("%s has a name"), *Gun->GetName()), !Made->DisplayName.IsEmpty());
 				Test->TestTrue(FString::Printf(TEXT("%s has a shot sound that loads"), *Gun->GetName()), Cast<USoundBase>(Made->FireSound.TryLoad()) != nullptr);
 			}
+			// every laser, the energy rifle's shot and a hero's own, is the owner's one laser recording
+			Test->TestTrue(TEXT("A hero's own shot is the energy rifle's laser, and nothing else"),
+				USenniteSounds::Takes(TEXT("attack.own")) == TArray<FSoftObjectPath>{ GetDefault<AWeaponActor>(ASenniteEnergyRifle::StaticClass())->FireSound });
+			Test->TestEqual(TEXT("The laser is the owner's recording"), GetDefault<AWeaponActor>(ASenniteEnergyRifle::StaticClass())->FireSound.ToString(), FString(TEXT("/Game/Sounds/SW_LaserShot.SW_LaserShot")));
 			Test->TestTrue(TEXT("A shot fades with distance"), Cast<USoundAttenuation>(GetDefault<AWeaponActor>()->FireFalloff.TryLoad()) != nullptr);
 			Test->TestTrue(TEXT("Opening a crate has a sound that loads"), Cast<USoundBase>(GetDefault<ASenniteCrate>()->OpenSound.TryLoad()) != nullptr);
 			Enter(EPhase::OwnWeapon, World);
