@@ -266,6 +266,7 @@ bool USennitePublisher::Tick(float)
 	else {
 		WalletWaitFrom = 0.0;
 		bWalletOpenedForWait = false;
+		bWalletTriedForWait = false;
 	}
 	if (!bShop && !bShopAsked) {
 		AskShop();
@@ -599,7 +600,7 @@ bool USennitePublisher::OpenWallet(bool bComeBack)
 		}
 	}
 #endif
-	++WalletOpens;
+	WalletOpens += bOpened ? 1 : 0;
 	UE_LOG(LogSennitePublisher, Display, TEXT("The game %s the DSM wallet after waiting %.1f s on it%s"), bOpened ? TEXT("opened") : TEXT("could not open"),
 		WaitingOnWallet(), bOpened && bComeBack ? TEXT(", to come back by itself") : TEXT(""));
 	return bOpened;
@@ -608,13 +609,15 @@ bool USennitePublisher::OpenWallet(bool bComeBack)
 bool USennitePublisher::OpenWalletForWait()
 {
 	const double Now = FPlatformTime::Seconds();
-	if (bWalletOpenedForWait || WaitingOnWallet() < WalletWaitBeforeOpening || Now < NextWalletOpen) {
+	if (bWalletTriedForWait || WaitingOnWallet() < WalletWaitBeforeOpening || Now < NextWalletOpen) {
 		return false;
 	}
 	// once for a wait, and not again within the minute: a wallet that is running and slow is not opened over and over
-	bWalletOpenedForWait = true;
+	bWalletTriedForWait = true;
 	NextWalletOpen = Now + 60.0;
-	return OpenWallet(true);
+	// opened is opened: with no wallet app on this device (the wallet is on another), nothing here says one was
+	bWalletOpenedForWait = OpenWallet(true);
+	return bWalletOpenedForWait;
 }
 
 void USennitePublisher::BuyDBucks(const FString& InEra)

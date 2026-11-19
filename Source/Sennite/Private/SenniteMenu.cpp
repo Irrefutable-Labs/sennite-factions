@@ -1324,11 +1324,18 @@ bool ASenniteMenuHUD::NextStep(const USennitePublisher* Server, const FForSale& 
 		Button(Thing.Buy, TEXT("ON ITS WAY TO YOUR WALLET"), Left, Y, Wide, 66.0f, false, 14);
 	}
 #if PLATFORM_ANDROID || PLATFORM_IOS
-	else if ((Server->bBusy || !Server->bMaterialsKnown) && Server->WalletOpenedForWait() && Server->WaitingOnWallet() > Server->WalletWaitBeforeOpening + 20.0) {
-		// the game opened the wallet for this and it has still not answered: something waits there for the player
-		Button(TEXT("openwallet"), TEXT("OPEN YOUR WALLET"), Left, Y, Wide, 66.0f, true, 16, true);
+	else if ((Server->bBusy || !Server->bMaterialsKnown) && Server->WalletTriedForWait() && Server->WaitingOnWallet() > Server->WalletWaitBeforeOpening + 20.0) {
 		Hint = TEXT("YOUR DSM WALLET HAS NOT ANSWERED.");
-		Hint2 = TEXT("OPEN IT, APPROVE WHAT WAITS THERE, THEN COME BACK.");
+		if (Server->WalletOpenedForWait()) {
+			// the game opened the wallet for this and it has still not answered: something waits there for the player
+			Button(TEXT("openwallet"), TEXT("OPEN YOUR WALLET"), Left, Y, Wide, 66.0f, true, 16, true);
+			Hint2 = TEXT("OPEN IT, APPROVE WHAT WAITS THERE, THEN COME BACK.");
+		}
+		else {
+			// no wallet app on this phone to open: the wallet that was connected is on another device
+			Button(Thing.Buy, TEXT("WAITING FOR YOUR WALLET ..."), Left, Y, Wide, 66.0f, false, 14);
+			Hint2 = TEXT("OPEN IT ON THE DEVICE IT IS ON, AND APPROVE WHAT WAITS THERE.");
+		}
 	}
 #endif
 	else if (Server->bBusy) {

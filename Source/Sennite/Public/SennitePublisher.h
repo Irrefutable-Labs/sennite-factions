@@ -284,8 +284,10 @@ public:
 
 	/** How long the game has waited on the wallet for what it asked (a proof of what it holds, or what the player asked of it), in seconds; 0 while it waits on nothing. */
 	double WaitingOnWallet() const { return WalletWaitFrom > 0.0 ? FPlatformTime::Seconds() - WalletWaitFrom : 0.0; }
-	/** Whether the wallet was opened for the wait there is now. */
+	/** Whether the wallet app was opened for the wait there is now: it was there to open, and it started. */
 	bool WalletOpenedForWait() const { return bWalletOpenedForWait; }
+	/** Whether opening the wallet was tried for the wait there is now, opened or not. */
+	bool WalletTriedForWait() const { return bWalletTriedForWait; }
 	/**
 	 * On a phone, bring the DSM Wallet app to the front; with bComeBack the game comes to the front again by itself
 	 * WalletComeBackAfter seconds later, without it the player comes back when they have done what waits there.
@@ -294,7 +296,7 @@ public:
 	bool OpenWallet(bool bComeBack);
 	/** Open the wallet, to come back, once for the wait there is now and only when it has lasted WalletWaitBeforeOpening. Answers whether it opened. */
 	bool OpenWalletForWait();
-	/** How many times the game opened the wallet, for a check to read. */
+	/** How many times the game opened the wallet app. */
 	int32 WalletOpens = 0;
 	/** How much ERA one trade for D-bucks takes from the wallet, in the shop and on the character select. */
 	static const TCHAR* TradeEra() { return TEXT("2"); }
@@ -495,6 +497,7 @@ private:
 	/** When the wait on the wallet there is now began; 0 while the game waits on nothing. */
 	double WalletWaitFrom = 0.0;
 	bool bWalletOpenedForWait = false;
+	bool bWalletTriedForWait = false;
 	double NextWalletOpen = 0.0;
 	/** The wallet's holdings changed with what was just asked: prove them again once it settles. */
 	bool bProveAfter = false;

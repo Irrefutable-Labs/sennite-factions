@@ -27,7 +27,8 @@
 	/**
 	 * Bring the DSM Wallet app to the front, so that it runs and answers what the game asked of it. With
 	 * ComeBackAfterMs above 0 the game comes to the front again by itself that long after: Android lets an app
-	 * that was in front a few seconds ago do so. Answers whether there is a wallet app to open.
+	 * that was in front a few seconds ago do so. Answers whether the wallet app was opened: false with none on
+	 * this phone, or one that did not start.
 	 */
 	public boolean AndroidThunkJava_SenniteOpenWallet(final int ComeBackAfterMs)
 	{
@@ -37,45 +38,37 @@
 			Log.debug("[JAVA] SenniteOpenWallet: no " + SENNITE_WALLET_PACKAGE + " on this phone");
 			return false;
 		}
-		runOnUiThread(new Runnable()
+		try
 		{
-			@Override
-			public void run()
+			startActivity(Wallet);
+			Log.debug("[JAVA] SenniteOpenWallet: opened the wallet, to come back after " + ComeBackAfterMs + " ms");
+		}
+		catch (Exception Refused)
+		{
+			Log.debug("[JAVA] SenniteOpenWallet: the wallet did not open: " + Refused);
+			return false;
+		}
+		if (ComeBackAfterMs > 0)
+		{
+			new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable()
 			{
-				try
+				@Override
+				public void run()
 				{
-					startActivity(Wallet);
-					Log.debug("[JAVA] SenniteOpenWallet: opened the wallet, to come back after " + ComeBackAfterMs + " ms");
-				}
-				catch (Exception Refused)
-				{
-					Log.debug("[JAVA] SenniteOpenWallet: the wallet did not open: " + Refused);
-					return;
-				}
-				if (ComeBackAfterMs <= 0)
-				{
-					return;
-				}
-				new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable()
-				{
-					@Override
-					public void run()
+					try
 					{
-						try
-						{
-							Intent Back = new Intent(GameActivity.this, GameActivity.class);
-							Back.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-							startActivity(Back);
-							Log.debug("[JAVA] SenniteOpenWallet: asked to come back to the game");
-						}
-						catch (Exception Refused)
-						{
-							Log.debug("[JAVA] SenniteOpenWallet: the game did not come back: " + Refused);
-						}
+						Intent Back = new Intent(GameActivity.this, GameActivity.class);
+						Back.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+						startActivity(Back);
+						Log.debug("[JAVA] SenniteOpenWallet: asked to come back to the game");
 					}
-				}, ComeBackAfterMs);
-			}
-		});
+					catch (Exception Refused)
+					{
+						Log.debug("[JAVA] SenniteOpenWallet: the game did not come back: " + Refused);
+					}
+				}
+			}, ComeBackAfterMs);
+		}
 		return true;
 	}
 		]]></insert>
