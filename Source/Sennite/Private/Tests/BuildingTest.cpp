@@ -3,8 +3,8 @@
 // camera a quarter turn and pressing C then F does the same for a ramp and a floor, the right mouse
 // button changing the material in between; each piece costs its price once, has its material's
 // strength, and is solid. G then edits the wall she built and the reload button takes it away whole:
-// it is gone without rubble, heard as taken away, what it cost is given back and the ramp and the
-// floor stand. The hero then runs up the ramp she built.
+// it is gone without rubble, heard as taken away, what it cost is given back once (asking again for the
+// same piece is refused) and the ramp and the floor stand. The hero then runs up the ramp she built.
 //
 // Tools/check_building.sh runs this and reads the result.
 
@@ -107,6 +107,9 @@ namespace
 		FRotator LookBefore = FRotator::ZeroRotator;
 		int32 WoodBefore = 0;
 		int32 TakenAwayBefore = 0;
+		bool AskedAgain = false;
+		int32 DeniedBefore = 0;
+		int32 DeniedAfter = 0;
 		GameCheck::FMouseTurn Turn;
 	};
 
@@ -277,9 +280,19 @@ namespace
 				PhaseStart = World->GetTimeSeconds();
 				return false;
 			}
+			// Taken away and not yet ended: the same ask a second time is refused and gives nothing back.
+			if (!AskedAgain && Taken.IsValid() && Taken->bTakenAway) {
+				AskedAgain = true;
+				DeniedBefore = USenniteSounds::Heard(World, TEXT("ui.denied"));
+				Hero->ServerRemovePiece(Taken.Get());
+				DeniedAfter = USenniteSounds::Heard(World, TEXT("ui.denied"));
+				return false;
+			}
 			if (Elapsed(World) < 0.8) {
 				return false;
 			}
+			Test->TestTrue(TEXT("The piece was asked for a second time while it was taken away"), AskedAgain);
+			Test->TestEqual(TEXT("The second ask is refused"), DeniedAfter, DeniedBefore + 1);
 			Test->TestTrue(TEXT("Taking the piece away ends the edit"), Hero->GetEditingPiece() == nullptr);
 			Test->TestFalse(TEXT("The wall is gone"), Taken.IsValid());
 			Test->TestEqual(TEXT("No wall stands"), Built(World, TEXT("Wall")).Num(), 0);
@@ -293,8 +306,8 @@ namespace
 				}
 				Test->TestEqual(TEXT("A piece taken away leaves no rubble"), Rubble, 0);
 			}
-			UE_LOG(LogBuildingCheck, Display, TEXT("GAMECHECK taken away: walls %d, wood %d -> %d, heard %d"), Built(World, TEXT("Wall")).Num(),
-				WoodBefore, State->MaterialCounts[0], USenniteSounds::Heard(World, TEXT("piece.remove")) - TakenAwayBefore);
+			UE_LOG(LogBuildingCheck, Display, TEXT("GAMECHECK taken away: walls %d, wood %d -> %d, heard %d, asked again %d, refused %d"), Built(World, TEXT("Wall")).Num(),
+				WoodBefore, State->MaterialCounts[0], USenniteSounds::Heard(World, TEXT("piece.remove")) - TakenAwayBefore, AskedAgain ? 1 : 0, DeniedAfter - DeniedBefore);
 			// back to the view she had, facing the ramp
 			Controller->SetControlRotation(LookBefore);
 			StartZ = Hero->GetActorLocation().Z;
