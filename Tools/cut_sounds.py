@@ -10,12 +10,13 @@ The packs are "Sonniss.com-GDC2024-GameAudioBundle1of9" (royalty-free for games,
 "License - GDC Game Audio.pdf") and "Essentials_Series_NOX_SOUND" (CC0: its README). They are looked
 for in ~/Downloads, or in the folders named; a file is found by its name, wherever it lies under them.
 
-Six are the owner's own recordings (2026-11-19), which lie loose in ~/Downloads or in a folder named:
+Seven are the owner's own recordings (2026-11-19), which lie loose in ~/Downloads or in a folder named:
 menu-button-push.m4a, "the main button press sound in the menus and just throughout the game ... for
 approving or going through"; menu-button-press-2.m4a, "more of a lower register ... For canceling";
 placing-build-piece.m4a, "for placing build pieces"; Removing-build-piece.m4a, the "removing one"; and
 small-ticks.m4a, "use this for smaller ticks, like checking something off"; and laser-gun-shot.m4a,
-"use it for all lasers": the energy rifle's shot and every hero's own.
+"use it for all lasers": the energy rifle's shot and every hero's own; and arm-swing.m4a, "for the when
+the Rampage guy swings a punch for melee".
 
 Every sound is named for what it is in the packs, so which file is which sound was chosen from the
 names and each file's length; nobody listened to them when this was written. To change a sound, change
@@ -74,6 +75,8 @@ ONE_SHOTS = [
     ("SW_ShotgunShot", "GUNShotg_Saiga 12 Cal.12 DESIGNED Single Shot Core Long_DRCA_SG12_Stereo.wav", "start", 1.6),
     ("SW_SniperShot", "GUNRif_SVD Dragunov 7.62×54R DESIGNED Single Shot Core Long_DRCA_DRAG_Stereo_05.wav", "start", 2.2),
     ("SW_Swing", "WHOOSH PASS SF LOW.wav", "peak", 0.55),
+    # the owner's own: Rampage's punch. The owner, 2026-11-19: "arm-swing.m4a for the when the Rampage guy swings a punch for melee"
+    ("SW_Punch", "arm-swing.m4a", "start", None),
     ("SW_ReloadRifle", "GUNMech_SVD Dragunov 7.62×54R SOURCE Magazine Insert Slow_DRCA_DRAG_CO-100K.wav", "start", 1.3),
     ("SW_ReloadShotgun", "GUNMech_Saiga 12 Cal.12 SOURCE Chamber Eject Bullet_DRCA_SG12_MKH416.wav", "start", 1.3),
     ("SW_WeaponSwitch", "Bluezone_BC0302_industrial_lever_switch_small_003.wav", "start", None),

@@ -134,6 +134,9 @@ public:
 	UPROPERTY(VisibleInstanceOnly, Category = "Hero")
 	bool bHeroFloats = false;
 
+	/** What this hero's own attack is heard as, by name (FSenniteHero::AttackSound). */
+	FName HeroAttackSound = TEXT("attack.own");
+
 	/** A blow of the hero's own weapon: what it takes off what it lands on, how far ahead it reaches, how wide it is,
 	 * and how long after the swing starts it lands. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Hero")

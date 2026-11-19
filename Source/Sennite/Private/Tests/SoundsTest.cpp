@@ -50,6 +50,7 @@ namespace
 		FVector Began = FVector::ZeroVector;
 		int32 Before = 0;
 		int32 SwingsBefore = 0;
+		int32 PunchesBefore = 0;
 		int32 ShotsBefore = 0;
 		bool bBoltSeen = false;
 		TWeakObjectPtr<ABuildingActor> Wall;
@@ -82,7 +83,7 @@ namespace
 			// the ones the game's own code asks for by name are in the list
 			for (const TCHAR* Name : { TEXT("ui.press"), TEXT("ui.tab"), TEXT("ui.turn"), TEXT("ui.pick"), TEXT("ui.back"), TEXT("ui.confirm"), TEXT("ui.key"), TEXT("ui.step"),
 				TEXT("ui.click"), TEXT("ui.select"), TEXT("ui.page"), TEXT("ui.open"), TEXT("ui.denied"),
-				TEXT("ui.bought"), TEXT("ui.coins"), TEXT("ui.tick"), TEXT("wallet.connected"), TEXT("hit.marker"), TEXT("attack.own"), TEXT("swing"),
+				TEXT("ui.bought"), TEXT("ui.coins"), TEXT("ui.tick"), TEXT("wallet.connected"), TEXT("hit.marker"), TEXT("attack.own"), TEXT("swing"), TEXT("swing.punch"),
 				TEXT("reload.rifle"), TEXT("reload.shotgun"), TEXT("weapon.switch"), TEXT("bolt.hit"), TEXT("body.hit"), TEXT("fell"), TEXT("harvest"),
 				TEXT("piece.place"), TEXT("piece.remove"), TEXT("piece.edit"), TEXT("piece.hit.wood"), TEXT("piece.hit.stone"), TEXT("piece.hit.steel"), TEXT("piece.break.wood"), TEXT("piece.break.stone"),
 				TEXT("piece.break.steel"), TEXT("pickup.item"), TEXT("pickup.weapon"), TEXT("pickup.rounds"), TEXT("heal.bandage"), TEXT("heal.potion"),
@@ -259,25 +260,60 @@ namespace
 				Step = 5;
 				return false;
 			}
-			if (Elapsed() < 4.6) {
+			if (Step == 5) {
+				if (Elapsed() < 4.6) {
+					return false;
+				}
+				Test->TestFalse(TEXT("A blow is not aimed: AIM does nothing with no gun in hand"), Hero->AimedIn);
+				GameCheck::Key(Player, EKeys::RightMouseButton, IE_Released);
+				Test->TestEqual(TEXT("His attack is heard as a swing"), USenniteSounds::Heard(World, TEXT("swing")) - SwingsBefore, 1);
+				Test->TestEqual(TEXT("and not as a shot"), USenniteSounds::Heard(World, TEXT("attack.own")) - ShotsBefore, 0);
+				Test->TestFalse(TEXT("No bolt leaves him"), bBoltSeen);
+				Test->TestTrue(TEXT("The wall within his reach was put up"), Wall.IsValid());
+				if (Wall.IsValid()) {
+					Test->TestEqual(TEXT("The blow lands on the wall within his reach"), Wall->Health, WallHealth - Hero->MeleeDamage);
+					UE_LOG(LogSoundsCheck, Display, TEXT("GAMECHECK blow: swings %d, shots %d, bolt %d, the wall %.0f -> %.0f"), USenniteSounds::Heard(World, TEXT("swing")) - SwingsBefore,
+						USenniteSounds::Heard(World, TEXT("attack.own")) - ShotsBefore, bBoltSeen ? 1 : 0, WallHealth, Wall->Health);
+					Wall->Destroy();
+				}
+				State->SetHero(FName(TEXT("rampage")));
+				Step = 6;
 				return false;
 			}
-			Test->TestFalse(TEXT("A blow is not aimed: AIM does nothing with no gun in hand"), Hero->AimedIn);
-			GameCheck::Key(Player, EKeys::RightMouseButton, IE_Released);
-			Test->TestEqual(TEXT("His attack is heard as a swing"), USenniteSounds::Heard(World, TEXT("swing")) - SwingsBefore, 1);
-			Test->TestEqual(TEXT("and not as a shot"), USenniteSounds::Heard(World, TEXT("attack.own")) - ShotsBefore, 0);
-			Test->TestFalse(TEXT("No bolt leaves him"), bBoltSeen);
-			Test->TestTrue(TEXT("The wall within his reach was put up"), Wall.IsValid());
-			if (Wall.IsValid()) {
-				Test->TestEqual(TEXT("The blow lands on the wall within his reach"), Wall->Health, WallHealth - Hero->MeleeDamage);
-				UE_LOG(LogSoundsCheck, Display, TEXT("GAMECHECK blow: swings %d, shots %d, bolt %d, the wall %.0f -> %.0f"), USenniteSounds::Heard(World, TEXT("swing")) - SwingsBefore,
-					USenniteSounds::Heard(World, TEXT("attack.own")) - ShotsBefore, bBoltSeen ? 1 : 0, WallHealth, Wall->Health);
-				Wall->Destroy();
+			if (Step == 6) {
+				// Rampage punches: his blow is heard as the owner's punch, not the swing every other blow is heard as
+				if (Elapsed() < 5.2) {
+					return false;
+				}
+				Test->TestTrue(TEXT("Rampage's own weapon is a blow"), Hero->bHeroMelee);
+				SwingsBefore = USenniteSounds::Heard(World, TEXT("swing"));
+				PunchesBefore = USenniteSounds::Heard(World, TEXT("swing.punch"));
+				GameCheck::Key(Player, EKeys::LeftMouseButton, IE_Pressed);
+				Step = 7;
+				return false;
 			}
-			State->SetHero(GetDefault<USenniteHeroes>()->DefaultHero);
-			GameCheck::Key(Player, EKeys::Escape, IE_Pressed);
-			GameCheck::Key(Player, EKeys::Escape, IE_Released);
-			Enter(EPhase::Menu);
+			if (Step == 7) {
+				if (Elapsed() < 5.4) {
+					return false;
+				}
+				GameCheck::Key(Player, EKeys::LeftMouseButton, IE_Released);
+				Step = 8;
+				return false;
+			}
+			if (Step == 8) {
+				if (Elapsed() < 6.4) {
+					return false;
+				}
+				Test->TestEqual(TEXT("Rampage's blow is heard as a punch"), USenniteSounds::Heard(World, TEXT("swing.punch")) - PunchesBefore, 1);
+				Test->TestEqual(TEXT("and not as a swing"), USenniteSounds::Heard(World, TEXT("swing")) - SwingsBefore, 0);
+				UE_LOG(LogSoundsCheck, Display, TEXT("GAMECHECK punch: punches %d, swings %d"), USenniteSounds::Heard(World, TEXT("swing.punch")) - PunchesBefore,
+					USenniteSounds::Heard(World, TEXT("swing")) - SwingsBefore);
+				State->SetHero(GetDefault<USenniteHeroes>()->DefaultHero);
+				GameCheck::Key(Player, EKeys::Escape, IE_Pressed);
+				GameCheck::Key(Player, EKeys::Escape, IE_Released);
+				Enter(EPhase::Menu);
+				return false;
+			}
 			return false;
 		}
 
