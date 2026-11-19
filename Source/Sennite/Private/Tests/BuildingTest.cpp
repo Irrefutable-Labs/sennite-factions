@@ -31,7 +31,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, WallPreview, WallBuilt, Turn, RampPreview, RampBuilt, FloorPreview, FloorBuilt, Climb, Done };
+		enum class EPhase { WaitForPawn, WallPreview, WallBuilt, Turn, RampPreview, RampBuilt, FloorPreview, FloorBuilt, Climb, NextRamp, ClimbOn, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -241,19 +241,77 @@ namespace
 			return false;
 
 		case EPhase::Climb:
-			// W with Left Shift runs her the way the camera faces: onto the ramp and up it
+			// W with Left Shift runs her the way the camera faces: onto the ramp and up it. She stops part of the way
+			// up, standing on it.
 			TopZ = FMath::Max(TopZ, Hero->GetActorLocation().Z);
-			if (Step == 0 && TopZ - StartZ > 0.6 * Cell) {
-				Step = 1;
-				GameCheck::Shot(TEXT("Building"), TEXT("on_ramp.png"));
+			if (TopZ - StartZ < 0.45 * Cell) {
+				return Elapsed(World) > 6.0 ? Fail(FString::Printf(TEXT("The hero did not run up the ramp she built (rose %.0f of %.0f)"), TopZ - StartZ, Cell)) : false;
 			}
-			if (Elapsed(World) < 2.2) {
+			GameCheck::Key(Controller, EKeys::LeftShift, IE_Released);
+			GameCheck::Key(Controller, EKeys::W, IE_Released);
+			GameCheck::Shot(TEXT("Building"), TEXT("on_ramp.png"));
+			UE_LOG(LogBuildingCheck, Display, TEXT("GAMECHECK climb: rose %.0f of %.0f"), TopZ - StartZ, Cell);
+			Enter(EPhase::NextRamp, World);
+			return false;
+
+		case EPhase::NextRamp: {
+			// Standing on the ramp and facing up it, the next ramp goes on from this one's top: in the next cell that
+			// way, one level up, not on the ground. Built, the two make one climb.
+			const FVector Onward = Origin + FVector(0.0, -2.0 * Cell, Cell);
+			switch (Step) {
+			case 0:
+				if (Elapsed(World) < 0.6) { return false; }
+				Test->TestTrue(TEXT("She stands on the ramp, part of the way up"), Hero->GetCharacterMovement()->IsMovingOnGround() && Hero->GetActorLocation().Z - StartZ > 0.3 * Cell);
+				Step = 1;
+				Tap(Controller, EKeys::C);
+				return false;
+			case 1: {
+				if (Elapsed(World) < 1.1) { return false; }
+				const ABuildingActor* Preview = Hero->BuildingPreview;
+				Test->TestTrue(TEXT("On a ramp, the ramp preview shows"), Preview != nullptr && Preview->StructureType == TEXT("Ramp"));
+				if (Preview != nullptr) {
+					Test->TestTrue(FString::Printf(TEXT("The next ramp goes on from the top of the one she stands on (preview at %s, the top is %s)"),
+						*Preview->GetActorLocation().ToCompactString(), *Onward.ToCompactString()), Preview->GetActorLocation().Equals(Onward, 1.0));
+					Test->TestTrue(TEXT("and rises the same way"), FMath::Abs(FMath::FindDeltaAngleDegrees(Preview->GetActorRotation().Yaw, -90.0)) < 1.0);
+					UE_LOG(LogBuildingCheck, Display, TEXT("GAMECHECK next ramp: preview at %s, the first ramp's top is %s"), *Preview->GetActorLocation().ToCompactString(), *Onward.ToCompactString());
+				}
+				GameCheck::Shot(TEXT("Building"), TEXT("next_ramp.png"));
+				Step = 2;
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Pressed);
+				return false;
+			}
+			case 2: {
+				if (Elapsed(World) < 1.9) { return false; }
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
+				const TArray<ABuildingActor*> Ramps = Built(World, TEXT("Ramp"));
+				Test->TestEqual(TEXT("A second ramp is built"), Ramps.Num(), 2);
+				Test->TestTrue(TEXT("It stands where its preview was, one level up"), Ramps.ContainsByPredicate([&Onward](const ABuildingActor* Each) { return Each->GetActorLocation().Equals(Onward, 1.0); }));
+				Step = 3;
+				// C again leaves build mode
+				Tap(Controller, EKeys::C);
+				return false;
+			}
+			default:
+				if (Elapsed(World) < 2.6) { return false; }
+				Test->TestTrue(TEXT("Out of build mode again"), !State->InBuildMode);
+				GameCheck::Key(Controller, EKeys::W, IE_Pressed);
+				GameCheck::Key(Controller, EKeys::LeftShift, IE_Pressed);
+				Enter(EPhase::ClimbOn, World);
+				return false;
+			}
+		}
+
+		case EPhase::ClimbOn:
+			// on up the second ramp: she ends well above the top of the first
+			TopZ = FMath::Max(TopZ, Hero->GetActorLocation().Z);
+			if (TopZ - StartZ < 1.5 * Cell && Elapsed(World) < 5.0) {
 				return false;
 			}
 			GameCheck::Key(Controller, EKeys::LeftShift, IE_Released);
 			GameCheck::Key(Controller, EKeys::W, IE_Released);
-			Test->TestTrue(TEXT("The hero runs up the ramp she built"), TopZ - StartZ > 0.6 * Cell);
-			UE_LOG(LogBuildingCheck, Display, TEXT("GAMECHECK climb: rose %.0f of %.0f"), TopZ - StartZ, Cell);
+			Test->TestTrue(FString::Printf(TEXT("The two ramps make one climb: she rises past the top of the first (rose %.0f, a ramp is %.0f)"), TopZ - StartZ, Cell), TopZ - StartZ > 1.5 * Cell);
+			GameCheck::Shot(TEXT("Building"), TEXT("up_two_ramps.png"));
+			UE_LOG(LogBuildingCheck, Display, TEXT("GAMECHECK climb on: rose %.0f of %.0f"), TopZ - StartZ, 2.0 * Cell);
 			UE_LOG(LogBuildingCheck, Display, TEXT("GAMECHECK finished"));
 			Phase = EPhase::Done;
 			return true;

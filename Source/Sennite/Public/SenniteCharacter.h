@@ -744,6 +744,13 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Building")
 	float BuildGridCell = 480.0f;
 
+	/** Looking this many degrees above the horizon builds one level up; standing on a piece and looking this many below it, one level down. */
+	UPROPERTY(EditDefaultsOnly, Category = "Building")
+	float BuildUpAbove = 40.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Building")
+	float BuildDownBelow = 50.0f;
+
 	/**
 	 * The shot the server last let out and that has not left yet: its bullet, the gun it was let out
 	 * of (none for the hero's own weapon) and when. The one projectile of that shot is this bullet, from

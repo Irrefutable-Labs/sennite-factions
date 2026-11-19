@@ -184,16 +184,41 @@ const TArray<TSubclassOf<ABuildingActor>>* ASenniteCharacter::BuildingClassesOf(
 void ASenniteCharacter::BuildPlacement(const FString& PieceKind, FVector& OutLocation, FRotator& OutRotation) const
 {
 	// Build cells are squares of BuildGridCell centred on the grid points, in levels BuildGridCell apart.
-	// The player builds along the quarter turn the camera faces, on the level they stand on, or one
-	// level up when looking well above the horizon.
+	// The player builds along the quarter turn the camera faces, on the level they stand on.
 	const double Cell = BuildGridCell;
 	const FRotator View = GetControlRotation();
+	const double Pitch = FRotator::NormalizeAxis(View.Pitch);
 	const double FacingYaw = FMath::RoundHalfFromZero(FRotator::NormalizeAxis(View.Yaw) / 90.0) * 90.0;
 	const FVector Ahead = FRotator(0.0, FacingYaw, 0.0).Vector();
 	const FVector Feet = GetActorLocation() - FVector(0.0, 0.0, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 	const auto Snap = [Cell](double Value) { return FMath::RoundHalfFromZero(Value / Cell) * Cell; };
-	const double Level = FMath::FloorToDouble((Feet.Z + 1.0) / Cell) * Cell + (FRotator::NormalizeAxis(View.Pitch) > 40.0 ? Cell : 0.0);
-	const FVector OwnCell(Snap(Feet.X), Snap(Feet.Y), Level);
+	double Level = FMath::FloorToDouble((Feet.Z + 1.0) / Cell) * Cell;
+	FVector2D Own(Snap(Feet.X), Snap(Feet.Y));
+	// Standing on a ramp, the level is the one the ramp reaches at the edge the player faces: facing up it, its
+	// top, so that the next ramp goes on from where this one ends and a run of them climbs into the sky; facing
+	// down it, its foot; across it, whichever the feet are nearer. The owner, 2026-11-19: "the next ramp just
+	// automatically goes to the ground level. You should be able to build a ramp that walks you into the sky".
+	const UCharacterMovementComponent* Moves = GetCharacterMovement();
+	const ABuildingActor* On = Moves != nullptr ? Cast<ABuildingActor>(Moves->CurrentFloor.HitResult.GetActor()) : nullptr;
+	if (On != nullptr && On->IsPreview) {
+		On = nullptr;
+	}
+	if (On != nullptr && On->StructureType == TEXT("Ramp")) {
+		const double Foot = On->GetActorLocation().Z;
+		const double Rising = FVector::DotProduct(Ahead, On->GetActorForwardVector());
+		Own = FVector2D(On->GetActorLocation().X, On->GetActorLocation().Y);
+		Level = Rising > 0.5 ? Foot + Cell : Rising < -0.5 ? Foot : Foot + (Feet.Z - Foot > Cell * 0.5 ? Cell : 0.0);
+	}
+	// The height is the player's to pick: looking well above the horizon builds one level up; and from a piece,
+	// looking well down builds one level down. ("You should be able to pick your build height if it's coming
+	// off of another piece.")
+	if (Pitch > BuildUpAbove) {
+		Level += Cell;
+	}
+	else if (On != nullptr && Pitch < -BuildDownBelow) {
+		Level -= Cell;
+	}
+	const FVector OwnCell(Own.X, Own.Y, Level);
 	if (PieceKind == TEXT("Wall")) {
 		// on the far edge of the cell the player stands in, across the way they face
 		OutLocation = OwnCell + Ahead * (Cell * 0.5);
