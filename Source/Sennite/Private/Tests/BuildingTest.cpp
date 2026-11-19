@@ -3,7 +3,7 @@
 // camera a quarter turn and pressing C then F does the same for a ramp and a floor, the right mouse
 // button changing the material in between; each piece costs its price once, has its material's
 // strength, and is solid. G then edits the wall she built and the reload button takes it away whole:
-// it is gone without rubble, heard as taken away, nothing is given back for it and the ramp and the
+// it is gone without rubble, heard as taken away, what it cost is given back and the ramp and the
 // floor stand. The hero then runs up the ramp she built.
 //
 // Tools/check_building.sh runs this and reads the result.
@@ -284,7 +284,7 @@ namespace
 			Test->TestFalse(TEXT("The wall is gone"), Taken.IsValid());
 			Test->TestEqual(TEXT("No wall stands"), Built(World, TEXT("Wall")).Num(), 0);
 			Test->TestEqual(TEXT("The ramp and the floor stand"), Built(World, TEXT("Ramp")).Num() + Built(World, TEXT("Floor")).Num(), 2);
-			Test->TestEqual(TEXT("Nothing is given back for a piece taken away"), State->MaterialCounts[0], WoodBefore);
+			Test->TestEqual(TEXT("What the wall cost is given back, once"), State->MaterialCounts[0], WoodBefore + Hero->BuildingPieceCost);
 			Test->TestEqual(TEXT("The piece is heard taken away, once"), USenniteSounds::Heard(World, TEXT("piece.remove")), TakenAwayBefore + 1);
 			{
 				int32 Rubble = 0;

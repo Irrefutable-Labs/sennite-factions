@@ -2671,8 +2671,15 @@ void ASenniteCharacter::ServerRemovePiece_Implementation(ABuildingActor* Piece) 
 		}
 		return;
 	}
+	// What the piece cost goes back to whoever built it, in its material; a piece nobody paid for gives
+	// nothing back.
+	if (ASennitePlayerState* Paid = Cast<ASennitePlayerState>(Piece->Builder)) {
+		if (Paid->MaterialCounts.IsValidIndex(Piece->MaterialType)) {
+			Paid->MaterialCounts[Piece->MaterialType] += BuildingPieceCost;
+		}
+	}
 	// Every machine is told first, so none sees it break; then it ends, and what it alone held up falls
-	// a moment later, as after any piece (ABuildingActor::EndPlay). Nothing is given back for it.
+	// a moment later, as after any piece (ABuildingActor::EndPlay).
 	NetMulticastPieceTakenAway(Piece);
 	Piece->SetLifeSpan(PieceTakenAwaySeconds);
 }

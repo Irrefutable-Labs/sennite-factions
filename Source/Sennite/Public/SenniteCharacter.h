@@ -288,7 +288,8 @@ public:
 
 	/**
 	 * On the server: take a piece away whole, if this player may: a piece of the player's own side, within
-	 * reach, as for an edit. Nothing is given back for it, and what it alone held up falls as after any piece.
+	 * reach, as for an edit. What it cost goes back to whoever built it, and what it alone held up falls as
+	 * after any piece.
 	 */
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerRemovePiece(ABuildingActor* Piece);
