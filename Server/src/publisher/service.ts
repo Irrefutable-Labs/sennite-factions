@@ -68,6 +68,13 @@ const TICKET_MS = 2 * 60 * 1000;
 const MAX_TICKETS = 10_000;
 /** How long a hero pass is good for. It is good once: the game server that asks with it uses it up. */
 const PASS_MS = 2 * 60 * 1000;
+/** The words the server's routes are made of: all of a path that is written to the server's output (said). */
+const ROUTE_WORDS = new Set([
+  "world", "players", "me", "prizes", "shop", "dbucks", "swap", "price", "trades", "skins", "heroes", "weapons", "hero-pass", "hero-passes", "free",
+  "materials", "factions", "parcels", "base", "invitations", "changes", "commitments", "withdrawals", "requests", "destroyed", "matches", "outcome",
+  "tickets", "entries", "bases",
+]);
+
 /**
  * The terms an offer is made on. 1: the shop's grant let the game be paid D-bucks and trade ERA within caps without
  * asking the player. 2: it grants neither, and every payment and trade waits for the player in their wallet. A player
@@ -153,11 +160,14 @@ export class Service {
   /**
    * What a game asked and what it was answered, one line each on the server's output: everything that is not a
    * read, and a read whose answer changed since that game last made it (a game reads the same things every
-   * second). A game is named by the first six characters of its token, which give nobody the token.
+   * second). Nothing secret is written: a game is named by six characters of a hash of what it bears (its token,
+   * or the match server's secret), never by a piece of it, and of a path only the words the server's routes are
+   * made of are kept; a request's id, a hero pass, a parcel, a faction or a match is written as "…".
    */
   private said(req: IncomingMessage, status: number, why = ""): void {
-    const game = this.bearer(req).slice(0, 6) || "-";
-    const path = (req.url ?? "").replace(/\/requests\/[0-9a-f]+/, "/requests/…");
+    const bears = this.bearer(req);
+    const game = bears === "" ? "-" : createHash("sha256").update(bears).digest("hex").slice(0, 6);
+    const path = (req.url ?? "").split("?")[0]!.split("/").map((part) => (part === "" || ROUTE_WORDS.has(part) ? part : "…")).join("/");
     const key = `${game} ${req.method} ${path}`;
     if (req.method === "GET") {
       if (this.#saidLast.get(key) === status) return;
@@ -248,9 +258,11 @@ export class Service {
       this.options.store.save();
     }
     if (found === undefined && all.some((c) => !c.connected && hex(c.raw.offerDigest) === record.offer)) {
-      // The wallet that approved this player's offer ended the connection. An offer is approved once: its code
-      // cannot connect a wallet again (the account refuses a second approval of it). So the player is over, and
-      // the game starts again as a new player with a new code for the wallet to approve.
+      // The wallet that approved this player's offer ended the connection. That is not a passing state: the account
+      // lists an ended connection as ended for good, and an offer is approved once, so its code cannot connect a
+      // wallet again (the account refuses a second approval of it). So the player is over, and the game starts
+      // again as a new player with a new code for the wallet to approve. Nothing of the wallet's is lost with the
+      // record: what it owns and its faction are kept by its own key, not by the game's token.
       delete this.options.store.data.players[player];
       this.options.store.save();
       throw new HttpError(401, "the wallet ended its connection to the game: connect it again");
@@ -349,7 +361,7 @@ export class Service {
       .finally(() => {
         job.state = "done";
         this.#bases.delete(factionId);
-        console.log(`[publisher] ${new Date().toISOString().slice(11, 19)}Z request ${id.slice(0, 6)} of game ${player.slice(0, 6)} is done: ${job.ok ? "carried out" : "not carried out"}: ${job.message}`);
+        console.log(`[publisher] ${new Date().toISOString().slice(11, 19)}Z request ${id.slice(0, 6)} of game ${createHash("sha256").update(player).digest("hex").slice(0, 6)} is done: ${job.ok ? "carried out" : "not carried out"}: ${job.message}`);
       });
     return { request: id };
   }
