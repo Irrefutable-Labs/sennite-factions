@@ -178,7 +178,7 @@ namespace
 				TEXT("FLOOR=FLOOR"), TEXT("RIFLE=RIFLE"), TEXT("SHOTGUN=SHOTGUN"), TEXT("BANDAGE=BANDAGE"), TEXT("POTION=POTION"), TEXT("STICK=0.00,0.00") }) {
 				Test->TestTrue(FString::Printf(TEXT("The HUD draws %s"), Name), Drawn(Name));
 			}
-			Test->TestFalse(TEXT("With no gun in hand, there is no RELOAD button: her own weapon has nothing to load"), Controls->LastDrawn.ContainsByPredicate([](const FString& Each) { return Each.StartsWith(TEXT("RELOAD=")); }));
+			Test->TestTrue(TEXT("With no gun in hand the RELOAD button is there, dimmed: her own weapon has nothing to load"), Drawn(TEXT("RELOAD=dimmed")));
 			Test->TestFalse(TEXT("With no crate near, there is no OPEN button"), Controls->LastDrawn.ContainsByPredicate([](const FString& Each) { return Each.StartsWith(TEXT("OPEN=")); }));
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK controls: %s"), *FString::Join(Controls->LastDrawn, TEXT(" ")));
 			GameCheck::Shot(TEXT("Touch"), TEXT("controls.png"));
@@ -192,12 +192,23 @@ namespace
 		switch (Phase) {
 		case EPhase::FaceWeapons:
 			// a drag to the right turns her right, a quarter turn, to face along the crate
+			if (Step == 0) {
+				// first a tap of the dimmed RELOAD, once the picture of the controls at rest is taken
+				if (Elapsed(World) > 0.5) {
+					Step = 1;
+					Press(TEXT("RELOAD"));
+				}
+				return false;
+			}
 			if (Elapsed(World) < 1.0) {
 				return false;
 			}
-			if (Step == 0) {
+			if (Step == 1) {
+				Lift(TEXT("RELOAD"));
+				Test->TestEqual(TEXT("A tap of RELOAD with no gun in hand is heard as refused"), USenniteSounds::Heard(World, TEXT("ui.denied")), 1);
+				Test->TestEqual(TEXT("and not as a press"), USenniteSounds::Heard(World, TEXT("ui.press")), 0);
 				// where she faced before the drag
-				Step = 1;
+				Step = 2;
 				Mark = FVector(Controller->GetControlRotation().Yaw, 0.0, 0.0);
 			}
 			if (!TurnStep(Controller, Mark.X + 90.0)) {

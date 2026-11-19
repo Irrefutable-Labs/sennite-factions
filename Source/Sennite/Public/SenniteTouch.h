@@ -94,8 +94,10 @@ private:
 	/** Whether a button is AIM as it aims: a tap aims and the next lets go, where a mouse button is held. */
 	bool AimLatches(const FButton& Button) const;
 
-	/** Which buttons show now: OPEN only beside a closed crate, RELOAD only with a gun in hand, EDIT only by a piece to edit or while editing, the rest while the player has a hero. */
+	/** Which buttons show now: OPEN only beside a closed crate, EDIT only by a piece to edit or while editing, the rest while the player has a hero. */
 	bool Shows(const FButton& Button) const;
+	/** Whether what is in hand reloads: a gun. With none RELOAD is still on the screen, dimmed, and a tap of it is heard as refused. */
+	bool Loads() const;
 	/** The label a button carries now (FIRE becomes BUILD in build mode and TILE while editing, AIM becomes MAT or RESET, EDIT becomes DONE, ...). */
 	FString LabelOf(const FButton& Button) const;
 	FVector2D Centre(const FButton& Button, const FVector2D& Viewport) const;

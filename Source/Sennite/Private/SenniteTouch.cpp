@@ -191,16 +191,19 @@ bool USenniteTouchControls::Shows(const FButton& Button) const
 		// the base editor is in a world only when a publisher's server is set
 		return ASenniteBaseEditor::Find(Hero->GetWorld()) != nullptr;
 	}
-	if (Button.Key == EKeys::R) {
-		// only a gun reloads: the hero's own weapon, a bandage or a potion has nothing to load
-		return Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType > 0;
-	}
 	if (Button.Key == EKeys::G) {
 		// what G would start editing, or the edit G would finish
 		int32 Tile = INDEX_NONE;
 		return Hero->GetEditingPiece() != nullptr || Hero->EditablePieceUnderAim(Tile) != nullptr;
 	}
 	return true;
+}
+
+bool USenniteTouchControls::Loads() const
+{
+	// only a gun reloads: the hero's own weapon, a bandage or a potion has nothing to load
+	const ASenniteCharacter* Hero = Controller ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
+	return Hero != nullptr && Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType > 0;
 }
 
 int32 USenniteTouchControls::GunOfSlot(const FKey& InKey)
@@ -497,7 +500,8 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 			const bool bAlreadyDown = Fingers.ContainsByPredicate([&New](const FFinger& Each) { return Each.Use == EUse::Button && Each.Button == New.Button; });
 			if (!bAlreadyDown) {
 				// Every tap of a button is heard: a slot as one of a row, or as refused where the player has not got
-				// what it names; any other button as a press. FIRE is heard as its shot, MENU as the menu opening.
+				// what it names; RELOAD as refused with no gun in hand; any other button as a press. FIRE is heard
+				// as its shot, MENU as the menu opening.
 				const FButton& Tapped = All[New.Button];
 				const ASennitePlayerState* Has = Controller->GetPlayerState<ASennitePlayerState>();
 				if (Tapped.bSlot) {
@@ -507,7 +511,7 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 					USenniteSounds::Play(Controller, bHas ? TEXT("ui.pick") : TEXT("ui.denied"));
 				}
 				else if (Tapped.Key != EKeys::LeftMouseButton && Tapped.Key != EKeys::Escape) {
-					USenniteSounds::Play(Controller, TEXT("ui.press"));
+					USenniteSounds::Play(Controller, Tapped.Key == EKeys::R && !Loads() ? TEXT("ui.denied") : TEXT("ui.press"));
 				}
 			}
 			if (AimLatches(All[New.Button])) {
@@ -730,6 +734,10 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 		else if (Button.Key == EKeys::G) {
 			bInHand = Hero->GetEditingPiece() != nullptr;
 		}
+		else if (Button.Key == EKeys::R) {
+			// RELOAD stays where it is with no gun in hand, dimmed: there is nothing to load
+			bHave = Loads();
+		}
 		else if (AimLatches(Button)) {
 			// AIM stays lit while the hero is aiming: a tap aims, the next tap lets go
 			bInHand = Hero->AimedIn;
@@ -750,10 +758,10 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 		}
 		else {
 			Disc(At, Button.Radius * S, Fill);
-			Ring(At, Button.Radius * S, Edge);
-			Text(At, Label, Button.Radius >= 40.0f ? 13 : 9, FLinearColor::White);
+			Ring(At, Button.Radius * S, bHave ? Edge : Dim);
+			Text(At, Label, Button.Radius >= 40.0f ? 13 : 9, bHave ? FLinearColor::White : Dim);
 		}
-		LastDrawn.Add(FString::Printf(TEXT("%s=%s"), Button.Name, *Label));
+		LastDrawn.Add(FString::Printf(TEXT("%s=%s"), Button.Name, bHave || Button.bSlot ? *Label : TEXT("dimmed")));
 	}
 }
 
