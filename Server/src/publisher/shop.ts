@@ -12,7 +12,7 @@
 // The shop records what it issued and which payment bought it. It never
 // records who owns a skin: that is what a wallet proves.
 
-import { ask, grant, type AppAccount, type Connection, type Grant, type ObjectInfo } from "dsm-app-client";
+import { ask, type AppAccount, type Connection, type Grant, type ObjectInfo } from "dsm-app-client";
 import { hex } from "../faction/canonical.js";
 import { Refused } from "./refused.js";
 import type { Store } from "./store.js";
@@ -87,16 +87,17 @@ export class Shop {
     }
   }
 
-  /** What the shop asks a wallet to grant: trading ERA for D-bucks through the vault, and paying D-bucks, within caps. */
+  /**
+   * What the shop asks a wallet to grant for paying and trading: nothing. Every
+   * payment of D-bucks and every trade of ERA is outside the grant, so each one
+   * waits in the player's wallet until the player approves it there. The owner,
+   * 2026-11-19, of a grant that let the game take up to 5,000 D-bucks a request
+   * without asking: "I didn't come up with that fucking stupid idea to have that
+   * on in this game, the 5,000 limit. No, because it's real money. Yeah, you got
+   * to go to the wallet".
+   */
   grants(): Grant[] {
-    const { era, dbucks } = this.world.grant;
-    return [
-      grant.trade("ERA", this.symbol, [
-        { object: "ERA", ...era },
-        { object: this.symbol, ...dbucks },
-      ]),
-      grant.send(this.symbol, dbucks.perRequest, dbucks.total),
-    ];
+    return [];
   }
 
   skin(skinId: string): SkinForSale {

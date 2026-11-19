@@ -67,6 +67,8 @@ export interface PlayerRecord {
   approved?: boolean;
   /** When the player's game last asked anything with its token, to the hour (milliseconds). */
   lastSeen?: number;
+  /** Which terms the player's offer was made on (TERMS in service.ts); a record from before they were kept has none. */
+  terms?: number;
 }
 
 /** A skin the shop sold: the one object issued for it. */

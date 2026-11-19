@@ -68,6 +68,13 @@ const TICKET_MS = 2 * 60 * 1000;
 const MAX_TICKETS = 10_000;
 /** How long a hero pass is good for. It is good once: the game server that asks with it uses it up. */
 const PASS_MS = 2 * 60 * 1000;
+/**
+ * The terms an offer is made on. 1: the shop's grant let the game be paid D-bucks and trade ERA within caps without
+ * asking the player. 2: it grants neither, and every payment and trade waits for the player in their wallet. A player
+ * whose offer was made on other terms than these is a new player the next time their game asks anything.
+ */
+const TERMS = 2;
+
 /** How old a wallet's proof of its heroes may be and still answer a hero pass. */
 const PROOF_FRESH_MS = 60 * 60 * 1000;
 /** The most wallets whose proven heroes are kept at once. */
@@ -188,6 +195,13 @@ export class Service {
     const players = this.options.store.data.players;
     const record = token !== "" && Object.hasOwn(players, token) ? players[token] : undefined;
     if (record === undefined) throw new HttpError(401, "the game is not known to the server");
+    if ((record.terms ?? 1) !== TERMS) {
+      // the offer this player's wallet approved granted what the game no longer asks for: the game starts again as a
+      // new player, and the wallet approves an offer on the terms there are now
+      delete players[token];
+      this.options.store.save();
+      throw new HttpError(401, "the game is not known to the server");
+    }
     const now = Date.now();
     if (now - (record.lastSeen ?? record.since) > IDLE_MS) {
       // unused for too long: the token is over, and the game starts again as a new player
@@ -353,7 +367,7 @@ export class Service {
       const grant = world.economy.grant;
       const offer = await publisher.offer(world.economy.resources.map((r) => ({ symbol: r.symbol, ...grant })));
       const player = hex(randomBytes(32));
-      store.data.players[player] = { offer: hex(offer.digest), since: Date.now() };
+      store.data.players[player] = { offer: hex(offer.digest), since: Date.now(), terms: TERMS };
       store.save();
       return { status: 201, body: { player, code: offer.code } };
     }

@@ -55,8 +55,6 @@ export interface ShopWorld {
   currency: ResourceIssue;
   /** What the publisher's vault is opened with, and its fee in hundredths of a percent. */
   vault: { era: string; dbucks: string; feeBps: number };
-  /** What the grant lets the game ask for without asking the player again. */
-  grant: { era: { perRequest: string; total: string }; dbucks: { perRequest: string; total: string } };
   skins: SkinForSale[];
   heroes: HeroForSale[];
   weapons: WeaponForSale[];

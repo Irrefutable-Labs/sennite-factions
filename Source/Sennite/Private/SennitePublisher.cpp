@@ -557,7 +557,7 @@ void USennitePublisher::Swap(const FString& From, const FString& To, const FStri
 	Body->SetStringField(TEXT("to"), To);
 	Body->SetStringField(TEXT("amount"), Amount);
 	Body->SetStringField(TEXT("shown"), SwapPrice.Out);
-	Ask(TEXT("/shop/swap/trades"), Body, TEXT("waiting for the wallet to swap..."));
+	AskToPay(TEXT("/shop/swap/trades"), Body, TEXT("approve the swap in your DSM wallet (Apps, Waiting), then come back"));
 	bSwapping = bBusy;
 	bProveAfter = bBusy;
 }
@@ -624,7 +624,7 @@ void USennitePublisher::BuyDBucks(const FString& InEra)
 {
 	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
 	Body->SetStringField(TEXT("era"), InEra);
-	Ask(TEXT("/shop/dbucks"), Body, TEXT("waiting for the wallet to trade ERA for D-bucks..."));
+	AskToPay(TEXT("/shop/dbucks"), Body, TEXT("approve the trade of ERA for D-bucks in your DSM wallet (Apps, Waiting), then come back"));
 	bProveAfter = bBusy;
 }
 
@@ -635,7 +635,7 @@ void USennitePublisher::BuySkin(const FString& SkinId)
 	if (bBusy) {
 		return;
 	}
-	Ask(TEXT("/shop/skins"), Body, TEXT("waiting for the wallet to pay for the skin..."));
+	AskToPay(TEXT("/shop/skins"), Body, TEXT("approve the payment for the skin in your DSM wallet (Apps, Waiting), then come back"));
 	bProveAfter = bBusy;
 	BuyingSkin = SkinId;
 }
@@ -647,7 +647,7 @@ void USennitePublisher::BuyHero(const FString& HeroId)
 	if (bBusy) {
 		return;
 	}
-	Ask(TEXT("/shop/heroes"), Body, TEXT("waiting for the wallet to pay for the hero..."));
+	AskToPay(TEXT("/shop/heroes"), Body, TEXT("approve the payment for the hero in your DSM wallet (Apps, Waiting), then come back"));
 	bProveAfter = bBusy;
 	BuyingHero = HeroId;
 }
@@ -659,7 +659,7 @@ void USennitePublisher::BuyWeapon(const FString& WeaponId)
 	if (bBusy) {
 		return;
 	}
-	Ask(TEXT("/shop/weapons"), Body, TEXT("waiting for the wallet to pay for the gun..."));
+	AskToPay(TEXT("/shop/weapons"), Body, TEXT("approve the payment for the gun in your DSM wallet (Apps, Waiting), then come back"));
 	bProveAfter = bBusy;
 	// bought and given as a hero is: it is the wallet's once the wallet proves it, in the same list
 	BuyingHero = WeaponId;
@@ -994,6 +994,19 @@ void USennitePublisher::Ask(const FString& Path, const TSharedPtr<FJsonObject>& 
 		BuyingHero.Reset();
 		Message = ErrorOf(Status, Json);
 	});
+}
+
+void USennitePublisher::AskToPay(const FString& Path, const TSharedPtr<FJsonObject>& Body, const TCHAR* Waiting)
+{
+	if (bBusy) {
+		return;
+	}
+	Ask(Path, Body, Waiting);
+	// No payment and no trade is in the grant: each waits in the wallet for the player's approval. So the game goes to
+	// the wallet with it at once, and the player comes back when they have approved it there. The owner, 2026-11-19:
+	// "when you hit fucking buy, it goes to the wallet, and it goes to where it asks you to approve".
+	bWalletTriedForWait = true;
+	bWalletOpenedForWait = OpenWallet(false);
 }
 
 void USennitePublisher::ProveMaterials()

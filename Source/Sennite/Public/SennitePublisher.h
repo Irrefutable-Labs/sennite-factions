@@ -498,6 +498,8 @@ private:
 	double WalletWaitFrom = 0.0;
 	bool bWalletOpenedForWait = false;
 	bool bWalletTriedForWait = false;
+	/** Ask the wallet for a payment or a trade: as Ask, and on a phone the wallet app is opened for the player to approve it. */
+	void AskToPay(const FString& Path, const TSharedPtr<FJsonObject>& Body, const TCHAR* Waiting);
 	double NextWalletOpen = 0.0;
 	/** The wallet's holdings changed with what was just asked: prove them again once it settles. */
 	bool bProveAfter = false;
