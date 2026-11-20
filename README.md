@@ -2,7 +2,9 @@
 
 A battle royale where a faction's base is funded by its members' own DSM escrow vaults.
 
-Unreal Engine 5.8, built and run on macOS, played on a computer or on an Android phone. The publisher's server, which runs the factions, the shop and the matches on DSM, is in `Server/` (see `Server/README.md`).
+**It works on Android.** The game is played by touch on real Android phones: the phone build has been run on a Galaxy A16, arena and all (see [On a phone](#on-a-phone)). It also plays on a Mac with a keyboard and mouse.
+
+Unreal Engine 5.8, built on macOS. The publisher's server, which runs the factions, the shop and the matches on DSM, is in `Server/` (see `Server/README.md`).
 
 ## Build
 
