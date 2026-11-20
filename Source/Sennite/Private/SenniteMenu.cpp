@@ -674,7 +674,11 @@ void ASenniteMenuController::Act(FName Action)
 		Settings->OpenSettings();
 	}
 	else if (Name == TEXT("store") || Name == TEXT("heroes") || Name == TEXT("tab:heroes")) {
-		// the store opens on its heroes; the lobby's HEROES is the same section
+		// the store opens on its heroes; the lobby's HEROES is the same section. What the shop sells now is asked
+		// for again, each time
+		if (USennitePublisher* Seller = GetGameInstance() != nullptr ? GetGameInstance()->GetSubsystem<USennitePublisher>() : nullptr) {
+			Seller->RefreshShop();
+		}
 		Page = ESenniteMenuPage::Heroes;
 		Browse = IndexOf(Profile.PlayingHero(this));
 		Note.Reset();
@@ -687,6 +691,9 @@ void ASenniteMenuController::Act(FName Action)
 		Note.Reset();
 	}
 	else if (Name == TEXT("tab:weapons")) {
+		if (USennitePublisher* Seller = GetGameInstance() != nullptr ? GetGameInstance()->GetSubsystem<USennitePublisher>() : nullptr) {
+			Seller->RefreshShop();
+		}
 		Page = ESenniteMenuPage::Weapons;
 		BrowseWeapon = 0;
 		Note.Reset();
@@ -1599,7 +1606,7 @@ void ASenniteMenuHUD::DrawWeapons(ASenniteMenuController* Menu)
 		SenniteUi::Plate(Canvas, FBox2D(FVector2D(Left * S, 226.0f * S), FVector2D((Left + 96.0f) * S, 229.0f * S)), 0.0f, SenniteUi::Gold, SenniteUi::Gold);
 		if (!bShop) {
 			FForSale Thing;
-			Thing.Kind = TEXT("GUNS");
+			Thing.Kind = TEXT("WEAPONS");
 			Thing.Buy = TEXT("buygun");
 			NextStep(Server, Thing, Left, BY, BW);
 		}
@@ -1640,7 +1647,7 @@ void ASenniteMenuHUD::DrawWeapons(ASenniteMenuController* Menu)
 	}
 	else {
 		FForSale Thing;
-		Thing.Kind = TEXT("GUNS");
+		Thing.Kind = TEXT("WEAPONS");
 		Thing.Buy = TEXT("buygun");
 		Thing.bListed = true;
 		Thing.Price = Gun.Price;
@@ -1650,7 +1657,7 @@ void ASenniteMenuHUD::DrawWeapons(ASenniteMenuController* Menu)
 	ShopWord(Server, !Server->HeroOnItsWay.IsEmpty(), (Left + 2.0f) * S, (BY + 80.0f + (bHint ? 52.0f : bOwned ? 26.0f : 0.0f)) * S);
 
 	// which guns are bought and which are not
-	Text(TEXT("free"), TEXT("THE RIFLE AND THE SHOTGUN ARE FREE: EVERY CRATE GIVES THEM. A WEAPON SOLD HERE COMES OUT OF A CRATE ONLY FOR ITS OWNERS."),
+	Text(TEXT("free"), TEXT("THE RIFLE AND THE SHOTGUN ARE FREE: EVERY CRATE GIVES THEM. A WEAPON BOUGHT HERE IS YOURS IN EVERY MATCH, NO CRATE NEEDED."),
 		(Left + 2.0f) * S, (H - 112.0f) * S, 12, White, 0.0f, false);
 
 	// the arrows, either side of the gun: as far apart as the screen has room for, the gun turning whole between them

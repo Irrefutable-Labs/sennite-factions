@@ -403,6 +403,13 @@ void USennitePublisher::SaveToken() const
 	FFileHelper::SaveStringToFile(Text, *TokenFile());
 }
 
+void USennitePublisher::RefreshShop()
+{
+	if (IsOn() && !bShopAsked) {
+		AskShop();
+	}
+}
+
 void USennitePublisher::AskShop()
 {
 	bShopAsked = true;
