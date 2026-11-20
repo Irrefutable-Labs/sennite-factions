@@ -269,7 +269,9 @@ namespace
 					return Elapsed() > 60.0 ? Fail(FString::Printf(TEXT("The gun %s did not turn on the stage with CONNECT YOUR WALLET under it in 60 s"), *Gun.Id)) : false;
 				}
 				Test->TestEqual(TEXT("The store names the section open"), MenuCheck::Line(Menu, TEXT("section")), FString(TEXT("WEAPONS")));
-				Test->TestEqual(TEXT("The shop sells the energy rifle and the sniper"), Server->ShopWeapons.Num(), 2);
+				Test->TestTrue(TEXT("The shop sells the energy rifle, the sniper, the axe and the katana"), Server->ShopWeapons.Num() == 4
+					&& Server->ShopWeapons.ContainsByPredicate([](const FSenniteHeroForSale& Each) { return Each.Id == TEXT("axe"); })
+					&& Server->ShopWeapons.ContainsByPredicate([](const FSenniteHeroForSale& Each) { return Each.Id == TEXT("katana"); }));
 				Test->TestEqual(TEXT("The first gun is shown by the name it has in play"), MenuCheck::Line(Menu, TEXT("name")), FString(TEXT("ENERGY RIFLE")));
 				Test->TestEqual(TEXT("and its price, as the shop gives it"), MenuCheck::Line(Menu, TEXT("status")), FString::Printf(TEXT("%s D-BUCKS"), *SenniteUi::Grouped(Gun.Price)));
 				Test->TestFalse(TEXT("A gun not owned is not marked bought"), MenuCheck::Has(Menu, TEXT("bought")));
@@ -294,7 +296,7 @@ namespace
 			if (Menu->StageWeapon() != Server->ShopWeapons[Last].Id || Elapsed() < 1.5) {
 				return Elapsed() > 30.0 ? Fail(TEXT("A tap on a gun's tile did not bring it onto the stage in 30 s")) : false;
 			}
-			Test->TestEqual(TEXT("A tap on a gun's tile shows that gun"), MenuCheck::Line(Menu, TEXT("name")), FString(TEXT("SNIPER")));
+			Test->TestEqual(TEXT("A tap on a weapon's tile shows that weapon: the last, the katana"), MenuCheck::Line(Menu, TEXT("name")), FString(TEXT("KATANA")));
 			StoreGunIsSeenWhole(Test, Menu, Server->ShopWeapons[Last].Id);
 			GameCheck::Shot(TEXT("Store"), TEXT("weapons_last.png"));
 			Enter(EPhase::DBucks);

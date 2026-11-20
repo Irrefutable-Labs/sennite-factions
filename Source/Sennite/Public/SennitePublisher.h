@@ -446,6 +446,13 @@ public:
 	/** Take back what the wallet still has committed to a structure. */
 	void Withdraw(const FString& InstanceId);
 
+	/**
+	 * Ask the server for the shop again: what it sells now, as the store is opened. A game asked once when it
+	 * started, and kept that list for as long as it ran, so a server restarted with new things for sale went
+	 * unseen until the game was started again. The list shown stays until the new one comes.
+	 */
+	void RefreshShop();
+
 private:
 	using FAnswer = TFunction<void(int32 /* Status */, const TSharedPtr<FJsonObject>& /* Json */)>;
 
