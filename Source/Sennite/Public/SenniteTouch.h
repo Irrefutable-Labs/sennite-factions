@@ -12,8 +12,9 @@
 // What the hero holds is chosen on one button, the wheel, at the bottom of the screen: it names what is in
 // hand. A tap takes the next thing the player has in hand (the hero's own weapon, each gun and blade they
 // have, bandages, potions, in that order, round again). A finger held on it, or slid off it, opens the wheel:
-// everything that can be held in a circle round it, what the player has not got dimmed. The finger slides to
-// one and lets go, and that is in hand; the wheel shuts. Let go in the middle and nothing changes.
+// what the player has, on an arc round it, and nothing they have not got. The owner, 2026-11-19: "If you
+// don't have possession ..., they don't show up in the wheel." The finger slides to one and lets go, and that
+// is in hand; the wheel shuts. Let go in the middle and nothing changes.
 
 #pragma once
 
@@ -57,7 +58,7 @@ public:
 	/** Where, on the viewport now, the control is that presses a key: in play one that is shown; in the planning view any, dimmed or not. False if there is none. */
 	bool WhereKey(const FKey& InKey, FVector2D& OutCentre) const;
 
-	/** What the last frame drew, as "name=label" ("FIRE=FIRE", "AIM=MAT", "STICK=0.00,0.70", "WHEEL=RIFLE", ...); while the wheel is open each place on it as "WHEEL:name=name", or "=dimmed" for what the player has not got; in the planning view a dimmed button as "name=label (off)". */
+	/** What the last frame drew, as "name=label" ("FIRE=FIRE", "AIM=MAT", "STICK=0.00,0.70", "WHEEL=RIFLE", ...); while the wheel is open each place on it as "WHEEL:name=name" (only what the player has is on it); in the planning view a dimmed button as "name=label (off)". */
 	TArray<FString> LastDrawn;
 
 	/** How far a finger has to drag the stick for it to be pushed all the way, on a screen 720 lines high. */
@@ -109,6 +110,8 @@ private:
 	static const TArray<FWheelPlace>& WheelPlaces();
 	/** Whether the player has a place's thing to hold now, and whether it is in hand. */
 	bool Has(const FWheelPlace& Place) const;
+	/** The places on the wheel now, in order: only what the player has. What they have not got is not on it. */
+	TArray<int32> Shown() const;
 	bool InHand(const FWheelPlace& Place) const;
 	/** The wheel's middle when it is open (it is moved in from the screen's edges to fit), and where each place on it is. */
 	FVector2D WheelMiddle(const FVector2D& Viewport) const;

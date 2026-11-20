@@ -5,6 +5,7 @@
 #include "SenniteHeroes.h"
 #include "SenniteMenu.h"
 #include "SennitePublisher.h"
+#include "WeaponActor.h"
 #include "Engine/GameInstance.h"
 #include "Net/UnrealNetwork.h"
 
@@ -121,7 +122,7 @@ void ASennitePlayerState::ServerClaimGuns_Implementation(const FString& Pass) {
 			State->HeroWallet = SigningKey;
 		}
 		// THE STORE'S CONTRACT: what the wallet proved it owns names a bought gun by its ShopId, in the same list as its heroes
-		State->GunsOwned = ASenniteCharacter::BoughtGunsAmong(Owned);
+		State->SetGunsOwned(ASenniteCharacter::BoughtGunsAmong(Owned));
 		UE_LOG(LogTemp, Display, TEXT("%s owns bought guns %d"), *State->GetPlayerName(), State->GunsOwned);
 	});
 }
@@ -197,8 +198,8 @@ void ASennitePlayerState::CopyProperties(APlayerState* PlayerState) {
 	if (ASennitePlayerState* Next = Cast<ASennitePlayerState>(PlayerState)) {
 		Next->HeroId = HeroId;
 		// what the wallet proved to this server stays proved across a change of map
-		Next->GunsOwned = GunsOwned;
 		Next->bGunClaimTaken = bGunClaimTaken;
+		Next->SetGunsOwned(GunsOwned);
 	}
 }
 
@@ -227,6 +228,29 @@ void ASennitePlayerState::StartOver() {
 	JustUsedHealingItem = false;
 	JustReloadedRifle = false;
 	JustReloadedShotgun = false;
+	// what the wallet bought is the player's again at once
+	ArmOwned();
+}
+
+void ASennitePlayerState::SetGunsOwned(int32 Owned) {
+	GunsOwned = Owned;
+	ArmOwned();
+}
+
+void ASennitePlayerState::ArmOwned() {
+	if (!HasAuthority()) {
+		return;
+	}
+	const TArray<TSubclassOf<AWeaponActor>>& Slots = GetDefault<ASenniteCharacter>()->WeaponClasses;
+	for (int32 Type = 1; Type < Slots.Num() && Type < 31; ++Type) {
+		if ((GunsOwned & (1 << Type)) == 0 || Slots[Type] == nullptr || EquippedWeapons.Contains(Type)) {
+			continue;
+		}
+		EquippedWeapons.Add(Type);
+		if (EquippedWeaponsClips.IsValidIndex(Type)) {
+			EquippedWeaponsClips[Type] = GetDefault<AWeaponActor>(Slots[Type])->MagazineSize;
+		}
+	}
 }
 
 void ASennitePlayerState::Tick(float DeltaSeconds) {

@@ -268,13 +268,26 @@ FVector2D USenniteTouchControls::WheelMiddle(const FVector2D& Viewport) const
 	return FVector2D(FMath::Clamp(Button.X, Room, FMath::Max(Room, Viewport.X - Room)), FMath::Clamp(Button.Y, Room, FMath::Max(Room, Viewport.Y - Room)));
 }
 
+TArray<int32> USenniteTouchControls::Shown() const
+{
+	TArray<int32> Places;
+	for (int32 Index = 0; Index < WheelPlaces().Num(); ++Index) {
+		if (Has(WheelPlaces()[Index])) {
+			Places.Add(Index);
+		}
+	}
+	return Places;
+}
+
 FVector2D USenniteTouchControls::PlaceCentre(int32 Index, const FVector2D& Viewport) const
 {
-	// round the middle clockwise, from low on the left over the top to low on the right; the bottom, where the wheel's
-	// button is, stays clear
+	// what the player has, side by side round the middle and centred on its top, one place apart, clockwise in the
+	// wheel's order; the bottom, where the wheel's button is, stays clear even with everything on it
 	const double S = Viewport.Y / 720.0;
-	const int32 Count = WheelPlaces().Num();
-	const double Turn = FMath::DegreesToRadians(-WheelSpread + 2.0 * WheelSpread * Index / FMath::Max(1, Count - 1));
+	const TArray<int32> Places = Shown();
+	const int32 At = FMath::Max(0, Places.IndexOfByKey(Index));
+	const double Apart = 2.0 * WheelSpread / FMath::Max(1, WheelPlaces().Num() - 1);
+	const double Turn = FMath::DegreesToRadians((At - (Places.Num() - 1) * 0.5) * Apart);
 	return WheelMiddle(Viewport) + WheelReach * S * FVector2D(FMath::Sin(Turn), -FMath::Cos(Turn));
 }
 
@@ -289,7 +302,7 @@ int32 USenniteTouchControls::PlaceUnder(const FVector2D& At, const FVector2D& Vi
 	}
 	int32 Nearest = INDEX_NONE;
 	double Best = TNumericLimits<double>::Max();
-	for (int32 Index = 0; Index < WheelPlaces().Num(); ++Index) {
+	for (const int32 Index : Shown()) {
 		const double Distance = FVector2D::Distance(At, PlaceCentre(Index, Viewport));
 		if (Distance < Best) {
 			Best = Distance;
@@ -323,9 +336,7 @@ void USenniteTouchControls::TakePlace(int32 Index)
 	}
 	const FWheelPlace& Place = WheelPlaces()[Index];
 	if (!Has(Place)) {
-		// what the player has not got: nothing comes to hand
-		USenniteSounds::Play(Controller, TEXT("ui.denied"));
-		return;
+		return; // gone from the player since the wheel opened: nothing comes to hand
 	}
 	USenniteSounds::Play(Controller, TEXT("ui.press"));
 	if (!InHand(Place)) {
@@ -822,7 +833,7 @@ bool USenniteTouchControls::Where(const FString& Name, const FVector2D& Viewport
 			return true;
 		}
 	}
-	for (int32 Index = 0; Index < WheelPlaces().Num(); ++Index) {
+	for (const int32 Index : Shown()) {
 		if (Name == WheelPlaces()[Index].Name) {
 			OutCentre = PlaceCentre(Index, Size) + DrawnOrigin;
 			return true;
@@ -952,22 +963,19 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 		LastDrawn.Add(FString::Printf(TEXT("%s=%s"), Button.Name, bHave ? *Label : TEXT("dimmed")));
 	}
 
-	// the open wheel: everything that can be held, round its middle; what the player has not got dimmed, what is in
-	// hand edged in gold, the place under the finger lit
+	// the open wheel: what the player has, round its middle; what is in hand edged in gold, the place under the finger lit
 	if (bWheelOpen && bPlaying) {
 		const FVector2D Middle = WheelMiddle(Viewport);
 		Disc(Middle, (WheelReach + PlaceRadius + 6.0f) * S, FLinearColor(0.0f, 0.0f, 0.0f, 0.45f));
 		Ring(Middle, WheelMiddleRadius * S, Dim);
-		const TArray<FWheelPlace>& Places = WheelPlaces();
-		for (int32 Index = 0; Index < Places.Num(); ++Index) {
-			const FWheelPlace& Place = Places[Index];
-			const bool bHas = Has(Place);
+		for (const int32 Index : Shown()) {
+			const FWheelPlace& Place = WheelPlaces()[Index];
 			const bool bHeld = InHand(Place);
 			const FVector2D At = PlaceCentre(Index, Viewport);
 			Disc(At, PlaceRadius * S, Index == WheelPick ? Held : bHeld ? Chosen : Rest);
-			Ring(At, PlaceRadius * S, bHeld ? SenniteUi::Gold : bHas ? Edge : Dim);
-			Text(At, Place.Name, 9, bHas ? FLinearColor::White : Dim);
-			LastDrawn.Add(FString::Printf(TEXT("WHEEL:%s=%s"), Place.Name, bHas ? Place.Name : TEXT("dimmed")));
+			Ring(At, PlaceRadius * S, bHeld ? SenniteUi::Gold : Edge);
+			Text(At, Place.Name, 9, FLinearColor::White);
+			LastDrawn.Add(FString::Printf(TEXT("WHEEL:%s=%s"), Place.Name, Place.Name));
 		}
 	}
 }

@@ -2,7 +2,7 @@
 // every move is a finger on the screen, sent to the game's viewport as a phone's touches are. A drag
 // on the right turns the hero to her right; the stick walks her to the range's crate, where OPEN
 // shows, and OPEN gives her what the crate held; the weapon wheel changes what she holds (slid to and let go,
-// held open and let go where it came down, tapped to take the next thing, slid to an axe she has not bought);
+// held open and let go where it came down, tapped to take the next thing; what she has not got is not on it);
 // FIRE held keeps the rifle firing, and RELOAD fills it from the rounds the crate gave; JUMP jumps
 // and fires nothing; WALL, MAT, FIRE, RAMP and FLOOR build; EDIT, TILE and DONE cut a tile out of
 // the wall she built; then she turns, runs with the stick pushed all the way, drinks a potion with
@@ -172,7 +172,6 @@ namespace
 		int32 CountMark = 0;
 		int32 JumpMark = 0;
 		int32 PressMark = 0;
-		int32 DeniedMark = 0;
 		double BehindMark = 0.0;
 		float ShieldMark = 0.0f;
 		bool bSawWalking = false;
@@ -193,8 +192,9 @@ namespace
 			if (Hero == nullptr || State == nullptr || GEngine->GameViewport == nullptr || !Hero->GetCharacterMovement()->IsMovingOnGround()) {
 				return FPlatformTime::Seconds() - RealStart > 60.0 ? Fail(TEXT("No ASenniteCharacter standing on the ground after 60 s")) : false;
 			}
-			// this player's wallet owns both guns sold in the store: set as the server sets it once the publisher's server says so
-			State->GunsOwned = (1 << 3) | (1 << 4);
+			// this player's wallet owns both guns sold in the store, not the blades: set as the server sets it once the
+			// publisher's server says so. What is bought is hers at once, with no crate.
+			State->SetGunsOwned((1 << 3) | (1 << 4));
 			Controls = Controller->GetTouchControls();
 			if (Controls == nullptr) {
 				return Fail(TEXT("No touch controls: run with bAlwaysShowTouchInterface set, as Tools/check_touch.sh does"));
@@ -353,7 +353,11 @@ namespace
 			if (Step == 11 && Elapsed(World) > 5.6) {
 				Test->TestTrue(TEXT("Held, the wheel opens with everything she has on it"), Drawn(TEXT("WHEEL:RIFLE=RIFLE")) && Drawn(TEXT("WHEEL:SHOTGUN=SHOTGUN"))
 					&& Drawn(TEXT("WHEEL:OWN=OWN")) && Drawn(TEXT("WHEEL:BANDAGE=BANDAGE")) && Drawn(TEXT("WHEEL:POTION=POTION")));
-				Test->TestTrue(TEXT("and the axe and the katana, which she has not bought, dimmed"), Drawn(TEXT("WHEEL:AXE=dimmed")) && Drawn(TEXT("WHEEL:KATANA=dimmed")));
+				Test->TestTrue(TEXT("and the guns she bought, which no crate had to give her"), Drawn(TEXT("WHEEL:ENERGY=ENERGY")) && Drawn(TEXT("WHEEL:SNIPER=SNIPER")));
+				Test->TestFalse(TEXT("The axe and the katana, which she has not got, are not on the wheel at all"),
+					Controls->LastDrawn.ContainsByPredicate([](const FString& Each) { return Each.StartsWith(TEXT("WHEEL:AXE")) || Each.StartsWith(TEXT("WHEEL:KATANA")); }));
+				FVector2D Nowhere;
+				Test->TestFalse(TEXT("and there is no place for the axe to slide to"), Controls->Where(TEXT("AXE"), ViewportSize(), Nowhere));
 				GameCheck::Shot(TEXT("Touch"), TEXT("wheel.png"));
 				Step = 120;
 				return false;
@@ -377,20 +381,12 @@ namespace
 				Step = 14;
 				Test->TestTrue(TEXT("A tap of the wheel takes the next thing she has: the shotgun"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 2);
 				Test->TestTrue(TEXT("and the wheel says so"), Drawn(TEXT("WHEEL=SHOTGUN")));
-				DeniedMark = USenniteSounds::Heard(World, TEXT("ui.denied"));
-				Press(TEXT("AXE"));
-				return false;
-			}
-			if (Step == 14 && Elapsed(World) > 7.35) { Step = 15; Lift(TEXT("AXE")); return false; }
-			if (Step == 15 && Elapsed(World) > 8.0) {
 				Step = 16;
-				Test->TestTrue(TEXT("Let go on the axe she has not bought, the shotgun stays in her hand"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 2);
-				Test->TestEqual(TEXT("and it is heard as refused"), USenniteSounds::Heard(World, TEXT("ui.denied")) - DeniedMark, 1);
 				Press(TEXT("RIFLE"));
 				return false;
 			}
-			if (Step == 16 && Elapsed(World) > 8.15) { Step = 17; Lift(TEXT("RIFLE")); return false; }
-			if (Step == 17 && Elapsed(World) > 8.9) {
+			if (Step == 16 && Elapsed(World) > 7.35) { Step = 17; Lift(TEXT("RIFLE")); return false; }
+			if (Step == 17 && Elapsed(World) > 8.1) {
 				Test->TestTrue(TEXT("Slid to the rifle and let go, the rifle is in her hand"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 1);
 				ClipMark = Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->CurrentBulletCount : 0;
 				TopZ = Hero->GetActorLocation().Z;
