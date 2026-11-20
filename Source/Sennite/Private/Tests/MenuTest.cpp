@@ -80,7 +80,9 @@ namespace
 		/** The studio's logo before the first menu: when it was first and last seen on the screen, and whether a picture of it was taken. */
 		double LogoFirst = -1.0;
 		double LogoLast = -1.0;
-		bool bLogoShot = false;
+		/** The start screens this check saw, in order, and the ones it took a picture of. */
+		TArray<FString> StartsSeen;
+		TSet<FString> ShotOf;
 	};
 
 	bool FMenuRun::Update()
@@ -94,15 +96,19 @@ namespace
 
 		switch (Phase) {
 		case EPhase::WaitForMenu: {
-			// the studio's logo comes first, on its own, with nothing to tap
-			if (Menu != nullptr && MenuCheck::Line(Menu, TEXT("page")) == TEXT("logo")) {
+			// the start screens come first, one after the other, with nothing to tap
+			if (Menu != nullptr && MenuCheck::Line(Menu, TEXT("page")).StartsWith(TEXT("start:"))) {
+				const FString Shown = MenuCheck::Line(Menu, TEXT("page")).RightChop(6);
+				if (StartsSeen.Num() == 0 || StartsSeen.Last() != Shown) {
+					StartsSeen.Add(Shown);
+				}
 				const double Now = FPlatformTime::Seconds();
 				LogoFirst = LogoFirst < 0.0 ? Now : LogoFirst;
 				LogoLast = Now;
 				Test->TestFalse(TEXT("While the logo is up there is no button to tap"), MenuCheck::Has(Menu, TEXT("play")));
-				if (!bLogoShot && Now - LogoFirst > 1.0) {
-					bLogoShot = true;
-					GameCheck::Shot(TEXT("Menu"), TEXT("logo.png"));
+				if (!ShotOf.Contains(Shown) && Now - LogoFirst > 0.0) {
+					ShotOf.Add(Shown);
+					GameCheck::Shot(TEXT("Menu"), *FString::Printf(TEXT("start_%s.png"), *Shown));
 				}
 				return false;
 			}
@@ -112,11 +118,21 @@ namespace
 			{
 				// the logo began with the first frame the menu drew, often before this check was running; the menu came three seconds later
 				const double Up = ASenniteMenuHUD::MenuBeganAt() - ASenniteMenuHUD::LogoBeganAt();
-				Test->TestTrue(TEXT("The studio's logo is on the screen before the first menu"), ASenniteMenuHUD::LogoBeganAt() > 0.0 && ASenniteMenuHUD::MenuBeganAt() > 0.0);
-				Test->TestTrue(FString::Printf(TEXT("for about three seconds (%.2f s)"), Up), Up > 2.9 && Up < 3.4);
-				UE_LOG(LogTemp, Display, TEXT("GAMECHECK logo: up %.2f s before the first menu; this check saw it for %.2f s"), Up, LogoFirst >= 0.0 ? LogoLast - LogoFirst : 0.0);
+				const TArray<FSenniteStartScreen>& Starts = GetDefault<ASenniteMenuHUD>()->StartScreens;
+				Test->TestTrue(TEXT("Two start screens: the studio's logo, then the game's title screen"), Starts.Num() == 2
+					&& Starts[0].Name == TEXT("irrefutable") && !Starts[0].bFill && Starts[1].Name == TEXT("sennite") && Starts[1].bFill);
+				for (const FSenniteStartScreen& Each : Starts) {
+					Test->TestTrue(FString::Printf(TEXT("The %s start screen is an image that loads"), *Each.Name), Cast<UTexture2D>(Each.Image.TryLoad()) != nullptr);
+					Test->TestEqual(FString::Printf(TEXT("The %s start screen is up for three seconds"), *Each.Name), Each.Seconds, 3.0f);
+				}
+				Test->TestTrue(TEXT("The start screens are on the screen before the first menu"), ASenniteMenuHUD::LogoBeganAt() > 0.0 && ASenniteMenuHUD::MenuBeganAt() > 0.0);
+				Test->TestTrue(FString::Printf(TEXT("for about six seconds in all (%.2f s)"), Up), Up > 5.9 && Up < 6.4);
+				if (StartsSeen.Num() > 0) {
+					Test->TestEqual(TEXT("The last start screen seen before the menu is the game's title screen"), StartsSeen.Last(), FString(TEXT("sennite")));
+				}
+				UE_LOG(LogTemp, Display, TEXT("GAMECHECK start screens: up %.2f s before the first menu; this check saw %s for %.2f s"), Up,
+					*FString::Join(StartsSeen, TEXT(", ")), LogoFirst >= 0.0 ? LogoLast - LogoFirst : 0.0);
 			}
-			Test->TestTrue(TEXT("The logo is a texture that loads"), Cast<UTexture2D>(GetDefault<ASenniteMenuHUD>()->Logo.TryLoad()) != nullptr);
 			// the heroes this check uses: the first free hero that is not the default, and the first that is bought
 			const FName Default = USenniteHeroes::FindOrDefault(NAME_None).Id;
 			for (const FSenniteHero& Hero : Heroes) {
