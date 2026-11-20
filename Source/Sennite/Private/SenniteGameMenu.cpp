@@ -267,6 +267,7 @@ void USenniteGameMenu::Act(FName Action)
 		}
 		else if (Name == TEXT("music-") || Name == TEXT("music+")) {
 			Profile.MusicVolume = FMath::Clamp(Tenths(Profile.MusicVolume + (Name == TEXT("music+") ? VolumeStep : -VolumeStep)), 0.0f, 1.0f);
+			Profile.bMusicChosen = true;
 		}
 		else if (Name == TEXT("quality-") || Name == TEXT("quality+")) {
 			// from what is in effect now; a device's own mix of levels counts as medium

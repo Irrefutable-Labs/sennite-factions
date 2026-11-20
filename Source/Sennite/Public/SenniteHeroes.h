@@ -147,9 +147,16 @@ public:
 	UPROPERTY()
 	float Volume = 1.0f;
 
-	/** How loud the menu's songs are, 0 to 1, of that: low from the start, so a button is heard over them. */
+	/**
+	 * How loud the menu's songs are, 0 to 1, of that: low from the start, so a button is heard over them. The owner,
+	 * 2026-11-20: "It should default at 10%."
+	 */
 	UPROPERTY()
-	float MusicVolume = 0.3f;
+	float MusicVolume = 0.1f;
+
+	/** Whether the player set the music's volume in SETTINGS. Until they have, it is the default, also in a profile saved before the default changed. */
+	UPROPERTY()
+	bool bMusicChosen = false;
 
 	/** The graphics quality the player chose, 0 (low) to 3 (epic); -1 while they have chosen none and the device's own is kept. */
 	UPROPERTY()
