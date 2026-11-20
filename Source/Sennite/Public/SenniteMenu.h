@@ -234,14 +234,30 @@ private:
 	TObjectPtr<USenniteGameMenu> Settings;
 };
 
-/** The menu's pages, drawn on the canvas. */
-UCLASS()
+/**
+ * The menu's pages, drawn on the canvas. Before the first of them, each time the game starts, the studio's logo
+ * (Irrefutable Labs) is shown on black over the whole screen for LogoSeconds, right after the engine's own start.
+ */
+UCLASS(config=Game)
 class SENNITE_API ASenniteMenuHUD : public AHUD
 {
 	GENERATED_BODY()
 
 public:
 	virtual void DrawHUD() override;
+
+	/** The studio's logo, and how long it is up before the first menu (Tools/import_brand.py). Set in DefaultGame.ini. */
+	UPROPERTY(Config)
+	FSoftObjectPath Logo;
+
+	UPROPERTY(Config)
+	float LogoSeconds = 3.0f;
+
+	/** Whether the logo is on the screen now: once a game, from the first frame the menu draws, for LogoSeconds. */
+	static bool LogoUp();
+	/** When (FPlatformTime) the logo was first drawn this game, and when the first menu after it was; negative before. */
+	static double LogoBeganAt();
+	static double MenuBeganAt();
 
 	/** The buttons the last frame drew. */
 	TArray<FSenniteMenuButton> Buttons;
@@ -310,6 +326,8 @@ private:
 
 	/** The whole screen, in the canvas's own measure: on a phone the canvas starts inside the screen's safe zone. */
 	FBox2D Screen() const;
+	/** The logo on black over the whole screen, fading in and out. True while it is up, and the menu is not drawn. */
+	bool DrawLogo();
 
 	/**
 	 * How far the canvas starts in from the screen's top left corner: nothing on a desktop, a phone's safe
