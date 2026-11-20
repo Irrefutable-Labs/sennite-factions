@@ -250,9 +250,13 @@ struct FSenniteStartScreen
 	UPROPERTY()
 	float Seconds = 3.0f;
 
-	/** Over the whole screen, cut to its shape (a title screen); or whole, as large as fits on black (a logo). */
+	/** Over the whole screen, cut to its shape; or whole, as large as fits on black. */
 	UPROPERTY()
 	bool bFill = false;
+
+	/** Shown whole, the share of the screen's height or width it takes at most: 1 to the edges, less for a margin round it. */
+	UPROPERTY()
+	float Size = 0.82f;
 };
 
 /**

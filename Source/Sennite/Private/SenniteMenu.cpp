@@ -1089,8 +1089,8 @@ bool ASenniteMenuHUD::DrawLogo()
 			}
 		}
 		else {
-			// whole, as large as fits with a margin, in the middle
-			const double Room = 0.82;
+			// whole, as large as fits (with the margin its Size leaves), in the middle
+			const double Room = FMath::Clamp(double(Due->Size), 0.1, 1.0);
 			Drawn = Size.X / Size.Y > Aspect ? FVector2D(Size.Y * Room * Aspect, Size.Y * Room) : FVector2D(Size.X * Room, Size.X * Room / Aspect);
 			At = Whole.GetCenter() - Drawn * 0.5;
 		}

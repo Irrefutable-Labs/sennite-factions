@@ -120,7 +120,9 @@ namespace
 				const double Up = ASenniteMenuHUD::MenuBeganAt() - ASenniteMenuHUD::LogoBeganAt();
 				const TArray<FSenniteStartScreen>& Starts = GetDefault<ASenniteMenuHUD>()->StartScreens;
 				Test->TestTrue(TEXT("Two start screens: the studio's logo, then the game's title screen"), Starts.Num() == 2
-					&& Starts[0].Name == TEXT("irrefutable") && !Starts[0].bFill && Starts[1].Name == TEXT("sennite") && Starts[1].bFill);
+					&& Starts[0].Name == TEXT("irrefutable") && !Starts[0].bFill && Starts[1].Name == TEXT("sennite") && !Starts[1].bFill);
+				Test->TestFalse(TEXT("No start screen is cut at the screen's edges: each is shown whole"), Starts.ContainsByPredicate([](const FSenniteStartScreen& Each) { return Each.bFill || Each.Size > 1.0f; }));
+				Test->TestEqual(TEXT("A new profile's music is at 10%"), GetDefault<USenniteProfile>()->MusicVolume, 0.1f);
 				for (const FSenniteStartScreen& Each : Starts) {
 					Test->TestTrue(FString::Printf(TEXT("The %s start screen is an image that loads"), *Each.Name), Cast<UTexture2D>(Each.Image.TryLoad()) != nullptr);
 					Test->TestEqual(FString::Printf(TEXT("The %s start screen is up for three seconds"), *Each.Name), Each.Seconds, 3.0f);

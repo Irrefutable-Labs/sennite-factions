@@ -1,6 +1,10 @@
 #!/bin/zsh
 # Builds, cooks and packages the game for Android phones: one APK with the menu, the arena PLAY opens and the test range the bases stand on,
-# played by touch, no server and no wallet. Long (the first run cooks every asset the two maps use).
+# played by touch. Long (the first run cooks every asset the two maps use).
+# The publisher's server the game uses is written into the APK itself, so a phone the game is newly installed on
+# reaches it too (a server address left on the phone, Tools/phone_game.sh, is lost when the game is uninstalled):
+#   SENNITE_PUBLISHER_URL   the server (default: this computer's Wi-Fi address, port 8790, as Tools/phone_publisher.sh serves it);
+#                           none for an APK with no server, no store and no faction bases
 #   Tools/package_android.sh                 the APK, in Saved/Phone/
 #   Tools/package_android.sh -iterate        cook only what changed since the last run
 # Then, with the phone on adb (USB, or wireless: adb pair / adb connect):
@@ -26,12 +30,21 @@ if [[ ! -d "$UE/Engine/Build/Android/Java" ]]; then
   exit 2
 fi
 
+SERVER="${SENNITE_PUBLISHER_URL:-http://$(ipconfig getifaddr en0 2>/dev/null):8790}"
+if [[ "$SERVER" == "none" || "$SERVER" == "http://:8790" ]]; then
+  GAME_LINE=()
+  echo "the APK names no publisher's server"
+else
+  GAME_LINE=("-cmdline=-PublisherUrl=$SERVER")
+  echo "the APK reaches the publisher's server at $SERVER"
+fi
+
 OUT="$PWD/Saved/Phone"
 mkdir -p "$OUT"
 touch "$OUT/.started"
 "$UE/Engine/Build/BatchFiles/RunUAT.sh" BuildCookRun -project="$PWD/Sennite.uproject" -platform=Android -cookflavor=ASTC \
   -clientconfig=Development -build -cook -stage -package -pak -archive -archivedirectory="$OUT" \
-  -map=/Game/Maps/Menu+/Game/Maps/Arena+/Game/Maps/TestRange -nop4 -utf8output -unattended -nocompileeditor "$@" 2>&1 | tee "$OUT/package.log"
+  -map=/Game/Maps/Menu+/Game/Maps/Arena+/Game/Maps/TestRange -nop4 -utf8output -unattended -nocompileeditor "${GAME_LINE[@]}" "$@" 2>&1 | tee "$OUT/package.log"
 rc=${pipestatus[1]}
 echo "package exit $rc"
 APK=$(find "$OUT" -name "*.apk" -newer "$OUT/.started" | head -1)

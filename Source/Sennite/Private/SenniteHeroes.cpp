@@ -51,6 +51,10 @@ USenniteProfile& USenniteProfile::Get()
 	if (!Kept.IsValid()) {
 		USenniteProfile* Read = Cast<USenniteProfile>(UGameplayStatics::LoadGameFromSlot(Slot(), 0));
 		Kept.Reset(Read != nullptr ? Read : NewObject<USenniteProfile>());
+		if (!Kept->bMusicChosen) {
+			// a volume the player never chose is the default, whatever an older game saved
+			Kept->MusicVolume = GetDefault<USenniteProfile>()->MusicVolume;
+		}
 	}
 	return *Kept.Get();
 }
