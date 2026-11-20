@@ -93,8 +93,8 @@ void USenniteHeroMesh::HoldGun(TArray<FTransform>& Pose)
 	const ASenniteCharacter* Hero = Cast<ASenniteCharacter>(GetOwner());
 	const AWeaponActor* Gun = Hero != nullptr ? Hero->CurrentWeapon : nullptr;
 	const UWorld* World = GetWorld();
-	// a gun, in this body's hand: the pickaxe is swung, not held like one
-	if (Gun == nullptr || World == nullptr || Gun->WeaponType < 1 || Gun->WeaponMesh == nullptr || Gun->WeaponMesh->GetAttachParent() != this || !FindArms()) {
+	// a gun, in this body's hand: the pickaxe, the axe and the katana are swung by the hero's own attack, not held like one
+	if (Gun == nullptr || World == nullptr || Gun->WeaponType < 1 || Gun->bMelee || Gun->WeaponMesh == nullptr || Gun->WeaponMesh->GetAttachParent() != this || !FindArms()) {
 		return;
 	}
 	const FReferenceSkeleton& Bones = GetSkeletalMeshAsset()->GetRefSkeleton();

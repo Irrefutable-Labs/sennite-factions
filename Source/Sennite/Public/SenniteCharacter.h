@@ -556,6 +556,12 @@ protected:
 	UFUNCTION()
 	void HoldSniper();
 
+	UFUNCTION()
+	void HoldAxe();
+
+	UFUNCTION()
+	void HoldKatana();
+
 	/** Whether a weapon slot holds a gun: every slot but the pickaxe's that has a weapon class. */
 	bool IsGun(int32 Type) const;
 

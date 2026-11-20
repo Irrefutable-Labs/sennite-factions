@@ -10,7 +10,7 @@ describe("the shop's world", () => {
   const { shop } = loadWorld();
 
   it("sells the energy rifle and the sniper, by the ids the game knows them by, each at a price in whole D-bucks", () => {
-    expect(shop.weapons.map((w) => w.id)).toEqual(["energy-rifle", "sniper"]);
+    expect(shop.weapons.map((w) => w.id)).toEqual(["energy-rifle", "sniper", "axe", "katana"]);
     for (const weapon of shop.weapons) {
       expect(weapon.name).not.toBe("");
       expect(weapon.price).toMatch(/^[1-9][0-9]*$/);

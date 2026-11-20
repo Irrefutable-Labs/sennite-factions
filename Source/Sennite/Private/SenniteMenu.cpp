@@ -1546,7 +1546,7 @@ void ASenniteMenuHUD::DrawWeapons(ASenniteMenuController* Menu)
 			NextStep(Server, Thing, Left, BY, BW);
 		}
 		else {
-			Text(TEXT("status"), TEXT("NO GUNS FROM THE SHOP YET"), (Left + 2.0f) * S, 254.0f * S, 13, SenniteUi::Gold);
+			Text(TEXT("status"), TEXT("NO WEAPONS FROM THE SHOP YET"), (Left + 2.0f) * S, 254.0f * S, 13, SenniteUi::Gold);
 		}
 		Text(TEXT("free"), TEXT("THE RIFLE AND THE SHOTGUN ARE FREE: EVERY CRATE GIVES THEM."), (Left + 2.0f) * S, (H - 112.0f) * S, 12, White, 0.0f, false);
 		return;
@@ -1556,7 +1556,7 @@ void ASenniteMenuHUD::DrawWeapons(ASenniteMenuController* Menu)
 	const FSenniteHeroForSale& Gun = Guns[Menu->BrowseWeapon];
 	const AWeaponActor* Known = ShopGun(Gun.Id);
 	const bool bOwned = Server->bConnected && Server->OwnsWeapon(Gun.Id);
-	Text(TEXT("count"), FString::Printf(TEXT("GUN %d OF %d"), Menu->BrowseWeapon + 1, Guns.Num()), Left * S, 122.0f * S, 12, SenniteUi::Gold);
+	Text(TEXT("count"), FString::Printf(TEXT("WEAPON %d OF %d"), Menu->BrowseWeapon + 1, Guns.Num()), Left * S, 122.0f * S, 12, SenniteUi::Gold);
 	// the name the game calls it in play, where it is one of the game's guns
 	const FString Name = Known != nullptr && !Known->DisplayName.IsEmpty() ? Known->DisplayName : Gun.Name.ToUpper();
 	const float Room = 440.0f * S;
@@ -1592,7 +1592,7 @@ void ASenniteMenuHUD::DrawWeapons(ASenniteMenuController* Menu)
 	ShopWord(Server, !Server->HeroOnItsWay.IsEmpty(), (Left + 2.0f) * S, (BY + 80.0f + (bHint ? 52.0f : bOwned ? 26.0f : 0.0f)) * S);
 
 	// which guns are bought and which are not
-	Text(TEXT("free"), TEXT("THE RIFLE AND THE SHOTGUN ARE FREE: EVERY CRATE GIVES THEM. A GUN SOLD HERE COMES OUT OF A CRATE ONLY FOR ITS OWNERS."),
+	Text(TEXT("free"), TEXT("THE RIFLE AND THE SHOTGUN ARE FREE: EVERY CRATE GIVES THEM. A WEAPON SOLD HERE COMES OUT OF A CRATE ONLY FOR ITS OWNERS."),
 		(Left + 2.0f) * S, (H - 112.0f) * S, 12, White, 0.0f, false);
 
 	// the arrows, either side of the gun: as far apart as the screen has room for, the gun turning whole between them

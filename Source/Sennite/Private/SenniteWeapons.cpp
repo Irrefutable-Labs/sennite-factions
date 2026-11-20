@@ -70,6 +70,21 @@ ASenniteSniper::ASenniteSniper()
 	BulletClass = ASenniteSniperBullet::StaticClass();
 }
 
+ASenniteAxe::ASenniteAxe()
+{
+	// swung: no magazine, no bullet (how hard and how far a blow lands is in DefaultGame.ini)
+	WeaponType = 5;
+	MagazineSize = 0;
+	CurrentBulletCount = 0;
+}
+
+ASenniteKatana::ASenniteKatana()
+{
+	WeaponType = 6;
+	MagazineSize = 0;
+	CurrentBulletCount = 0;
+}
+
 ASenniteOwnBolt::ASenniteOwnBolt()
 {
 	// 40 m of reach; kind 0, the pickaxe's, so it takes materials from what it harvests

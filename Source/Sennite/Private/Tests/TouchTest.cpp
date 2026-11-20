@@ -1,7 +1,8 @@
 // Touch check. Run in the game on the test range with the touch controls shown (as on a phone):
 // every move is a finger on the screen, sent to the game's viewport as a phone's touches are. A drag
 // on the right turns the hero to her right; the stick walks her to the range's crate, where OPEN
-// shows, and OPEN gives her what the crate held; the slots along the bottom change what she holds;
+// shows, and OPEN gives her what the crate held; the weapon wheel changes what she holds (slid to and let go,
+// held open and let go where it came down, tapped to take the next thing, slid to an axe she has not bought);
 // FIRE held keeps the rifle firing, and RELOAD fills it from the rounds the crate gave; JUMP jumps
 // and fires nothing; WALL, MAT, FIRE, RAMP and FLOOR build; EDIT, TILE and DONE cut a tile out of
 // the wall she built; then she turns, runs with the stick pushed all the way, drinks a potion with
@@ -78,8 +79,30 @@ namespace
 			return Centre;
 		}
 
-		/** A tap on a button: the finger comes down now and lifts a moment later, in Lift(). */
-		void Press(const TCHAR* Name) { Finger(RightThumb, ETouchType::Began, At(Name)); }
+		/** Whether a name is a place on the weapon wheel (RIFLE, AXE, POTION, ...), not a button of its own. */
+		static bool OnWheel(const TCHAR* Name)
+		{
+			for (const TCHAR* Place : { TEXT("OWN"), TEXT("RIFLE"), TEXT("SHOTGUN"), TEXT("ENERGY"), TEXT("SNIPER"), TEXT("AXE"), TEXT("KATANA"), TEXT("BANDAGE"), TEXT("POTION") }) {
+				if (FCString::Strcmp(Place, Name) == 0) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		/**
+		 * A tap on a button: the finger comes down now and lifts a moment later, in Lift(). For a place on the wheel the
+		 * finger comes down on the wheel and slides to the place, which opens the wheel, and lets go there in Lift().
+		 */
+		void Press(const TCHAR* Name)
+		{
+			if (OnWheel(Name)) {
+				Finger(RightThumb, ETouchType::Began, At(TEXT("WHEEL")));
+				Finger(RightThumb, ETouchType::Moved, At(Name));
+				return;
+			}
+			Finger(RightThumb, ETouchType::Began, At(Name));
+		}
 		void Lift(const TCHAR* Name) { Finger(RightThumb, ETouchType::Ended, At(Name)); }
 
 		/** One step of turning the hero to face a yaw by dragging a finger across the right of the screen. True once she does. */
@@ -149,6 +172,7 @@ namespace
 		int32 CountMark = 0;
 		int32 JumpMark = 0;
 		int32 PressMark = 0;
+		int32 DeniedMark = 0;
 		double BehindMark = 0.0;
 		float ShieldMark = 0.0f;
 		bool bSawWalking = false;
@@ -181,10 +205,12 @@ namespace
 			// a run without a window starts with a stray mouse movement; begin from the view behind the hero
 			Controller->SetControlRotation(FRotator(-12.0, Hero->GetActorRotation().Yaw, 0.0));
 			for (const TCHAR* Name : { TEXT("FIRE=ATTACK"), TEXT("JUMP=JUMP"), TEXT("AIM=AIM"), TEXT("WALL=WALL"), TEXT("RAMP=RAMP"),
-				TEXT("FLOOR=FLOOR"), TEXT("RIFLE=RIFLE"), TEXT("SHOTGUN=SHOTGUN"), TEXT("BANDAGE=BANDAGE"), TEXT("POTION=POTION"), TEXT("STICK=0.00,0.00") }) {
+				TEXT("FLOOR=FLOOR"), TEXT("WHEEL=OWN"), TEXT("STICK=0.00,0.00") }) {
 				Test->TestTrue(FString::Printf(TEXT("The HUD draws %s"), Name), Drawn(Name));
 			}
 			Test->TestTrue(TEXT("With no gun in hand the RELOAD button is there, dimmed: her own weapon has nothing to load"), Drawn(TEXT("RELOAD=dimmed")));
+			Test->TestFalse(TEXT("There is no row of slots along the bottom: what she holds is on the wheel"), Drawn(TEXT("RIFLE=RIFLE")) || Drawn(TEXT("POTION=POTION")));
+			Test->TestFalse(TEXT("The wheel is shut until a finger opens it"), Controls->LastDrawn.ContainsByPredicate([](const FString& Each) { return Each.StartsWith(TEXT("WHEEL:")); }));
 			Test->TestFalse(TEXT("With no crate near, there is no OPEN button"), Controls->LastDrawn.ContainsByPredicate([](const FString& Each) { return Each.StartsWith(TEXT("OPEN=")); }));
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK controls: %s"), *FString::Join(Controls->LastDrawn, TEXT(" ")));
 			GameCheck::Shot(TEXT("Touch"), TEXT("controls.png"));
@@ -317,7 +343,55 @@ namespace
 			}
 			if (Step == 9 && Elapsed(World) > 4.15) { Step = 10; Lift(TEXT("RIFLE")); return false; }
 			if (Step == 10 && Elapsed(World) > 5.0) {
+				Step = 11;
 				Test->TestTrue(TEXT("RIFLE puts the rifle back in her hand"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 1);
+				Test->TestTrue(TEXT("The wheel names what is in hand"), Drawn(TEXT("WHEEL=RIFLE")));
+				// a finger held on the wheel, not moving
+				Finger(RightThumb, ETouchType::Began, At(TEXT("WHEEL")));
+				return false;
+			}
+			if (Step == 11 && Elapsed(World) > 5.6) {
+				Test->TestTrue(TEXT("Held, the wheel opens with everything she has on it"), Drawn(TEXT("WHEEL:RIFLE=RIFLE")) && Drawn(TEXT("WHEEL:SHOTGUN=SHOTGUN"))
+					&& Drawn(TEXT("WHEEL:OWN=OWN")) && Drawn(TEXT("WHEEL:BANDAGE=BANDAGE")) && Drawn(TEXT("WHEEL:POTION=POTION")));
+				Test->TestTrue(TEXT("and the axe and the katana, which she has not bought, dimmed"), Drawn(TEXT("WHEEL:AXE=dimmed")) && Drawn(TEXT("WHEEL:KATANA=dimmed")));
+				GameCheck::Shot(TEXT("Touch"), TEXT("wheel.png"));
+				Step = 120;
+				return false;
+			}
+			if (Step == 120 && Elapsed(World) > 5.9) {
+				// the picture taken with the wheel open; let go where it came down: nothing changes
+				Step = 12;
+				Lift(TEXT("WHEEL"));
+				return false;
+			}
+			if (Step == 12 && Elapsed(World) > 6.4) {
+				Step = 13;
+				Test->TestTrue(TEXT("Let go without moving, the rifle stays in her hand"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 1);
+				Test->TestFalse(TEXT("and the wheel shuts"), Controls->LastDrawn.ContainsByPredicate([](const FString& Each) { return Each.StartsWith(TEXT("WHEEL:")); }));
+				// a tap: the next thing she has after the rifle
+				Finger(RightThumb, ETouchType::Began, At(TEXT("WHEEL")));
+				Finger(RightThumb, ETouchType::Ended, At(TEXT("WHEEL")));
+				return false;
+			}
+			if (Step == 13 && Elapsed(World) > 7.2) {
+				Step = 14;
+				Test->TestTrue(TEXT("A tap of the wheel takes the next thing she has: the shotgun"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 2);
+				Test->TestTrue(TEXT("and the wheel says so"), Drawn(TEXT("WHEEL=SHOTGUN")));
+				DeniedMark = USenniteSounds::Heard(World, TEXT("ui.denied"));
+				Press(TEXT("AXE"));
+				return false;
+			}
+			if (Step == 14 && Elapsed(World) > 7.35) { Step = 15; Lift(TEXT("AXE")); return false; }
+			if (Step == 15 && Elapsed(World) > 8.0) {
+				Step = 16;
+				Test->TestTrue(TEXT("Let go on the axe she has not bought, the shotgun stays in her hand"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 2);
+				Test->TestEqual(TEXT("and it is heard as refused"), USenniteSounds::Heard(World, TEXT("ui.denied")) - DeniedMark, 1);
+				Press(TEXT("RIFLE"));
+				return false;
+			}
+			if (Step == 16 && Elapsed(World) > 8.15) { Step = 17; Lift(TEXT("RIFLE")); return false; }
+			if (Step == 17 && Elapsed(World) > 8.9) {
+				Test->TestTrue(TEXT("Slid to the rifle and let go, the rifle is in her hand"), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == 1);
 				ClipMark = Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->CurrentBulletCount : 0;
 				TopZ = Hero->GetActorLocation().Z;
 				Mark = Hero->GetActorLocation();
@@ -339,7 +413,7 @@ namespace
 			// in play a button is heard as the owner's press recording, the one the menus' buttons play, and never as the
 			// small tick of a row: the five slots tapped above, once each. JUMP alone is heard only as the jump.
 			Test->TestEqual(TEXT("The tap of JUMP is heard as the jump"), USenniteSounds::HeardBeginning(World, TEXT("jump.")) - JumpMark, 1);
-			Test->TestEqual(TEXT("Each slot tapped is heard as a press, and JUMP is not"), USenniteSounds::Heard(World, TEXT("ui.press")) - PressMark, 5);
+			Test->TestEqual(TEXT("Each thing taken from the wheel is heard as a press, and JUMP is not"), USenniteSounds::Heard(World, TEXT("ui.press")) - PressMark, 7);
 			Test->TestEqual(TEXT("No tap in play is heard as a tick"), USenniteSounds::Heard(World, TEXT("ui.tick")), 0);
 			Test->TestEqual(TEXT("nor as one of a menu's row"), USenniteSounds::Heard(World, TEXT("ui.pick")), 0);
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK jump: rose %.0f cm"), TopZ - Mark.Z);
@@ -557,7 +631,7 @@ namespace
 				return false;
 			}
 			Test->TestTrue(TEXT("BANDAGE puts a bandage in her hand"), Hero->CurrentHealingItem != nullptr && Hero->CurrentHealingItem->HealingType == 0);
-			Test->TestTrue(TEXT("The HUD draws the BANDAGE slot"), Drawn(TEXT("BANDAGE=BANDAGE")));
+			Test->TestTrue(TEXT("The wheel names the bandage in hand"), Drawn(TEXT("WHEEL=BANDAGE")));
 			UE_LOG(LogTouchCheck, Display, TEXT("GAMECHECK controls: %s"), *FString::Join(Controls->LastDrawn, TEXT(" ")));
 			GameCheck::Shot(TEXT("Touch"), TEXT("bandage.png"));
 			Enter(EPhase::Done, World);

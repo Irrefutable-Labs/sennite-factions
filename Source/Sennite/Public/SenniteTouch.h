@@ -8,6 +8,12 @@
 // for what the key does on the page shown (PLACE is BUY in the shop, DISMANTLE is WITHDRAW among the
 // people). A button whose key would do nothing now is dimmed. A tap on the map moves the cursor to the
 // cell tapped, by pressing the editor's arrow keys (W A S D) as many times as it takes.
+//
+// What the hero holds is chosen on one button, the wheel, at the bottom of the screen: it names what is in
+// hand. A tap takes the next thing the player has in hand (the hero's own weapon, each gun and blade they
+// have, bandages, potions, in that order, round again). A finger held on it, or slid off it, opens the wheel:
+// everything that can be held in a circle round it, what the player has not got dimmed. The finger slides to
+// one and lets go, and that is in hand; the wheel shuts. Let go in the middle and nothing changes.
 
 #pragma once
 
@@ -45,13 +51,13 @@ public:
 	/** Let go of every key and the stick: the player's fingers are no longer on the screen. */
 	void ReleaseAll();
 
-	/** Where on the screen a control is, by the name drawn on it (FIRE, JUMP, RIFLE, STICK, ...): where a finger taps it. The size given is used until the controls have been drawn once. False if there is none. */
+	/** Where on the screen a control is, by the name drawn on it (FIRE, JUMP, WHEEL, STICK, ...), or a place on the wheel by what it holds (RIFLE, AXE, POTION, ...), where it is when the wheel is open: where a finger taps it. The size given is used until the controls have been drawn once. False if there is none. */
 	bool Where(const FString& Name, const FVector2D& Viewport, FVector2D& OutCentre) const;
 
 	/** Where, on the viewport now, the control is that presses a key: in play one that is shown; in the planning view any, dimmed or not. False if there is none. */
 	bool WhereKey(const FKey& InKey, FVector2D& OutCentre) const;
 
-	/** What the last frame drew, as "name=label" ("FIRE=FIRE", "AIM=MAT", "STICK=0.00,0.70", ...); in the planning view a dimmed button as "name=label (off)". */
+	/** What the last frame drew, as "name=label" ("FIRE=FIRE", "AIM=MAT", "STICK=0.00,0.70", "WHEEL=RIFLE", ...); while the wheel is open each place on it as "WHEEL:name=name", or "=dimmed" for what the player has not got; in the planning view a dimmed button as "name=label (off)". */
 	TArray<FString> LastDrawn;
 
 	/** How far a finger has to drag the stick for it to be pushed all the way, on a screen 720 lines high. */
@@ -63,13 +69,23 @@ private:
 	{
 		const TCHAR* Name;
 		FKey Key;
-		/** Centre: a negative X is measured from the right edge, a negative Y from the bottom edge. For a cell of the editor's grid: its column (0 to 3, left to right) and row. */
+		/** Centre: a negative X is measured from the right edge, a negative Y from the bottom edge. For a cell of the editor's grid: its column (0 to 3, left to right) and row. For the wheel, X is from the middle of the screen. */
 		FVector2D Spot;
-		/** Round buttons have a radius; the slots along the bottom are boxes of this half-width and a fixed half-height. */
+		/** Round buttons have a radius; a cell is a box of a fixed size. */
 		float Radius;
-		bool bSlot;
+		/** The wheel: what the hero holds is chosen on it. It presses no key of its own. */
+		bool bWheel;
 		/** A cell of the planning view's grid of buttons, down the right side. */
 		bool bCell = false;
+	};
+
+	/** A place on the wheel: the name it goes by, the key that takes it in hand, and what it is: a gun or blade by its weapon slot (0 the hero's own weapon), or a healing item. */
+	struct FWheelPlace
+	{
+		const TCHAR* Name;
+		FKey Key;
+		int32 Weapon;
+		int32 Healing;
 	};
 
 	static const TArray<FButton>& Buttons();
@@ -77,7 +93,7 @@ private:
 	static const TArray<FButton>& EditorButtons();
 
 	/** What a finger on the screen is doing. */
-	enum class EUse : uint8 { Stick, Look, Button, EditorButton, Map };
+	enum class EUse : uint8 { Stick, Look, Button, EditorButton, Map, Wheel };
 
 	struct FFinger
 	{
@@ -89,8 +105,21 @@ private:
 		bool bLatched = false;
 	};
 
-	/** The gun a slot along the bottom holds, by the key it presses: 1 rifle, 2 shotgun, 3 energy rifle, 4 sniper; 0 for any other button. */
-	static int32 GunOfSlot(const FKey& InKey);
+	/** Everything the wheel offers, in the order a tap goes through them. */
+	static const TArray<FWheelPlace>& WheelPlaces();
+	/** Whether the player has a place's thing to hold now, and whether it is in hand. */
+	bool Has(const FWheelPlace& Place) const;
+	bool InHand(const FWheelPlace& Place) const;
+	/** The wheel's middle when it is open (it is moved in from the screen's edges to fit), and where each place on it is. */
+	FVector2D WheelMiddle(const FVector2D& Viewport) const;
+	FVector2D PlaceCentre(int32 Index, const FVector2D& Viewport) const;
+	/** The place on the open wheel a finger is over: INDEX_NONE in its middle. */
+	int32 PlaceUnder(const FVector2D& At, const FVector2D& Viewport) const;
+	/** A tap of the wheel: the next thing the player has comes to hand. */
+	void NextInHand();
+	/** The wheel is let go of while open: the place under the finger comes to hand. */
+	void TakePlace(int32 Index);
+	void OpenWheel();
 	/** Whether a button is AIM as it aims: a tap aims and the next lets go, where a mouse button is held. */
 	bool AimLatches(const FButton& Button) const;
 
@@ -140,4 +169,13 @@ private:
 	bool bRunning = false;
 	/** After a run ends, the walk is taken up again on the next frame, once the run's keys have been let go. */
 	bool bWalkAgain = false;
+
+	/** The wheel: open or not, when its finger came down, and the place the finger is over while open. */
+	bool bWheelOpen = false;
+	double WheelDownAt = 0.0;
+	int32 WheelPick = INDEX_NONE;
+
+public:
+	/** Held this long, a finger on the wheel opens it. */
+	static constexpr double WheelHoldSeconds = 0.25;
 };

@@ -76,6 +76,27 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Gun")
 	FSoftObjectPath FireFalloff;
 
+	/**
+	 * A weapon that is swung, not fired (the axe, the katana): the hero swings it with its own attack, and the blow
+	 * lands MeleeDamage on the nearest thing within MeleeReach cm ahead of the chest, MeleeAcross cm wide, MeleeLandsAfter
+	 * seconds into the swing. It holds no rounds, is not aimed, and is held in the one hand that holds the hero's own
+	 * weapon. FireSeconds is how long a swing lasts; FireSound is what a swing sounds like. Set per weapon class in DefaultGame.ini.
+	 */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Melee")
+	bool bMelee = false;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Melee")
+	float MeleeDamage = 0.0f;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Melee")
+	float MeleeReach = 0.0f;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Melee")
+	float MeleeAcross = 0.0f;
+
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Melee")
+	float MeleeLandsAfter = 0.25f;
+
 	/** Where the other hand holds the gun, in the mesh's own space: its foregrip. Set per weapon class in DefaultGame.ini. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Grip")
 	FVector OffHandPoint;
@@ -103,7 +124,7 @@ public:
 	int CurrentBulletCount; // Only applies to assault rifle and shotgun
 
 	UPROPERTY(EditDefaultsOnly, Category = "WeaponType")
-	int WeaponType; // 0 for pickaxe, 1 for the rifle, 2 for the shotgun, 3 for the energy rifle, 4 for the sniper
+	int WeaponType; // 0 for pickaxe, 1 for the rifle, 2 for the shotgun, 3 for the energy rifle, 4 for the sniper, 5 for the axe, 6 for the katana
 
 	virtual bool IsSupportedForNetworking() const override
 	{

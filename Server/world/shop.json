@@ -33,6 +33,8 @@
   ],
   "weapons": [
     { "id": "energy-rifle", "name": "Energy Rifle", "price": "900" },
-    { "id": "sniper", "name": "Sniper", "price": "900" }
+    { "id": "sniper", "name": "Sniper", "price": "900" },
+    { "id": "axe", "name": "Axe", "price": "600" },
+    { "id": "katana", "name": "Katana", "price": "600" }
   ]
 }
