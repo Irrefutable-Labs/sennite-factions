@@ -234,9 +234,31 @@ private:
 	TObjectPtr<USenniteGameMenu> Settings;
 };
 
+/** A screen shown before the first menu: an image, for how long, and whether it fills the screen or sits in its middle on black. */
+USTRUCT()
+struct FSenniteStartScreen
+{
+	GENERATED_BODY()
+
+	/** What it goes by in what a check reads ("page=start:irrefutable"). */
+	UPROPERTY()
+	FString Name;
+
+	UPROPERTY()
+	FSoftObjectPath Image;
+
+	UPROPERTY()
+	float Seconds = 3.0f;
+
+	/** Over the whole screen, cut to its shape (a title screen); or whole, as large as fits on black (a logo). */
+	UPROPERTY()
+	bool bFill = false;
+};
+
 /**
- * The menu's pages, drawn on the canvas. Before the first of them, each time the game starts, the studio's logo
- * (Irrefutable Labs) is shown on black over the whole screen for LogoSeconds, right after the engine's own start.
+ * The menu's pages, drawn on the canvas. Before the first of them, each time the game starts and right after the
+ * engine's own start screen, the start screens are shown one after the other: the studio's logo (Irrefutable Labs),
+ * then the game's title screen (Sennite Factions).
  */
 UCLASS(config=Game)
 class SENNITE_API ASenniteMenuHUD : public AHUD
@@ -246,16 +268,13 @@ class SENNITE_API ASenniteMenuHUD : public AHUD
 public:
 	virtual void DrawHUD() override;
 
-	/** The studio's logo, and how long it is up before the first menu (Tools/import_brand.py). Set in DefaultGame.ini. */
+	/** The start screens, in order (Tools/import_brand.py). Set in DefaultGame.ini. */
 	UPROPERTY(Config)
-	FSoftObjectPath Logo;
+	TArray<FSenniteStartScreen> StartScreens;
 
-	UPROPERTY(Config)
-	float LogoSeconds = 3.0f;
-
-	/** Whether the logo is on the screen now: once a game, from the first frame the menu draws, for LogoSeconds. */
+	/** Whether the start screens are on the screen now: once a game, from the first frame the menu draws, one after the other. */
 	static bool LogoUp();
-	/** When (FPlatformTime) the logo was first drawn this game, and when the first menu after it was; negative before. */
+	/** When (FPlatformTime) the first start screen was drawn this game, and when the first menu after them was; negative before. */
 	static double LogoBeganAt();
 	static double MenuBeganAt();
 
@@ -326,7 +345,7 @@ private:
 
 	/** The whole screen, in the canvas's own measure: on a phone the canvas starts inside the screen's safe zone. */
 	FBox2D Screen() const;
-	/** The logo on black over the whole screen, fading in and out. True while it is up, and the menu is not drawn. */
+	/** The start screen due now, over the whole screen, fading in and out. True while one is up, and the menu is not drawn. */
 	bool DrawLogo();
 
 	/**

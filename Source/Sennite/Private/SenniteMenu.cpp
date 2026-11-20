@@ -1042,27 +1042,63 @@ bool ASenniteMenuHUD::DrawLogo()
 {
 	if (LogoShownAt < 0.0) {
 		LogoShownAt = FPlatformTime::Seconds();
-		LogoFor = LogoSeconds;
+		LogoFor = 0.0;
+		for (const FSenniteStartScreen& Each : StartScreens) {
+			LogoFor += FMath::Max(0.0f, Each.Seconds);
+		}
 	}
-	const double Since = FPlatformTime::Seconds() - LogoShownAt;
+	double Since = FPlatformTime::Seconds() - LogoShownAt;
 	if (Since >= LogoFor) {
 		FirstMenuAt = FirstMenuAt < 0.0 ? FPlatformTime::Seconds() : FirstMenuAt;
 		return false;
 	}
-	// black to every edge of the screen, and the logo in the middle, as large as fits with a margin; it fades in
-	// and out over a third of a second
+	// the screen due now, and how far into it
+	const FSenniteStartScreen* Due = nullptr;
+	for (const FSenniteStartScreen& Each : StartScreens) {
+		if (Since < Each.Seconds) {
+			Due = &Each;
+			break;
+		}
+		Since -= Each.Seconds;
+	}
 	const FBox2D Whole = Screen();
 	FCanvasTileItem Black(Whole.Min, Whole.GetSize(), FLinearColor::Black);
 	Canvas->DrawItem(Black);
-	if (UTexture2D* Mark = Cast<UTexture2D>(Logo.TryLoad())) {
+	UTexture2D* Image = Due != nullptr ? Cast<UTexture2D>(Due->Image.TryLoad()) : nullptr;
+	if (Image != nullptr && Image->GetSizeX() > 0 && Image->GetSizeY() > 0) {
+		// each fades in from black and out to it over a third of a second
 		const double Fade = 0.33;
-		const float Alpha = float(FMath::Clamp(FMath::Min(Since / Fade, (LogoFor - Since) / Fade), 0.0, 1.0));
-		const float Side = 0.82f * FMath::Min(Whole.GetSize().X, Whole.GetSize().Y);
-		FCanvasTileItem Shown(Whole.GetCenter() - FVector2D(Side * 0.5f), Mark->GetResource(), FVector2D(Side), FLinearColor(1.0f, 1.0f, 1.0f, Alpha));
+		const float Alpha = float(FMath::Clamp(FMath::Min(Since / Fade, (Due->Seconds - Since) / Fade), 0.0, 1.0));
+		const FVector2D Size = Whole.GetSize();
+		const double Aspect = double(Image->GetSizeX()) / Image->GetSizeY();
+		FVector2D At = Whole.Min;
+		FVector2D Drawn = Size;
+		FVector2D UV0(0.0, 0.0);
+		FVector2D UV1(1.0, 1.0);
+		if (Due->bFill) {
+			// over the whole screen at its own shape: what does not fit is cut from both sides alike
+			if (Size.X / Size.Y > Aspect) {
+				const double Kept = (Size.Y / Size.X) * Aspect;
+				UV0.Y = (1.0 - Kept) * 0.5;
+				UV1.Y = 1.0 - UV0.Y;
+			}
+			else {
+				const double Kept = (Size.X / Size.Y) / Aspect;
+				UV0.X = (1.0 - Kept) * 0.5;
+				UV1.X = 1.0 - UV0.X;
+			}
+		}
+		else {
+			// whole, as large as fits with a margin, in the middle
+			const double Room = 0.82;
+			Drawn = Size.X / Size.Y > Aspect ? FVector2D(Size.Y * Room * Aspect, Size.Y * Room) : FVector2D(Size.X * Room, Size.X * Room / Aspect);
+			At = Whole.GetCenter() - Drawn * 0.5;
+		}
+		FCanvasTileItem Shown(At, Image->GetResource(), Drawn, UV0, UV1, FLinearColor(1.0f, 1.0f, 1.0f, Alpha));
 		Shown.BlendMode = SE_BLEND_Translucent;
 		Canvas->DrawItem(Shown);
 	}
-	Drawing.Add(TEXT("page=logo"));
+	Drawing.Add(FString::Printf(TEXT("page=start:%s"), Due != nullptr ? *Due->Name : TEXT("")));
 	return true;
 }
 
