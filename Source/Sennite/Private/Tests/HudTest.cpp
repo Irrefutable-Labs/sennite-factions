@@ -143,8 +143,9 @@ namespace
 				return false;
 			}
 			Hides(Hud, TEXT("mode"), TEXT("a piece name after leaving build mode"));
-			// this player's wallet owns both guns sold in the store: set as the server sets it once the publisher's server says so
-			State->GunsOwned = (1 << 3) | (1 << 4);
+			// this player's wallet owns both guns sold in the store: set as the server sets it once the publisher's server
+			// says so. They are hers at once, so the crate does not give them; it gives the free guns and rounds for all
+			State->SetGunsOwned((1 << 3) | (1 << 4));
 			Hides(Hud, TEXT("crate"), TEXT("how to open a crate away from one"));
 			Enter(EPhase::OpenCrate, World);
 			return false;
@@ -167,8 +168,9 @@ namespace
 				return false;
 			}
 			Hides(Hud, TEXT("crate"), TEXT("how to open a crate that is open"));
-			// she owns the energy rifle and the sniper here, not the axe or the katana: the crate keeps those, and says they are in the store
-			Shows(Hud, *FString::Printf(TEXT("crategave=RIFLE   SHOTGUN   ENERGY RIFLE   SNIPER   +ROUNDS   +%d BANDAGES   +%d POTIONS   IN THE STORE: AXE, KATANA"),
+			// she owns the energy rifle and the sniper here, already hers; not the axe or the katana: the crate keeps those,
+			// and says they are in the store
+			Shows(Hud, *FString::Printf(TEXT("crategave=RIFLE   SHOTGUN   +ROUNDS   +%d BANDAGES   +%d POTIONS   IN THE STORE: AXE, KATANA"),
 				GetDefault<ASenniteBandage>()->Count, GetDefault<ASennitePotion>()->Count), TEXT("what the crate gave, and what it kept for the store"));
 			Shows(Hud, TEXT("weapon=RIFLE"), TEXT("the rifle the crate gave, in hand"));
 			Shows(Hud, *FString::Printf(TEXT("reserve=%d"), GetDefault<ASenniteRifle>()->CrateRounds), TEXT("the rounds the crate gave"));

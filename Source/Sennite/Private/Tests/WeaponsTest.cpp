@@ -425,8 +425,13 @@ namespace
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK held fire: rounds %d -> %d in a second held, %d a second after letting go"), RoundsBefore, RoundsWhenLetGo,
 				Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1);
 			// Her wallet now owns the guns and the blades sold in the store: set as the server sets it once the
-			// publisher's server says so of a pass she showed. The crate beside her, full again, gives them when opened.
-			State->GunsOwned = (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6);
+			// publisher's server says so of a pass she showed. They are hers at once, no crate needed; the crate beside
+			// her, full again, gives rounds for them.
+			State->SetGunsOwned((1 << 3) | (1 << 4) | (1 << 5) | (1 << 6));
+			Test->TestTrue(TEXT("What her wallet bought is hers at once, before any crate"), State->EquippedWeapons.Contains(3) && State->EquippedWeapons.Contains(4)
+				&& State->EquippedWeapons.Contains(5) && State->EquippedWeapons.Contains(6));
+			Test->TestTrue(TEXT("each bought gun with a full magazine"), State->EquippedWeaponsClips[3] == GetDefault<ASenniteEnergyRifle>()->MagazineSize
+				&& State->EquippedWeaponsClips[4] == GetDefault<ASenniteSniper>()->MagazineSize);
 			Enter(EPhase::BoughtGuns, World);
 			Step = 0;
 			return false;
@@ -447,12 +452,12 @@ namespace
 				PhaseStart = World->GetTimeSeconds();
 				return false;
 			}
-			if (!State->EquippedWeapons.Contains(3) || !State->EquippedWeapons.Contains(4) || !State->EquippedWeapons.Contains(5) || !State->EquippedWeapons.Contains(6)) {
-				return Elapsed(World) > 8.0 ? Fail(TEXT("The crate did not give the guns and blades her wallet owns")) : false;
+			if (State->EquippedWeaponsAmmunition[3] == 0 || State->EquippedWeaponsAmmunition[4] == 0) {
+				return Elapsed(World) > 8.0 ? Fail(TEXT("The crate did not give rounds for the guns her wallet owns")) : false;
 			}
 			Test->TestEqual(TEXT("With the bought guns hers, the crate gives rounds for each"), State->EquippedWeaponsAmmunition[3], GetDefault<ASenniteEnergyRifle>()->CrateRounds);
 			Test->TestEqual(TEXT("and for the sniper"), State->EquippedWeaponsAmmunition[4], GetDefault<ASenniteSniper>()->CrateRounds);
-			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK bought guns: none from the first crate; owned, the crate gave both, %d and %d rounds"),
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK bought guns: none from the first crate; owned, hers at once, and the crate gave %d and %d rounds for them"),
 				State->EquippedWeaponsAmmunition[3], State->EquippedWeaponsAmmunition[4]);
 			OtherGun = 0;
 			Enter(EPhase::OtherGuns, World);

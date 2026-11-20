@@ -94,12 +94,19 @@ public:
 	FString HeroWallet;
 
 	/**
-	 * The guns bought in the store that this player's wallet proved it owns: a bit for each weapon slot.
-	 * Set on the server, from what the publisher's server says of a pass the player showed; sent to the
-	 * player alone. A crate gives a player the free guns and these (ASenniteCharacter::TakeFromCrate).
+	 * The guns and blades bought in the store that this player's wallet proved it owns: a bit for each weapon slot.
+	 * Set on the server with SetGunsOwned, from what the publisher's server says of a pass the player showed; sent to
+	 * the player alone. What is bought is the player's at once, no crate needed; a crate gives the free guns, and
+	 * rounds for every gun the player has (ASenniteCharacter::TakeFromCrate).
 	 */
 	UPROPERTY(Replicated)
 	int32 GunsOwned = 0;
+
+	/** What the wallet owns, set on the server: each owned gun or blade is among what the player holds at once, a gun with a full magazine. */
+	void SetGunsOwned(int32 Owned);
+
+	/** Each gun or blade the wallet owns that the player does not have yet: among what they hold, a gun with a full magazine. On the server: once owned, and again after a fall. */
+	void ArmOwned();
 
 	/**
 	 * Once in, a player whose wallet owns guns bought in the store shows a pass made out to this server.
