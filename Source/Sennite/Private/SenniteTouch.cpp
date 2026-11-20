@@ -11,6 +11,7 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GenericPlatform/GenericPlatformInputDeviceMapper.h"
+#include "HAL/PlatformTime.h"
 #include "HealingActor.h"
 #include "InputKeyEventArgs.h"
 #include "Misc/CoreDelegates.h"
@@ -30,8 +31,14 @@ namespace
 	/** The stick takes a finger that comes down this far across the screen from the left, and below the top bars. */
 	constexpr float StickZoneAcross = 0.42f;
 	constexpr float StickZoneTop = 120.0f;
-	/** Half the height of the slots along the bottom. */
-	constexpr float SlotHalfHeight = 24.0f;
+	/** The wheel when open: how far its places are from its middle, how big each is, and the middle where a finger lets go and nothing changes. */
+	constexpr float WheelReach = 132.0f;
+	/** The places go round from this far either side of the top, in degrees, leaving the bottom clear for the wheel's own button. */
+	constexpr float WheelSpread = 150.0f;
+	constexpr float PlaceRadius = 34.0f;
+	constexpr float WheelMiddleRadius = 44.0f;
+	/** A finger slid this far off the wheel's button opens it at once. */
+	constexpr float WheelSlide = 24.0f;
 	/** Pushed this far, and this straight ahead, the stick runs. */
 	constexpr float RunPush = 0.97f;
 	constexpr float RunAhead = 0.85f;
@@ -71,13 +78,25 @@ const TArray<USenniteTouchControls::FButton>& USenniteTouchControls::Buttons()
 		{ TEXT("BASE"), EKeys::B, FVector2D(-430.0, 92.0), 26.0f, false },
 		// the in-game menu (Escape), top left, clear of everything: there with or without a hero
 		{ TEXT("MENU"), EKeys::Escape, FVector2D(58.0, 50.0), 26.0f, false },
-		// what to hold, along the bottom: X is from the middle of the screen
-		{ TEXT("RIFLE"), EKeys::Two, FVector2D(-235.0, -62.0), 44.0f, true },
-		{ TEXT("SHOTGUN"), EKeys::Three, FVector2D(-141.0, -62.0), 44.0f, true },
-		{ TEXT("ENERGY"), EKeys::Six, FVector2D(-47.0, -62.0), 44.0f, true },
-		{ TEXT("SNIPER"), EKeys::Seven, FVector2D(47.0, -62.0), 44.0f, true },
-		{ TEXT("BANDAGE"), EKeys::Four, FVector2D(141.0, -62.0), 44.0f, true },
-		{ TEXT("POTION"), EKeys::Five, FVector2D(235.0, -62.0), 44.0f, true },
+		// what to hold: one button, the wheel, at the bottom in the middle (X is from the middle of the screen)
+		{ TEXT("WHEEL"), EKeys::Invalid, FVector2D(0.0, -78.0), 40.0f, true },
+	};
+	return All;
+}
+
+const TArray<USenniteTouchControls::FWheelPlace>& USenniteTouchControls::WheelPlaces()
+{
+	// the hero's own weapon, the guns, the blades, then what heals, each on the key the keyboard holds it with
+	static const TArray<FWheelPlace> All = {
+		{ TEXT("OWN"), EKeys::One, 0, INDEX_NONE },
+		{ TEXT("RIFLE"), EKeys::Two, 1, INDEX_NONE },
+		{ TEXT("SHOTGUN"), EKeys::Three, 2, INDEX_NONE },
+		{ TEXT("ENERGY"), EKeys::Six, 3, INDEX_NONE },
+		{ TEXT("SNIPER"), EKeys::Seven, 4, INDEX_NONE },
+		{ TEXT("AXE"), EKeys::Eight, 5, INDEX_NONE },
+		{ TEXT("KATANA"), EKeys::Nine, 6, INDEX_NONE },
+		{ TEXT("BANDAGE"), EKeys::Four, INDEX_NONE, 0 },
+		{ TEXT("POTION"), EKeys::Five, INDEX_NONE, 1 },
 	};
 	return All;
 }
@@ -148,7 +167,7 @@ FVector2D USenniteTouchControls::Centre(const FButton& Button, const FVector2D& 
 		return FVector2D(Viewport.X - (CellsRight + CellHalfWidth + (CellColumns - 1 - Button.Spot.X) * Step) * S,
 			(CellsTop + CellHalfHeight + Button.Spot.Y * (2.0 * CellHalfHeight + CellGap)) * S);
 	}
-	const double X = Button.bSlot ? Viewport.X * 0.5 + Button.Spot.X * S : (Button.Spot.X < 0.0 ? Viewport.X + Button.Spot.X * S : Button.Spot.X * S);
+	const double X = Button.bWheel ? Viewport.X * 0.5 + Button.Spot.X * S : (Button.Spot.X < 0.0 ? Viewport.X + Button.Spot.X * S : Button.Spot.X * S);
 	const double Y = Button.Spot.Y < 0.0 ? Viewport.Y + Button.Spot.Y * S : Button.Spot.Y * S;
 	return FVector2D(X, Y);
 }
@@ -159,9 +178,6 @@ bool USenniteTouchControls::Hits(const FButton& Button, const FVector2D& Viewpor
 	const FVector2D Middle = Centre(Button, Viewport);
 	if (Button.bCell) {
 		return FMath::Abs(At.X - Middle.X) <= CellHalfWidth * S && FMath::Abs(At.Y - Middle.Y) <= CellHalfHeight * S;
-	}
-	if (Button.bSlot) {
-		return FMath::Abs(At.X - Middle.X) <= Button.Radius * S && FMath::Abs(At.Y - Middle.Y) <= SlotHalfHeight * S;
 	}
 	return FVector2D::Distance(At, Middle) <= Button.Radius * S;
 }
@@ -191,9 +207,10 @@ bool USenniteTouchControls::Shows(const FButton& Button) const
 		// the base editor is in a world only when a publisher's server is set
 		return ASenniteBaseEditor::Find(Hero->GetWorld()) != nullptr;
 	}
-	if (Button.Key == EKeys::RightMouseButton && Hero->bHeroMelee && Hero->CurrentWeapon == nullptr && LabelOf(Button) == TEXT("AIM")) {
-		// fists and what a hero swings are not aimed: there is no AIM until a gun is in hand. The owner, 2026-11-19, of a
-		// melee weapon: "aim (which should be disabled when it's a melee weapon)".
+	if (Button.Key == EKeys::RightMouseButton && LabelOf(Button) == TEXT("AIM")
+		&& ((Hero->bHeroMelee && Hero->CurrentWeapon == nullptr) || (Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->bMelee))) {
+		// fists, what a hero swings, an axe and a katana are not aimed: there is no AIM until a gun is in hand. The owner,
+		// 2026-11-19, of a melee weapon: "aim (which should be disabled when it's a melee weapon)".
 		return false;
 	}
 	if (Button.Key == EKeys::G) {
@@ -209,12 +226,122 @@ bool USenniteTouchControls::Loads() const
 	// only a gun reloads: the hero's own weapon, a bandage or a potion has nothing to load. While a piece is being
 	// edited the button is REMOVE, which takes the piece away whatever is in hand.
 	const ASenniteCharacter* Hero = Controller ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
-	return Hero != nullptr && (Hero->GetEditingPiece() != nullptr || (Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType > 0));
+	return Hero != nullptr && (Hero->GetEditingPiece() != nullptr || (Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType > 0 && !Hero->CurrentWeapon->bMelee));
 }
 
-int32 USenniteTouchControls::GunOfSlot(const FKey& InKey)
+bool USenniteTouchControls::Has(const FWheelPlace& Place) const
 {
-	return InKey == EKeys::Two ? 1 : InKey == EKeys::Three ? 2 : InKey == EKeys::Six ? 3 : InKey == EKeys::Seven ? 4 : 0;
+	const ASennitePlayerState* State = Controller ? Controller->GetPlayerState<ASennitePlayerState>() : nullptr;
+	if (State == nullptr) {
+		return false;
+	}
+	if (Place.Healing != INDEX_NONE) {
+		return State->HealingItemCounts.IsValidIndex(Place.Healing) && State->HealingItemCounts[Place.Healing] > 0;
+	}
+	// the hero's own weapon is always the hero's
+	return Place.Weapon == 0 || State->EquippedWeapons.Contains(Place.Weapon);
+}
+
+bool USenniteTouchControls::InHand(const FWheelPlace& Place) const
+{
+	const ASenniteCharacter* Hero = Controller ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
+	const ASennitePlayerState* State = Controller ? Controller->GetPlayerState<ASennitePlayerState>() : nullptr;
+	if (Hero == nullptr || State == nullptr || State->InBuildMode) {
+		return false;
+	}
+	if (Place.Healing != INDEX_NONE) {
+		return Hero->CurrentHealingItem != nullptr && Hero->CurrentHealingItem->HealingType == Place.Healing;
+	}
+	if (Hero->CurrentHealingItem != nullptr) {
+		return false;
+	}
+	const int32 Held = Hero->CurrentWeapon != nullptr ? Hero->CurrentWeapon->WeaponType : 0;
+	return Held == Place.Weapon;
+}
+
+FVector2D USenniteTouchControls::WheelMiddle(const FVector2D& Viewport) const
+{
+	// round the wheel's button, moved in from the screen's edges until the whole wheel is on the screen
+	const double S = Viewport.Y / 720.0;
+	const double Room = (WheelReach + PlaceRadius + 8.0) * S;
+	const FVector2D Button = Centre(Buttons().Last(), Viewport);
+	return FVector2D(FMath::Clamp(Button.X, Room, FMath::Max(Room, Viewport.X - Room)), FMath::Clamp(Button.Y, Room, FMath::Max(Room, Viewport.Y - Room)));
+}
+
+FVector2D USenniteTouchControls::PlaceCentre(int32 Index, const FVector2D& Viewport) const
+{
+	// round the middle clockwise, from low on the left over the top to low on the right; the bottom, where the wheel's
+	// button is, stays clear
+	const double S = Viewport.Y / 720.0;
+	const int32 Count = WheelPlaces().Num();
+	const double Turn = FMath::DegreesToRadians(-WheelSpread + 2.0 * WheelSpread * Index / FMath::Max(1, Count - 1));
+	return WheelMiddle(Viewport) + WheelReach * S * FVector2D(FMath::Sin(Turn), -FMath::Cos(Turn));
+}
+
+int32 USenniteTouchControls::PlaceUnder(const FVector2D& At, const FVector2D& Viewport) const
+{
+	// the place nearest the finger; none in the middle, nor on the wheel's own button, where a finger that held it open
+	// and never moved lets go
+	const double S = Viewport.Y / 720.0;
+	const FButton& Wheel = Buttons().Last();
+	if (FVector2D::Distance(At, WheelMiddle(Viewport)) < WheelMiddleRadius * S || Hits(Wheel, Viewport, At)) {
+		return INDEX_NONE;
+	}
+	int32 Nearest = INDEX_NONE;
+	double Best = TNumericLimits<double>::Max();
+	for (int32 Index = 0; Index < WheelPlaces().Num(); ++Index) {
+		const double Distance = FVector2D::Distance(At, PlaceCentre(Index, Viewport));
+		if (Distance < Best) {
+			Best = Distance;
+			Nearest = Index;
+		}
+	}
+	return Nearest;
+}
+
+void USenniteTouchControls::NextInHand()
+{
+	// after what is in hand, the next thing the player has, round again; nothing else had, a tap is refused
+	const TArray<FWheelPlace>& Places = WheelPlaces();
+	int32 Now = Places.IndexOfByPredicate([this](const FWheelPlace& Place) { return InHand(Place); });
+	for (int32 Step = 1; Step < Places.Num(); ++Step) {
+		const FWheelPlace& Next = Places[(FMath::Max(Now, 0) + Step) % Places.Num()];
+		if (Has(Next) && !InHand(Next)) {
+			USenniteSounds::Play(Controller, TEXT("ui.press"));
+			Key(Next.Key, IE_Pressed);
+			Key(Next.Key, IE_Released);
+			return;
+		}
+	}
+	USenniteSounds::Play(Controller, TEXT("ui.denied"));
+}
+
+void USenniteTouchControls::TakePlace(int32 Index)
+{
+	if (!WheelPlaces().IsValidIndex(Index)) {
+		return; // let go in the middle: what is in hand stays
+	}
+	const FWheelPlace& Place = WheelPlaces()[Index];
+	if (!Has(Place)) {
+		// what the player has not got: nothing comes to hand
+		USenniteSounds::Play(Controller, TEXT("ui.denied"));
+		return;
+	}
+	USenniteSounds::Play(Controller, TEXT("ui.press"));
+	if (!InHand(Place)) {
+		Key(Place.Key, IE_Pressed);
+		Key(Place.Key, IE_Released);
+	}
+}
+
+void USenniteTouchControls::OpenWheel()
+{
+	if (bWheelOpen) {
+		return;
+	}
+	bWheelOpen = true;
+	WheelPick = INDEX_NONE;
+	USenniteSounds::Play(Controller, TEXT("ui.open"));
 }
 
 bool USenniteTouchControls::AimLatches(const FButton& Button) const
@@ -254,9 +381,22 @@ FString USenniteTouchControls::LabelOf(const FButton& Button) const
 			// no gun in hand: the hero's own weapon
 			return TEXT("ATTACK");
 		}
+		if (Hero->CurrentWeapon->bMelee) {
+			// an axe or a katana
+			return TEXT("SWING");
+		}
 	}
 	if (Button.Key == EKeys::RightMouseButton && bBuilding) {
 		return TEXT("MAT");
+	}
+	if (Button.bWheel) {
+		// the wheel names what is in hand; while building, nothing of it is
+		for (const FWheelPlace& Place : WheelPlaces()) {
+			if (InHand(Place)) {
+				return Place.Name;
+			}
+		}
+		return TEXT("HOLD");
 	}
 	return Button.Name;
 }
@@ -500,12 +640,21 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 		const TArray<FButton>& All = Buttons();
 		for (int32 Index = 0; Index < All.Num(); ++Index) {
 			if (Shows(All[Index]) && Hits(All[Index], Viewport, At)) {
-				New.Use = EUse::Button;
+				New.Use = All[Index].bWheel ? EUse::Wheel : EUse::Button;
 				New.Button = Index;
 				break;
 			}
 		}
-		if (New.Use == EUse::Button) {
+		if (New.Use == EUse::Wheel) {
+			// the wheel: a tap takes the next thing in hand; held, or slid off, it opens (in Tick and below)
+			if (Fingers.ContainsByPredicate([](const FFinger& Each) { return Each.Use == EUse::Wheel; })) {
+				return true; // a second finger on it is nobody's
+			}
+			bWheelOpen = false;
+			WheelPick = INDEX_NONE;
+			WheelDownAt = FPlatformTime::Seconds();
+		}
+		else if (New.Use == EUse::Button) {
 			const bool bAlreadyDown = Fingers.ContainsByPredicate([&New](const FFinger& Each) { return Each.Use == EUse::Button && Each.Button == New.Button; });
 			if (!bAlreadyDown) {
 				// In play a button is heard as the owner's own press recording, the bigger one the menus' buttons play,
@@ -513,18 +662,10 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 				// it: "It should play, not those checks, but the bigger sounds for the menu buttons, the AIM, and shoot
 				// and all that, and RAMP." JUMP alone is heard only as the jump (the same day: "The jump button makes an
 				// awful sound. It doesn't sound like a jump." and, once it was the jump alone, "The jump sounds good
-				// now."). A slot that names what the player has not got does nothing, and neither does RELOAD with no gun in hand
-				// and no piece being edited, so those taps are heard as refused.
+				// now."). RELOAD with no gun in hand and no piece being edited does nothing, so that tap is heard as refused.
 				const FButton& Tapped = All[New.Button];
-				const ASennitePlayerState* Has = Controller->GetPlayerState<ASennitePlayerState>();
 				bool bRefused = false;
-				if (Tapped.bSlot) {
-					const int32 Gun = GunOfSlot(Tapped.Key);
-					const int32 Heal = Tapped.Key == EKeys::Four ? 0 : 1;
-					const bool bHas = Has != nullptr && (Gun != 0 ? Has->EquippedWeapons.Contains(Gun) : Has->HealingItemCounts.IsValidIndex(Heal) && Has->HealingItemCounts[Heal] > 0);
-					bRefused = !bHas;
-				}
-				else if (Tapped.Key == EKeys::R) {
+				if (Tapped.Key == EKeys::R) {
 					bRefused = !Loads();
 				}
 				if (bRefused) {
@@ -576,6 +717,17 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 		else if (Gone.Use == EUse::EditorButton) {
 			Key(EditorButtons()[Gone.Button].Key, IE_Released);
 		}
+		else if (Gone.Use == EUse::Wheel) {
+			// let go: of the open wheel, on a place; of the button, a tap
+			if (bWheelOpen) {
+				TakePlace(PlaceUnder(At, Viewport));
+			}
+			else {
+				NextInHand();
+			}
+			bWheelOpen = false;
+			WheelPick = INDEX_NONE;
+		}
 		else if (Gone.Use == EUse::Button) {
 			const bool bStillDown = Fingers.ContainsByPredicate([&Gone](const FFinger& Each) { return Each.Use == EUse::Button && Each.Button == Gone.Button; });
 			if (!bStillDown && !Gone.bLatched) {
@@ -586,7 +738,16 @@ bool USenniteTouchControls::Touch(const FTouchId& Id, ETouchType::Type Type, con
 	}
 
 	// the finger moved, or is resting
-	if (Finger->Use == EUse::Stick) {
+	if (Finger->Use == EUse::Wheel) {
+		// slid off the wheel's button it opens at once; open, the place under the finger is marked
+		if (!bWheelOpen && FVector2D::Distance(At, Centre(Buttons()[Finger->Button], Viewport)) > WheelSlide * S) {
+			OpenWheel();
+		}
+		if (bWheelOpen) {
+			WheelPick = PlaceUnder(At, Viewport);
+		}
+	}
+	else if (Finger->Use == EUse::Stick) {
 		Stick = ((At - StickOrigin) / (StickReach * S)).GetClampedToMaxSize(1.0);
 	}
 	else if (Finger->Use == EUse::Look || (Finger->Use == EUse::Button && Buttons()[Finger->Button].Key == EKeys::LeftMouseButton)) {
@@ -603,6 +764,16 @@ void USenniteTouchControls::Tick()
 		return;
 	}
 	ASenniteCharacter* Hero = Cast<ASenniteCharacter>(Controller->GetPawn());
+	// a finger held on the wheel opens it
+	if (!bWheelOpen && FPlatformTime::Seconds() - WheelDownAt >= WheelHoldSeconds
+		&& Fingers.ContainsByPredicate([](const FFinger& Each) { return Each.Use == EUse::Wheel; })) {
+		OpenWheel();
+	}
+	if (Hero == nullptr && bWheelOpen) {
+		// the hero is gone: the wheel shuts
+		bWheelOpen = false;
+		WheelPick = INDEX_NONE;
+	}
 	if (bWalkAgain) {
 		bWalkAgain = false;
 		if (Hero != nullptr && bStickHeld) {
@@ -648,6 +819,12 @@ bool USenniteTouchControls::Where(const FString& Name, const FVector2D& Viewport
 	for (const FButton& Button : EditorButtons()) {
 		if (Name == Button.Name) {
 			OutCentre = Centre(Button, Size) + DrawnOrigin;
+			return true;
+		}
+	}
+	for (int32 Index = 0; Index < WheelPlaces().Num(); ++Index) {
+		if (Name == WheelPlaces()[Index].Name) {
+			OutCentre = PlaceCentre(Index, Size) + DrawnOrigin;
 			return true;
 		}
 	}
@@ -736,20 +913,12 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 		if (!Shows(Button) || (!bPlaying && Button.Key != EKeys::Escape)) {
 			continue;
 		}
-		const bool bDown = Fingers.ContainsByPredicate([Index](const FFinger& Each) { return Each.Use == EUse::Button && Each.Button == Index; });
+		bool bDown = Fingers.ContainsByPredicate([Index](const FFinger& Each) { return Each.Use == EUse::Button && Each.Button == Index; });
 		// what is in hand, or the piece being placed, is marked; what the player does not have is dimmed
 		bool bInHand = false;
 		bool bHave = true;
-		if (GunOfSlot(Button.Key) != 0) {
-			// a gun the player has not got, from a crate or bought in the store, is dimmed: its slot does nothing
-			const int32 Kind = GunOfSlot(Button.Key);
-			bHave = State->EquippedWeapons.Contains(Kind);
-			bInHand = !State->InBuildMode && Hero->CurrentHealingItem == nullptr && Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->WeaponType == Kind;
-		}
-		else if (Button.Key == EKeys::Four || Button.Key == EKeys::Five) {
-			const int32 Kind = Button.Key == EKeys::Four ? 0 : 1;
-			bHave = State->HealingItemCounts.IsValidIndex(Kind) && State->HealingItemCounts[Kind] > 0;
-			bInHand = Hero->CurrentHealingItem != nullptr && Hero->CurrentHealingItem->HealingType == Kind;
+		if (Button.bWheel) {
+			bDown = bDown || Fingers.ContainsByPredicate([](const FFinger& Each) { return Each.Use == EUse::Wheel; });
 		}
 		else if (Button.Key == EKeys::G) {
 			bInHand = Hero->GetEditingPiece() != nullptr;
@@ -768,20 +937,38 @@ void USenniteTouchControls::Draw(UCanvas* Canvas)
 		const FLinearColor Fill = bDown ? Held : (bInHand ? Chosen : Rest);
 		const FVector2D At = Centre(Button, Viewport);
 		const FString Label = LabelOf(Button);
-		if (Button.bSlot) {
-			const FVector2D Half(Button.Radius * S, SlotHalfHeight * S);
-			// a slot is a small plate with cut corners, its edge gold while what it names is in hand
-			const FBox2D Slot(At - Half, At + Half);
-			SenniteUi::Plate(Canvas, Slot, 6.0f * S, Fill, Fill);
-			SenniteUi::Outline(Canvas, Slot, 6.0f * S, bInHand ? SenniteUi::Gold : Edge, FMath::Max(1.0f, 1.5f * S));
-			Text(At, Label, 9, bHave ? FLinearColor::White : Dim);
+		if (Button.bWheel) {
+			// the wheel's button names what is in hand, its edge gold, with a small mark that it opens
+			Disc(At, Button.Radius * S, Fill);
+			Ring(At, Button.Radius * S, SenniteUi::Gold);
+			Text(At, Label, 11, FLinearColor::White);
+			Text(At + FVector2D(0.0, 24.0 * S), TEXT("..."), 9, Dim);
 		}
 		else {
 			Disc(At, Button.Radius * S, Fill);
 			Ring(At, Button.Radius * S, bHave ? Edge : Dim);
 			Text(At, Label, Button.Radius >= 40.0f ? 13 : 9, bHave ? FLinearColor::White : Dim);
 		}
-		LastDrawn.Add(FString::Printf(TEXT("%s=%s"), Button.Name, bHave || Button.bSlot ? *Label : TEXT("dimmed")));
+		LastDrawn.Add(FString::Printf(TEXT("%s=%s"), Button.Name, bHave ? *Label : TEXT("dimmed")));
+	}
+
+	// the open wheel: everything that can be held, round its middle; what the player has not got dimmed, what is in
+	// hand edged in gold, the place under the finger lit
+	if (bWheelOpen && bPlaying) {
+		const FVector2D Middle = WheelMiddle(Viewport);
+		Disc(Middle, (WheelReach + PlaceRadius + 6.0f) * S, FLinearColor(0.0f, 0.0f, 0.0f, 0.45f));
+		Ring(Middle, WheelMiddleRadius * S, Dim);
+		const TArray<FWheelPlace>& Places = WheelPlaces();
+		for (int32 Index = 0; Index < Places.Num(); ++Index) {
+			const FWheelPlace& Place = Places[Index];
+			const bool bHas = Has(Place);
+			const bool bHeld = InHand(Place);
+			const FVector2D At = PlaceCentre(Index, Viewport);
+			Disc(At, PlaceRadius * S, Index == WheelPick ? Held : bHeld ? Chosen : Rest);
+			Ring(At, PlaceRadius * S, bHeld ? SenniteUi::Gold : bHas ? Edge : Dim);
+			Text(At, Place.Name, 9, bHas ? FLinearColor::White : Dim);
+			LastDrawn.Add(FString::Printf(TEXT("WHEEL:%s=%s"), Place.Name, bHas ? Place.Name : TEXT("dimmed")));
+		}
 	}
 }
 

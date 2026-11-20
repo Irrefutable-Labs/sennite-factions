@@ -146,12 +146,14 @@ ASenniteCharacter::ASenniteCharacter(const FObjectInitializer& ObjectInitializer
 	Shield = 0.0f;
 
 	// slot 0 is the pickaxe, which is not held yet; then the guns: 1 the rifle, 2 the shotgun, 3 the
-	// energy rifle, 4 the sniper
-	WeaponClasses.SetNum(5);
+	// energy rifle, 4 the sniper; then what is swung: 5 the axe, 6 the katana
+	WeaponClasses.SetNum(7);
 	WeaponClasses[1] = ASenniteRifle::StaticClass();
 	WeaponClasses[2] = ASenniteShotgun::StaticClass();
 	WeaponClasses[3] = ASenniteEnergyRifle::StaticClass();
 	WeaponClasses[4] = ASenniteSniper::StaticClass();
+	WeaponClasses[5] = ASenniteAxe::StaticClass();
+	WeaponClasses[6] = ASenniteKatana::StaticClass();
 	OwnBoltClass = ASenniteOwnBolt::StaticClass();
 
 	// healing items: 0 the bandage, 1 the potion
@@ -393,6 +395,8 @@ void ASenniteCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerI
 	PlayerInputComponent->BindAction("HoldPickaxe", IE_Pressed, this, &ASenniteCharacter::HoldPickaxe);
 	PlayerInputComponent->BindAction("HoldEnergyRifle", IE_Pressed, this, &ASenniteCharacter::HoldEnergyRifle);
 	PlayerInputComponent->BindAction("HoldSniper", IE_Pressed, this, &ASenniteCharacter::HoldSniper);
+	PlayerInputComponent->BindAction("HoldAxe", IE_Pressed, this, &ASenniteCharacter::HoldAxe);
+	PlayerInputComponent->BindAction("HoldKatana", IE_Pressed, this, &ASenniteCharacter::HoldKatana);
 	PlayerInputComponent->BindAction("HoldAssaultRifle", IE_Pressed, this, &ASenniteCharacter::HoldAssaultRifle);
 	PlayerInputComponent->BindAction("HoldShotgun", IE_Pressed, this, &ASenniteCharacter::HoldShotgun);
 	PlayerInputComponent->BindAction("HoldBandage", IE_Pressed, this, &ASenniteCharacter::HoldBandage);
@@ -1073,6 +1077,14 @@ void ASenniteCharacter::HoldSniper() {
 	ServerHoldGun(4);
 }
 
+void ASenniteCharacter::HoldAxe() {
+	ServerHoldGun(5);
+}
+
+void ASenniteCharacter::HoldKatana() {
+	ServerHoldGun(6);
+}
+
 bool ASenniteCharacter::IsGun(int32 Type) const {
 	return Type > 0 && WeaponClasses.IsValidIndex(Type) && WeaponClasses[Type] != nullptr;
 }
@@ -1742,6 +1754,21 @@ void ASenniteCharacter::ServerFireWeapon_Implementation() {
 	if (CurrentWeapon == nullptr || !IsGun(State->CurrentWeapon)) {
 		return;
 	}
+	if (CurrentWeapon->bMelee) {
+		// a weapon that is swung (the axe, the katana): the hero swings it with its own attack, and the blow lands up
+		// close a moment into the swing, as a melee hero's own does; nothing to load, nothing to run out of
+		if (State->InBuildMode || State->JustSwungPickaxe || State->JustUsedHealingItem) {
+			return;
+		}
+		NetMulticastOwnAttack();
+		State->JustSwungPickaxe = true;
+		NextShotAt = Now + FMath::Max(0.05f, CurrentWeapon->FireSeconds);
+		FTimerHandle Again;
+		GetWorldTimerManager().SetTimer(Again, this, &ASenniteCharacter::ServerPickaxeTimeOut, FMath::Max(0.05f, CurrentWeapon->FireSeconds), false);
+		FTimerHandle Lands;
+		GetWorldTimerManager().SetTimer(Lands, this, &ASenniteCharacter::LandBlow, FMath::Max(0.01f, CurrentWeapon->MeleeLandsAfter), false);
+		return;
+	}
 	if (CurrentWeapon->CurrentBulletCount <= 0) {
 		// nothing in the magazine: reload
 		ServerReloadWeapons();
@@ -2005,7 +2032,10 @@ bool ASenniteCharacter::ServerChangeBuildingMaterial_Validate() {
 void ASenniteCharacter::ServerAimDownSights_Implementation() {
 	if (GetController()) {
 		ASennitePlayerState* State = Cast<ASennitePlayerState>(GetController()->PlayerState);
-		if (State && State->HoldingWeapon && State->CurrentWeapon != 0) {
+		if (State && State->HoldingWeapon && State->CurrentWeapon != 0 && CurrentWeapon != nullptr && CurrentWeapon->bMelee) {
+			// an axe or a katana is swung where the hero faces, not aimed
+		}
+		else if (State && State->HoldingWeapon && State->CurrentWeapon != 0) {
 			AimedIn = true;
 			HoldingWeaponType = 2;
 			ClientCameraAimIn();
@@ -2400,6 +2430,16 @@ void ASenniteCharacter::NetMulticastOwnAttack_Implementation() {
 	if (OwnAttack != nullptr) {
 		PlayAnimMontage(OwnAttack);
 	}
+	// an axe or a katana in hand is heard as itself, at its blade
+	if (CurrentWeapon != nullptr && CurrentWeapon->bMelee) {
+		if (GetNetMode() != NM_DedicatedServer) {
+			if (USoundBase* Swing = Cast<USoundBase>(GetDefault<AWeaponActor>(CurrentWeapon->GetClass())->FireSound.TryLoad())) {
+				USoundAttenuation* Fades = Cast<USoundAttenuation>(GetDefault<AWeaponActor>()->FireFalloff.TryLoad());
+				UGameplayStatics::PlaySoundAtLocation(this, Swing, CurrentWeapon->GetMuzzleLocation(), 1.0f, 1.0f, 0.0f, Fades);
+			}
+		}
+		return;
+	}
 	// as the hero's own (a blow is heard as a swing or a punch, never as a shot)
 	USenniteSounds::PlayAt(this, HeroAttackSound, OwnWeaponTip());
 }
@@ -2420,8 +2460,13 @@ void ASenniteCharacter::LandBlow() {
 	Kinds.AddObjectTypesToQuery(ECC_WorldStatic);
 	Kinds.AddObjectTypesToQuery(ECC_WorldDynamic);
 	Kinds.AddObjectTypesToQuery(ECC_PhysicsBody);
+	// an axe or a katana in hand lands its own blow; otherwise the hero's own fists or what it swings
+	const AWeaponActor* Swung = CurrentWeapon != nullptr && CurrentWeapon->bMelee ? CurrentWeapon : nullptr;
+	const float Reach = Swung != nullptr ? Swung->MeleeReach : MeleeReach;
+	const float Across = Swung != nullptr ? Swung->MeleeAcross : MeleeAcross;
+	const float Damage = Swung != nullptr ? Swung->MeleeDamage : MeleeDamage;
 	TArray<FHitResult> InTheWay;
-	GetWorld()->SweepMultiByObjectType(InTheWay, From, From + Ahead * MeleeReach, FQuat::Identity, Kinds, FCollisionShape::MakeSphere(MeleeAcross), Skip);
+	GetWorld()->SweepMultiByObjectType(InTheWay, From, From + Ahead * Reach, FQuat::Identity, Kinds, FCollisionShape::MakeSphere(Across), Skip);
 	InTheWay.Sort([](const FHitResult& A, const FHitResult& B) { return A.Distance < B.Distance; });
 	for (const FHitResult& Each : InTheWay) {
 		AActor* Other = Each.GetActor();
@@ -2429,7 +2474,7 @@ void ASenniteCharacter::LandBlow() {
 			continue;
 		}
 		// kind 0, the pickaxe's: it takes materials from what it harvests, as the own weapon's bolt does
-		if (AProjectileActor::Land(Other, MeleeDamage, 0, this)) {
+		if (AProjectileActor::Land(Other, Damage, 0, this)) {
 			USenniteSounds::PlayAt(this, TEXT("bolt.hit"), Each.ImpactPoint);
 			return;
 		}

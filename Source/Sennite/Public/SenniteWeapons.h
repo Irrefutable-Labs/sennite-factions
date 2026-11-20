@@ -87,6 +87,26 @@ public:
 	ASenniteSniper();
 };
 
+/** Weapon slot 5: the axe, swung. */
+UCLASS()
+class SENNITE_API ASenniteAxe : public AWeaponActor
+{
+	GENERATED_BODY()
+
+public:
+	ASenniteAxe();
+};
+
+/** Weapon slot 6: the katana, swung. */
+UCLASS()
+class SENNITE_API ASenniteKatana : public AWeaponActor
+{
+	GENERATED_BODY()
+
+public:
+	ASenniteKatana();
+};
+
 /** The bolt of a hero's own weapon, with no gun in hand: lighter than a rifle round, and it harvests as the pickaxe did. */
 UCLASS()
 class SENNITE_API ASenniteOwnBolt : public AProjectileActor

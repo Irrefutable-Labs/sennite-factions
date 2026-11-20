@@ -19,6 +19,8 @@
 #include "SenniteHeroMesh.h"
 #include "SennitePlayerState.h"
 #include "SenniteWeapons.h"
+#include "BuildingActor.h"
+#include "SenniteBuildings.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
 #include "SenniteSounds.h"
@@ -49,7 +51,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, OwnWeapon, OpenCrate, FromCrate, HoldShotgun, HoldRifle, Fire, HoldFire, BoughtGuns, OtherGuns, Crossing, Done };
+		enum class EPhase { WaitForPawn, OwnWeapon, OpenCrate, FromCrate, HoldShotgun, HoldRifle, Fire, HoldFire, BoughtGuns, OtherGuns, Blades, Crossing, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -75,7 +77,8 @@ namespace
 			Test->TestEqual(FString::Printf(TEXT("The %s is fixed to the hero's weapon bone"), What), Held->WeaponMesh->GetAttachSocketName(), Hero->HeroWeaponBone);
 			Test->TestNotNull(FString::Printf(TEXT("The %s has its mesh"), What), Held->WeaponMesh->GetStaticMesh().Get());
 			Test->TestTrue(FString::Printf(TEXT("The %s shows"), What), Held->WeaponMesh->IsVisible() && !Held->IsHidden());
-			const double FromHand = FVector::Dist(Held->WeaponMesh->GetComponentLocation(), Hero->GetMesh()->GetSocketLocation(TEXT("hand_r")));
+			// where the weapon is held (its grip point), not its middle: a katana's middle is half a blade from the hand
+			const double FromHand = FVector::Dist(Held->WeaponMesh->GetComponentTransform().TransformPosition(Held->GripPoint), Hero->GetMesh()->GetSocketLocation(TEXT("hand_r")));
 			Test->TestTrue(FString::Printf(TEXT("The %s is in the hero's right hand"), What), FromHand < 45.0);
 			Test->TestTrue(FString::Printf(TEXT("The %s belongs to the hero"), What), Held->Holder == Hero);
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK holding %s: class=%s mesh=%s from_hand=%.0f rounds=%d"), What, *Held->GetClass()->GetName(),
@@ -91,6 +94,9 @@ namespace
 		GameCheck::FCrateRun Crate;
 		int32 Step = 0;
 		int32 OtherGun = 0;
+		/** The wall a blade's blow is landed on, and its health before the swing. */
+		TWeakObjectPtr<ABuildingActor> BladeWall;
+		float BladeWallHealth = 0.0f;
 		UClass* BulletClass = nullptr;
 		FVector OwnTip = FVector::ZeroVector;
 		GameCheck::FOnlooker Onlooker;
@@ -152,7 +158,8 @@ namespace
 			Test->TestTrue(TEXT("The hero has a built-in weapon to hide"), Hero->HeroBuiltInWeaponBones.Num() > 0);
 			Test->TestEqual(TEXT("No weapon or healing item lies about on the range: they are in the crate"), GameCheck::LyingAbout(World), 0);
 			// every gun has a name and a shot to be heard, and opening a crate a sound (a run without sound cannot hear them)
-			for (UClass* Gun : { ASenniteRifle::StaticClass(), ASenniteShotgun::StaticClass(), ASenniteEnergyRifle::StaticClass(), ASenniteSniper::StaticClass() }) {
+			for (UClass* Gun : { ASenniteRifle::StaticClass(), ASenniteShotgun::StaticClass(), ASenniteEnergyRifle::StaticClass(), ASenniteSniper::StaticClass(),
+				ASenniteAxe::StaticClass(), ASenniteKatana::StaticClass() }) {
 				const AWeaponActor* Made = GetDefault<AWeaponActor>(Gun);
 				Test->TestTrue(FString::Printf(TEXT("%s has a name"), *Gun->GetName()), !Made->DisplayName.IsEmpty());
 				Test->TestTrue(FString::Printf(TEXT("%s has a shot sound that loads"), *Gun->GetName()), Cast<USoundBase>(Made->FireSound.TryLoad()) != nullptr);
@@ -417,9 +424,9 @@ namespace
 			Test->TestTrue(TEXT("Let go, the rifle stops: no more than the shot already asked for"), Hero->CurrentWeapon != nullptr && RoundsWhenLetGo - Hero->CurrentWeapon->CurrentBulletCount <= 1);
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK held fire: rounds %d -> %d in a second held, %d a second after letting go"), RoundsBefore, RoundsWhenLetGo,
 				Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1);
-			// Her wallet now owns both guns sold in the store: set as the server sets it once the publisher's
-			// server says so of a pass she showed. The crate beside her, full again, gives them when opened.
-			State->GunsOwned = (1 << 3) | (1 << 4);
+			// Her wallet now owns the guns and the blades sold in the store: set as the server sets it once the
+			// publisher's server says so of a pass she showed. The crate beside her, full again, gives them when opened.
+			State->GunsOwned = (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6);
 			Enter(EPhase::BoughtGuns, World);
 			Step = 0;
 			return false;
@@ -440,8 +447,8 @@ namespace
 				PhaseStart = World->GetTimeSeconds();
 				return false;
 			}
-			if (!State->EquippedWeapons.Contains(3) || !State->EquippedWeapons.Contains(4)) {
-				return Elapsed(World) > 8.0 ? Fail(TEXT("The crate did not give the guns her wallet owns")) : false;
+			if (!State->EquippedWeapons.Contains(3) || !State->EquippedWeapons.Contains(4) || !State->EquippedWeapons.Contains(5) || !State->EquippedWeapons.Contains(6)) {
+				return Elapsed(World) > 8.0 ? Fail(TEXT("The crate did not give the guns and blades her wallet owns")) : false;
 			}
 			Test->TestEqual(TEXT("With the bought guns hers, the crate gives rounds for each"), State->EquippedWeaponsAmmunition[3], GetDefault<ASenniteEnergyRifle>()->CrateRounds);
 			Test->TestEqual(TEXT("and for the sniper"), State->EquippedWeaponsAmmunition[4], GetDefault<ASenniteSniper>()->CrateRounds);
@@ -510,6 +517,80 @@ namespace
 			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK %s: bolts=%d of %s, rounds %d -> %d"), One.Name, BulletsSpawned, *GetNameSafe(BulletClass), RoundsBefore,
 				Hero->CurrentWeapon ? Hero->CurrentWeapon->CurrentBulletCount : -1);
 			if (++OtherGun < UE_ARRAY_COUNT(Others)) {
+				Step = 0;
+				return false;
+			}
+			OtherGun = 0;
+			Step = 0;
+			Enter(EPhase::Blades, World);
+			return false;
+		}
+
+		case EPhase::Blades: {
+			// the axe (8) and the katana (9): each comes to her right hand alone, is swung with her own attack, sends no
+			// bolt, has nothing to load, is not aimed, and its blow lands on a wall in front of her for its own damage
+			struct FBlade { FKey Key; UClass* Blade; const TCHAR* Name; };
+			const FBlade Blades[] = { { EKeys::Eight, ASenniteAxe::StaticClass(), TEXT("axe") }, { EKeys::Nine, ASenniteKatana::StaticClass(), TEXT("katana") } };
+			const FBlade& One = Blades[OtherGun];
+			const AWeaponActor* Rules = GetDefault<AWeaponActor>(One.Blade);
+			if (Step == 0) {
+				// the last shot or swing over first: nothing is taken in hand between shots
+				if (Elapsed(World) < 1.8) {
+					return false;
+				}
+				Step = 1;
+				GameCheck::Key(Controller, One.Key, IE_Pressed);
+				GameCheck::Key(Controller, One.Key, IE_Released);
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (Step == 1) {
+				if (Elapsed(World) < 1.2) {
+					return false;
+				}
+				Step = 2;
+				CheckHeld(Hero, One.Blade, One.Name);
+				Test->TestTrue(FString::Printf(TEXT("The %s is swung, not held in both hands as a gun is"), One.Name), Body != nullptr && !Body->bHolding);
+				for (const FName& Bone : Hero->HeroBuiltInWeaponBones) {
+					Test->TestTrue(FString::Printf(TEXT("Holding the %s, her own weapon is hidden"), One.Name), Mesh->IsBoneHiddenByName(Bone));
+				}
+				Onlooker.Look(World, Controller, Hero);
+				GameCheck::Shot(TEXT("Weapons"), *FString::Printf(TEXT("%s.png"), One.Name));
+				GameCheck::Key(Controller, EKeys::RightMouseButton, IE_Pressed);
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (Step == 2) {
+				if (Elapsed(World) < 0.5) {
+					return false;
+				}
+				Step = 3;
+				Test->TestFalse(FString::Printf(TEXT("The %s is not aimed"), One.Name), Hero->AimedIn || State->AimedIn);
+				GameCheck::Key(Controller, EKeys::RightMouseButton, IE_Released);
+				Onlooker.Back(Controller, Hero);
+				// a wall within reach, across the way she looks, and one swing
+				const FRotator Facing(0.0, Controller->GetControlRotation().Yaw, 0.0);
+				Controller->SetControlRotation(FRotator(0.0, Facing.Yaw, 0.0));
+				BladeWall = World->SpawnActor<ASenniteWoodWall>(Hero->GetActorLocation() + Facing.Vector() * 180.0, FRotator(0.0, Facing.Yaw + 90.0, 0.0));
+				BladeWallHealth = BladeWall.IsValid() ? BladeWall->Health : 0.0f;
+				BulletsSpawned = 0;
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Pressed);
+				GameCheck::Key(Controller, EKeys::LeftMouseButton, IE_Released);
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (Elapsed(World) < 1.5) {
+				return false;
+			}
+			Test->TestTrue(TEXT("A wall stood in front of her"), BladeWall.IsValid());
+			Test->TestEqual(FString::Printf(TEXT("A swing of the %s lands its blow on the wall"), One.Name), BladeWall.IsValid() ? BladeWallHealth - BladeWall->Health : -1.0f, Rules->MeleeDamage);
+			Test->TestEqual(FString::Printf(TEXT("The %s sends no bolt"), One.Name), BulletsSpawned, 0);
+			Test->TestTrue(FString::Printf(TEXT("The %s has nothing to load"), One.Name), Hero->CurrentWeapon != nullptr && Hero->CurrentWeapon->CurrentBulletCount == 0);
+			UE_LOG(LogWeaponsCheck, Display, TEXT("GAMECHECK %s: wall %.0f -> %.0f, bolts %d"), One.Name, BladeWallHealth, BladeWall.IsValid() ? BladeWall->Health : -1.0f, BulletsSpawned);
+			if (BladeWall.IsValid()) {
+				BladeWall->Destroy();
+			}
+			if (++OtherGun < UE_ARRAY_COUNT(Blades)) {
 				Step = 0;
 				return false;
 			}

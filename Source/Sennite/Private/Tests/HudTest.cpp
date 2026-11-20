@@ -167,8 +167,9 @@ namespace
 				return false;
 			}
 			Hides(Hud, TEXT("crate"), TEXT("how to open a crate that is open"));
-			Shows(Hud, *FString::Printf(TEXT("crategave=RIFLE   SHOTGUN   ENERGY RIFLE   SNIPER   +ROUNDS   +%d BANDAGES   +%d POTIONS"),
-				GetDefault<ASenniteBandage>()->Count, GetDefault<ASennitePotion>()->Count), TEXT("what the crate gave"));
+			// she owns the energy rifle and the sniper here, not the axe or the katana: the crate keeps those, and says they are in the store
+			Shows(Hud, *FString::Printf(TEXT("crategave=RIFLE   SHOTGUN   ENERGY RIFLE   SNIPER   +ROUNDS   +%d BANDAGES   +%d POTIONS   IN THE STORE: AXE, KATANA"),
+				GetDefault<ASenniteBandage>()->Count, GetDefault<ASennitePotion>()->Count), TEXT("what the crate gave, and what it kept for the store"));
 			Shows(Hud, TEXT("weapon=RIFLE"), TEXT("the rifle the crate gave, in hand"));
 			Shows(Hud, *FString::Printf(TEXT("reserve=%d"), GetDefault<ASenniteRifle>()->CrateRounds), TEXT("the rounds the crate gave"));
 			Log(Hud, TEXT("after opening the crate"));

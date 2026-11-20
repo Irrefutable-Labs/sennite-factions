@@ -21,6 +21,8 @@ struct FSenniteHudReadout
 	bool bBuildMode = false;
 	FString BuildMode;
 	bool bHoldingWeapon = false;
+	/** What is in hand is swung (the axe, the katana): it has no rounds to show. */
+	bool bSwung = false;
 	int32 WeaponType = -1;
 	int32 Clip = 0;
 	int32 Reserve = 0;
