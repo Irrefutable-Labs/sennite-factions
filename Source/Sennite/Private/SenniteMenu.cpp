@@ -13,6 +13,8 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
+#include "HAL/PlatformTime.h"
+#include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "IPAddress.h"
 #include "Kismet/GameplayStatics.h"
@@ -1006,6 +1008,57 @@ void ASenniteMenuHUD::Text(const TCHAR* Name, const FString& Line, float X, floa
 	Drawing.Add(FString::Printf(TEXT("%s=%s"), Name, *Line));
 }
 
+namespace
+{
+	/** When this game first showed the logo (FPlatformTime), and for how long: once a game, never again on a later visit to the menu. */
+	double LogoShownAt = -1.0;
+	double LogoFor = 0.0;
+	double FirstMenuAt = -1.0;
+}
+
+double ASenniteMenuHUD::LogoBeganAt()
+{
+	return LogoShownAt;
+}
+
+double ASenniteMenuHUD::MenuBeganAt()
+{
+	return FirstMenuAt;
+}
+
+bool ASenniteMenuHUD::LogoUp()
+{
+	return LogoShownAt < 0.0 || FPlatformTime::Seconds() - LogoShownAt < LogoFor;
+}
+
+bool ASenniteMenuHUD::DrawLogo()
+{
+	if (LogoShownAt < 0.0) {
+		LogoShownAt = FPlatformTime::Seconds();
+		LogoFor = LogoSeconds;
+	}
+	const double Since = FPlatformTime::Seconds() - LogoShownAt;
+	if (Since >= LogoFor) {
+		FirstMenuAt = FirstMenuAt < 0.0 ? FPlatformTime::Seconds() : FirstMenuAt;
+		return false;
+	}
+	// black to every edge of the screen, and the logo in the middle, as large as fits with a margin; it fades in
+	// and out over a third of a second
+	const FBox2D Whole = Screen();
+	FCanvasTileItem Black(Whole.Min, Whole.GetSize(), FLinearColor::Black);
+	Canvas->DrawItem(Black);
+	if (UTexture2D* Mark = Cast<UTexture2D>(Logo.TryLoad())) {
+		const double Fade = 0.33;
+		const float Alpha = float(FMath::Clamp(FMath::Min(Since / Fade, (LogoFor - Since) / Fade), 0.0, 1.0));
+		const float Side = 0.82f * FMath::Min(Whole.GetSize().X, Whole.GetSize().Y);
+		FCanvasTileItem Shown(Whole.GetCenter() - FVector2D(Side * 0.5f), Mark->GetResource(), FVector2D(Side), FLinearColor(1.0f, 1.0f, 1.0f, Alpha));
+		Shown.BlendMode = SE_BLEND_Translucent;
+		Canvas->DrawItem(Shown);
+	}
+	Drawing.Add(TEXT("page=logo"));
+	return true;
+}
+
 FBox2D ASenniteMenuHUD::Screen() const
 {
 	// On a phone the engine moves the canvas in from the screen's edges, clear of its rounded corners and
@@ -1077,6 +1130,11 @@ void ASenniteMenuHUD::DrawHUD()
 	S = Canvas->ClipY / 720.0f;
 	Inset = -Screen().Min;
 	if (Menu == nullptr) {
+		return;
+	}
+	if (DrawLogo()) {
+		// the studio's logo first: no button is there to tap
+		LastDrawn = Drawing;
 		return;
 	}
 	if (USenniteGameMenu* Settings = Menu->SettingsIfOpen()) {

@@ -13,6 +13,7 @@
 //
 // Tools/check_menu.sh runs this and reads the result.
 
+#include "Engine/Texture2D.h"
 #include "Misc/AutomationTest.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -76,6 +77,10 @@ namespace
 		FName Free;
 		FName Locked;
 		float MusicBefore = 0.0f;
+		/** The studio's logo before the first menu: when it was first and last seen on the screen, and whether a picture of it was taken. */
+		double LogoFirst = -1.0;
+		double LogoLast = -1.0;
+		bool bLogoShot = false;
 	};
 
 	bool FMenuRun::Update()
@@ -89,9 +94,29 @@ namespace
 
 		switch (Phase) {
 		case EPhase::WaitForMenu: {
+			// the studio's logo comes first, on its own, with nothing to tap
+			if (Menu != nullptr && MenuCheck::Line(Menu, TEXT("page")) == TEXT("logo")) {
+				const double Now = FPlatformTime::Seconds();
+				LogoFirst = LogoFirst < 0.0 ? Now : LogoFirst;
+				LogoLast = Now;
+				Test->TestFalse(TEXT("While the logo is up there is no button to tap"), MenuCheck::Has(Menu, TEXT("play")));
+				if (!bLogoShot && Now - LogoFirst > 1.0) {
+					bLogoShot = true;
+					GameCheck::Shot(TEXT("Menu"), TEXT("logo.png"));
+				}
+				return false;
+			}
 			if (Menu == nullptr || !MenuCheck::Has(Menu, TEXT("play")) || World->GetTimeSeconds() < 2.0) {
 				return false;
 			}
+			{
+				// the logo began with the first frame the menu drew, often before this check was running; the menu came three seconds later
+				const double Up = ASenniteMenuHUD::MenuBeganAt() - ASenniteMenuHUD::LogoBeganAt();
+				Test->TestTrue(TEXT("The studio's logo is on the screen before the first menu"), ASenniteMenuHUD::LogoBeganAt() > 0.0 && ASenniteMenuHUD::MenuBeganAt() > 0.0);
+				Test->TestTrue(FString::Printf(TEXT("for about three seconds (%.2f s)"), Up), Up > 2.9 && Up < 3.4);
+				UE_LOG(LogTemp, Display, TEXT("GAMECHECK logo: up %.2f s before the first menu; this check saw it for %.2f s"), Up, LogoFirst >= 0.0 ? LogoLast - LogoFirst : 0.0);
+			}
+			Test->TestTrue(TEXT("The logo is a texture that loads"), Cast<UTexture2D>(GetDefault<ASenniteMenuHUD>()->Logo.TryLoad()) != nullptr);
 			// the heroes this check uses: the first free hero that is not the default, and the first that is bought
 			const FName Default = USenniteHeroes::FindOrDefault(NAME_None).Id;
 			for (const FSenniteHero& Hero : Heroes) {
