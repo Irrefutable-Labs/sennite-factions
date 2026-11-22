@@ -2484,15 +2484,24 @@ void ASenniteArena::Build()
 	// The craft: seen here, moved in Tick, and felt through the server's own sums, not through collision.
 	// Each is one of the vehicles, by its place in the plan, so it is the same one on every machine:
 	// at its own size, its wheels on the road and its nose (its own +X) the way its lane runs. What
-	// reaches a hero is as large as that vehicle.
+	// reaches a hero is as large as that vehicle, by the size the settings give it (CraftSizes), which
+	// every machine has alike whatever loaded on it: a vehicle that is not there is drawn as a block
+	// of its size, so what kills is never larger than what is seen, nor another vehicle.
+	const bool bVehicles = CraftModels.Num() > 0 && CraftSizes.Num() == CraftModels.Num();
+	if (CraftModels.Num() != CraftSizes.Num()) {
+		UE_LOG(LogTemp, Error, TEXT("Arena: %d vehicles are named for the craft and %d sizes: no craft is a vehicle"), CraftModels.Num(), CraftSizes.Num());
+	}
 	TArray<UStaticMesh*> Vehicles;
-	for (const FSoftObjectPath& Named : CraftModels) {
-		if (UStaticMesh* Vehicle = Named.IsNull() ? nullptr : Cast<UStaticMesh>(Named.TryLoad())) {
-			Vehicles.Add(Vehicle);
+	for (int32 Which = 0; bVehicles && Which < CraftModels.Num(); ++Which) {
+		UStaticMesh* Vehicle = CraftModels[Which].IsNull() ? nullptr : Cast<UStaticMesh>(CraftModels[Which].TryLoad());
+		if (Vehicle == nullptr) {
+			UE_LOG(LogTemp, Error, TEXT("Arena: the craft's vehicle %s is not there: it is drawn as a block of its size"), *CraftModels[Which].ToString());
 		}
-		else {
-			UE_LOG(LogTemp, Warning, TEXT("Arena: the craft's vehicle %s is not there"), *Named.ToString());
+		else if (!Vehicle->GetBoundingBox().GetSize().Equals(CraftSizes[Which], 2.0)) {
+			UE_LOG(LogTemp, Error, TEXT("Arena: the craft's vehicle %s is %s, and its size in CraftSizes is %s: what reaches a hero is the size in CraftSizes"),
+				*CraftModels[Which].ToString(), *Vehicle->GetBoundingBox().GetSize().ToCompactString(), *CraftSizes[Which].ToCompactString());
 		}
+		Vehicles.Add(Vehicle);
 	}
 	CraftDrawnFrom.Reset();
 	CraftBoxes.Reset();
@@ -2501,27 +2510,38 @@ void ASenniteArena::Build()
 		const FArenaCraft& Craft = Plan.Craft[Index];
 		UStaticMeshComponent* Body = NewObject<UStaticMeshComponent>(this);
 		FTransform Drawn(Craft.Rotation, FVector::ZeroVector, Craft.Size / 100.0f);
-		if (Vehicles.Num() > 0) {
-			UStaticMesh* Vehicle = Vehicles[Index % Vehicles.Num()];
-			const FBox Shape = Vehicle->GetBoundingBox();
-			const FVector Whole = Shape.GetSize();
+		FVector Box = Craft.Size;
+		FVector Middle = FVector::ZeroVector;
+		UStaticMesh* Vehicle = nullptr;
+		if (bVehicles) {
+			const int32 Which = Index % CraftModels.Num();
+			// long, wide and high; a craft's box is across its lane, along it, and high
+			const FVector Sized = CraftSizes[Which];
 			const FVector Up = Craft.Rotation.GetUpVector();
 			const FQuat Facing = FRotationMatrix::MakeFromXZ(Craft.LaneDirection, Up).ToQuat();
-			const FVector Middle = Shape.GetCenter();
-			Drawn = FTransform(Facing, Facing.RotateVector(FVector(-Middle.X, -Middle.Y, -Shape.Min.Z)) - Up * FArenaCraft::Height);
+			Box = FVector(Sized.Y, Sized.X, Sized.Z);
+			Middle = Up * (Sized.Z * 0.5f - FArenaCraft::Height);
+			Vehicle = Vehicles[Which];
+			if (Vehicle != nullptr) {
+				const FBox Shape = Vehicle->GetBoundingBox();
+				Drawn = FTransform(Facing, Facing.RotateVector(FVector(-Shape.GetCenter().X, -Shape.GetCenter().Y, -Shape.Min.Z)) - Up * FArenaCraft::Height);
+			}
+			else {
+				Drawn = FTransform(Facing, Middle, Sized / 100.0f);
+			}
+		}
+		if (Vehicle != nullptr) {
 			Body->SetStaticMesh(Vehicle);
-			CraftBoxes.Add(FVector(Whole.Y, Whole.X, Whole.Z));
-			CraftMiddles.Add(Up * (Whole.Z * 0.5f - FArenaCraft::Height));
 		}
 		else {
 			Body->SetStaticMesh(Cube);
 			Body->SetMaterial(0, Tints[static_cast<int32>(EArenaTint::Craft)]);
-			CraftBoxes.Add(Craft.Size);
-			CraftMiddles.Add(FVector::ZeroVector);
 		}
 		Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Body->SetupAttachment(RootComponent);
 		Body->RegisterComponent();
+		CraftBoxes.Add(Box);
+		CraftMiddles.Add(Middle);
 		CraftDrawnFrom.Add(Drawn.GetLocation());
 		Drawn.AddToTranslation(CraftLocation(Craft, MatchSeconds()));
 		Body->SetWorldTransform(Drawn);

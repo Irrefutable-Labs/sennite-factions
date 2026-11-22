@@ -381,8 +381,9 @@ public:
 	static FVector CraftLocation(const FArenaCraft& Craft, double MatchSeconds);
 
 	/**
-	 * How large the craft at this place of the plan is: across its lane, along it, and high. Its
-	 * vehicle's own size once the arena is built, its plan's box when it has no vehicle to be.
+	 * How large the craft at this place of the plan is: across its lane, along it, and high. The
+	 * size the settings give its vehicle (CraftSizes) once the arena is built, its plan's box when it
+	 * has no vehicle to be.
 	 */
 	FVector CraftBox(int32 Index) const;
 
@@ -436,6 +437,17 @@ public:
 	 */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	TArray<FSoftObjectPath> CraftModels;
+
+	/**
+	 * How large each of CraftModels is, in their order: long, wide and high, in cm, as
+	 * Tools/import_vehicles.py writes them out. What reaches a hero is this size, taken from the
+	 * settings and not from the vehicle as it loaded, so it is the same on the match server and on
+	 * every player's machine: a machine a vehicle did not load on draws that craft as a block of this
+	 * size, never as another vehicle and never smaller than what kills. One size for each vehicle, or
+	 * no craft is a vehicle. Set in DefaultGame.ini.
+	 */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	TArray<FVector> CraftSizes;
 
 	/**
 	 * The country round the arena, and its water: mountains and a lake, seen and nothing else. Each

@@ -29,7 +29,9 @@ underside and the inside are 256. The pack's 4096 px sets come to 1.1 GB; what i
 The windows are one dark glass every vehicle shares, not see-through: see-through surfaces are what
 a phone draws slowest, and there are hundreds of them on a road. The pack's lamp glow maps are left out.
 
-What it made is written to Saved/import_vehicles.txt."""
+What it made is written to Saved/import_vehicles.txt, with each vehicle's size as the line
+Config/DefaultGame.ini gives it under CraftSizes: what reaches a hero is that size, so a vehicle
+brought in again at another size needs its line there changed."""
 import os
 import shutil
 import subprocess
@@ -231,6 +233,8 @@ def vehicle(pack_name, name, glass):
         name, box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z, box.min.z, box.max.z,
         ", ".join(str(mesh.get_num_triangles(level)) for level in range(mesh.get_num_lods())),
         ", ".join(str(source.get_num_triangles(level)) for level in range(source.get_num_lods()))))
+    # the line DefaultGame.ini gives this vehicle under CraftSizes, in CraftModels' order
+    log("  +CraftSizes=(X=%.0f,Y=%.0f,Z=%.0f)" % (box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z))
 
 
 def main():
