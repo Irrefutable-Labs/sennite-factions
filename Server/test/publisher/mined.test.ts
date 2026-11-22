@@ -1,7 +1,7 @@
 /**
  * What a match's players mined, given to their wallets: with a stand-in for the publisher's account, what
  * the server takes from the match server's report and what it gives, once. The gives themselves are DSM's.
- * The owner, 2026-11-22: "everyone has their own mining robot that goes into their wallet".
+ * The owner, 2026-11-22: "everyone has their own mining droid that goes into their wallet".
  */
 import { describe, expect, it } from "vitest";
 import type { AppAccount, Connection, ObjectInfo } from "dsm-app-client";

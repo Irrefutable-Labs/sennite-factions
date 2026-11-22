@@ -196,9 +196,9 @@ bool AProjectileActor::Land(AActor* OtherActor, float Damage, int32 Kind, ASenni
 		Piece->TakeHit(Damage, Shooter);
 		return true;
 	}
-	if (ASenniteMiningRobot* Robot = Cast<ASenniteMiningRobot>(OtherActor)) {
-		// a mining robot stops the bullet, and is shot down by those it is not safe from
-		Robot->TakeHit(Damage, Shooter);
+	if (ASenniteMiningDroid* Droid = Cast<ASenniteMiningDroid>(OtherActor)) {
+		// a mining droid stops the bullet, and is shot down by those it is not safe from
+		Droid->TakeHit(Damage, Shooter);
 		return true;
 	}
 	if (ASenniteStructure* Structure = Cast<ASenniteStructure>(OtherActor)) {

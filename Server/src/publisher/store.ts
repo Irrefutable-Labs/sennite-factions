@@ -213,7 +213,7 @@ export interface PrizeShare {
 }
 
 /**
- * What one member's mining robot took of one material in a match, which the publisher gives that member's
+ * What one member's mining droid took of one material in a match, which the publisher gives that member's
  * wallet (owner, 2026-11-22). `giving` is set, and written down, before the publisher gives it, and `given`
  * once it has: one found with `giving` set and not `given` was cut off while it was being given, and is
  * not given again by the server (the account cannot say whether that give was sent).

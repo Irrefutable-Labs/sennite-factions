@@ -191,7 +191,7 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/**
-	 * A player's robot took Units of a material (SenniteMining.h), on the match server: counted for the
+	 * A player's droid took Units of a material (SenniteMining.h), on the match server: counted for the
 	 * player's wallet, by its signing key, through whatever becomes of the player's game before the end.
 	 */
 	void Mined(const ASennitePlayerState* By, int32 Material, int32 Units);
@@ -199,7 +199,7 @@ public:
 private:
 	FSenniteMatchFaction* Find(const FString& FactionId);
 
-	/** What each wallet's robot has mined of each material, by the wallet's signing key. On the match server. */
+	/** What each wallet's droid has mined of each material, by the wallet's signing key. On the match server. */
 	TMap<FString, FIntVector> MinedBy;
 	/** The publisher's server has what was mined, or there was nothing to tell it. */
 	bool bMinedTold = false;

@@ -840,7 +840,7 @@ export class Service {
       return { status: 200, body: await publisher.matches.decide(b, text((await body(req)).outcome, "outcome")) };
     }
 
-    // The publisher's match server says what each player's robot mined, once the match is over (owner,
+    // The publisher's match server says what each player's droid mined, once the match is over (owner,
     // 2026-11-22): the publisher's account gives it to each player's wallet. Recorded once.
     if (is("POST", "matches", null, "mined") && b !== undefined) {
       this.matchServer(req, "reports what a match's players mined");

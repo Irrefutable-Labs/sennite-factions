@@ -405,7 +405,7 @@ void ASenniteCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerI
 	PlayerInputComponent->BindAction("Ironsights", IE_Pressed, this, &ASenniteCharacter::AimGunIn);
 	PlayerInputComponent->BindAction("Ironsights", IE_Released, this, &ASenniteCharacter::AimGunOut);
 	PlayerInputComponent->BindAction("OpenCrate", IE_Pressed, this, &ASenniteCharacter::OpenCrate);
-	PlayerInputComponent->BindAction("SendRobot", IE_Pressed, this, &ASenniteCharacter::SendRobot);
+	PlayerInputComponent->BindAction("SendDroid", IE_Pressed, this, &ASenniteCharacter::SendDroid);
 	PlayerInputComponent->BindAction("EditPiece", IE_Pressed, this, &ASenniteCharacter::EditPiece);
 
 	// We have 2 versions of the rotation bindings to handle different kinds of devices differently
@@ -1211,7 +1211,7 @@ void ASenniteCharacter::ServerOpenCrate_Implementation() {
 	}
 }
 
-void ASenniteCharacter::SendRobot() {
+void ASenniteCharacter::SendDroid() {
 	const APlayerController* Own = Cast<APlayerController>(GetController());
 	if (Own == nullptr) {
 		return;
@@ -1219,34 +1219,34 @@ void ASenniteCharacter::SendRobot() {
 	FVector Eye;
 	FRotator Look;
 	Own->GetPlayerViewPoint(Eye, Look);
-	ServerSendRobot(Eye, Look.Vector());
+	ServerSendDroid(Eye, Look.Vector());
 }
 
-void ASenniteCharacter::ServerSendRobot_Implementation(FVector_NetQuantize Eye, FVector_NetQuantizeNormal Toward) {
+void ASenniteCharacter::ServerSendDroid_Implementation(FVector_NetQuantize Eye, FVector_NetQuantizeNormal Toward) {
 	ASennitePlayerState* State = GetPlayerState<ASennitePlayerState>();
 	// a player looks from near their hero: an eye far from it is not this player's
 	if (State == nullptr || FVector::Dist(Eye, GetActorLocation()) > 3000.0) {
 		return;
 	}
-	if (State->bRobotDown) {
-		ClientRobotSaid(TEXT("YOUR ROBOT WAS SHOT DOWN: IT IS BACK NEXT MATCH"));
+	if (State->bDroidDown) {
+		ClientDroidSaid(TEXT("YOUR MINING DROID WAS SHOT DOWN: IT IS BACK NEXT MATCH"));
 		return;
 	}
-	const ASenniteMiningRobot* Rules = GetDefault<ASenniteMiningRobot>();
+	const ASenniteMiningDroid* Rules = GetDefault<ASenniteMiningDroid>();
 	ASenniteDeposit* Deposit = ASenniteDeposit::Aimed(GetWorld(), Eye, Toward, Rules->SendRange, Rules->SendOff);
 	if (Deposit == nullptr) {
-		ClientRobotSaid(TEXT("AIM AT A DEPOSIT TO SEND YOUR ROBOT THERE"));
+		ClientDroidSaid(TEXT("AIM AT A DEPOSIT TO SEND YOUR MINING DROID THERE"));
 		return;
 	}
-	ASenniteMiningRobot* Robot = State->Robot != nullptr ? State->Robot.Get() : ASenniteMiningRobot::Launch(this);
-	if (Robot == nullptr) {
+	ASenniteMiningDroid* Droid = State->Droid != nullptr ? State->Droid.Get() : ASenniteMiningDroid::Launch(this);
+	if (Droid == nullptr) {
 		return;
 	}
-	Robot->SendTo(Deposit);
-	ClientRobotSaid(FString::Printf(TEXT("YOUR ROBOT GOES TO MINE %s: %d THERE"), ASenniteDeposit::NameOf(Deposit->Material), Deposit->Left));
+	Droid->SendTo(Deposit);
+	ClientDroidSaid(FString::Printf(TEXT("YOUR MINING DROID GOES TO MINE %s: %d THERE"), ASenniteDeposit::NameOf(Deposit->Material), Deposit->Left));
 }
 
-void ASenniteCharacter::ClientRobotSaid_Implementation(const FString& Said) {
+void ASenniteCharacter::ClientDroidSaid_Implementation(const FString& Said) {
 	const APlayerController* Own = Cast<APlayerController>(GetController());
 	if (ASenniteHUD* Hud = Own != nullptr ? Cast<ASenniteHUD>(Own->GetHUD()) : nullptr) {
 		Hud->DrawCrateGave(Said);

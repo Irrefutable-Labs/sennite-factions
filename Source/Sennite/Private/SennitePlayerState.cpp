@@ -74,8 +74,8 @@ void ASennitePlayerState::GetLifetimeReplicatedProps(TArray< FLifetimeProperty >
 	DOREPLIFETIME(ASennitePlayerState, FactionId);
 	DOREPLIFETIME(ASennitePlayerState, Wallet);
 	DOREPLIFETIME(ASennitePlayerState, Mined);
-	DOREPLIFETIME(ASennitePlayerState, Robot);
-	DOREPLIFETIME(ASennitePlayerState, bRobotDown);
+	DOREPLIFETIME(ASennitePlayerState, Droid);
+	DOREPLIFETIME(ASennitePlayerState, bDroidDown);
 	DOREPLIFETIME(ASennitePlayerState, HeroId);
 	DOREPLIFETIME_CONDITION(ASennitePlayerState, HeroAudience, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(ASennitePlayerState, GunsOwned, COND_OwnerOnly);

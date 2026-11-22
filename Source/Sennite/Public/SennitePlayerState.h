@@ -7,7 +7,7 @@
 #include "SennitePlayerState.generated.h"
 
 class ASenniteCharacter;
-class ASenniteMiningRobot;
+class ASenniteMiningDroid;
 
 /**
  * 
@@ -72,19 +72,19 @@ public:
 	FString SigningKey;
 
 	/**
-	 * What this player's mining robot has taken of each material this game (SenniteMining.h), in the order
+	 * What this player's mining droid has taken of each material this game (SenniteMining.h), in the order
 	 * of MaterialCounts. It is kept through a fall: what was mined stays mined.
 	 */
 	UPROPERTY(Replicated)
 	TArray<int32> Mined;
 
-	/** This player's mining robot, while it is out. */
+	/** This player's mining droid, while it is out. */
 	UPROPERTY(Replicated)
-	TObjectPtr<ASenniteMiningRobot> Robot;
+	TObjectPtr<ASenniteMiningDroid> Droid;
 
-	/** This player's mining robot was shot down: it is gone until the next game. */
+	/** This player's mining droid was shot down: it is gone until the next game. */
 	UPROPERTY(Replicated)
-	bool bRobotDown = false;
+	bool bDroidDown = false;
 
 	/** Which hero this player is (USenniteHeroes): what they logged in with (Hero=), or chose in the lobby since. */
 	UPROPERTY(Replicated)

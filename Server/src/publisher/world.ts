@@ -96,7 +96,7 @@ export interface MatchWorld {
   prize: Record<string, number>;
   /**
    * What a match's arena holds to mine (owner, 2026-11-22): for each material, the whole units its deposits
-   * hold between them. A player's mining robot takes from them, and what it took is given to the player's
+   * hold between them. A player's mining droid takes from them, and what it took is given to the player's
    * wallet when the match is over. It is the most a match can pay out in mining, whoever mines it; every
    * unit of it is new supply entering circulation, as a prize's is. A match with none has nothing to mine.
    */

@@ -263,7 +263,7 @@ public:
 	TMap<FString, int32> MatchMining;
 
 	/**
-	 * Tell the publisher's server what each wallet's robot mined in a match that is over: for each wallet
+	 * Tell the publisher's server what each wallet's droid mined in a match that is over: for each wallet
 	 * (by its signing key) and material (by its symbol), the whole units. The match server's to say, once.
 	 */
 	void ReportMined(const FString& MatchId, const TArray<TTuple<FString, FString, int32>>& Mined, TFunction<void(bool /* bOk */, const FString& /* Said */)> Done);

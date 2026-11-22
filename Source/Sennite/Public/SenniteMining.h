@@ -1,15 +1,18 @@
 // Mining: where a player's building materials come from in play (owner, 2026-11-22).
 //
 // Deposits of wood, stone and steel stand on the land between the bases of an arena. Each holds so many
-// units; both sides take from the same ones. A player has one mining robot a match. It is not out until
-// the player sends it: the player aims at a deposit and sends the robot (the SendRobot key; ROBOT on the
-// touch wheel), and it flies there and takes a unit every so often until the deposit is empty or the
-// player sends it to another. Once it is out it stays out, whatever becomes of its player's hero. Anyone
-// it is not safe from can shoot it down; a robot shot down is gone for the rest of the match.
+// units; both sides take from the same ones. A player has one mining droid a match. It is not out until
+// the player sends it: the player aims at a deposit and sends the droid (the SendDroid key; DROID on the
+// touch wheel). It goes there low, just above the ground, and comes in at the deposit's side, the side it
+// set out from, where it hangs and takes a unit every so often until the deposit is empty or the player
+// sends it to another. It does not fly over the arena, where it would be shot down at once (owner,
+// 2026-11-22: "I thought they'd hover just above the ground ... coming at it from an side angle").
+// Once it is out it stays out, whatever becomes of its player's hero. Anyone
+// it is not safe from can shoot it down; a droid shot down is gone for the rest of the match.
 //
-// What a robot takes is its player's to build with in the match at once (the three materials on the HUD).
+// What a droid takes is its player's to build with in the match at once (the three materials on the HUD).
 // In a match the publisher's match server runs, it is also counted for the player's wallet: when the match
-// is over the match server reports what each wallet's robot took, and the publisher's account gives it
+// is over the match server reports what each wallet's droid took, and the publisher's account gives it
 // (ASenniteMatch, Server/src/publisher/matches.ts). What such an arena's deposits hold is the publisher's
 // to say (world/matches.json), and is the most a match can pay out in mining. An arena with no publisher
 // holds what DefaultGame.ini says, and what is mined there is for that game alone.
@@ -82,8 +85,9 @@ public:
 	/** Take up to Units from it, on the server. How many were taken. */
 	int32 Take(int32 Units);
 
-	/** How high it stands above the ground it is on. */
+	/** How high it stands above the ground it is on, and how far across it is on the ground. */
 	float Height() const { return Size.Z; }
+	float Width() const { return FMath::Max(Size.X, Size.Y); }
 
 	/**
 	 * Stand an arena's deposits, on the server: PerBase of each material on each base's side, holding
@@ -94,8 +98,9 @@ public:
 
 	/**
 	 * The deposit a player aims at: of those that hold something and are no farther than Range, the one
-	 * nearest the line from From along Toward, and no farther from that line than Off. None when the
-	 * player aims at none.
+	 * the line from From along Toward passes nearest for how near it has to pass: within Off of it, and
+	 * more for one far off (about five degrees), which is small on the screen. None when the player aims
+	 * at none.
 	 */
 	static ASenniteDeposit* Aimed(const UWorld* World, const FVector& From, const FVector& Toward, float Range, float Off);
 
@@ -120,20 +125,20 @@ private:
 	FVector Size = FVector::ZeroVector;
 };
 
-/** A player's mining robot. */
+/** A player's mining droid. */
 UCLASS(Config = Game)
-class SENNITE_API ASenniteMiningRobot : public AActor
+class SENNITE_API ASenniteMiningDroid : public AActor
 {
 	GENERATED_BODY()
 
 public:
-	ASenniteMiningRobot();
+	ASenniteMiningDroid();
 
-	/** The robot's model. */
+	/** The droid's model. */
 	UPROPERTY(Config)
 	FSoftObjectPath Model;
 
-	/** How far across the robot is. Its model is scaled evenly to it. */
+	/** How far across the droid is. Its model is scaled evenly to it. */
 	UPROPERTY(Config)
 	float Across = 140.0f;
 
@@ -141,13 +146,17 @@ public:
 	UPROPERTY(Config)
 	float Speed = 1200.0f;
 
-	/** How far above a deposit's top it hangs while it mines. */
+	/** How high above the ground it hangs, on its way and while it mines. */
 	UPROPERTY(Config)
-	float Above = 220.0f;
+	float Hover = 110.0f;
 
-	/** How high above the land it flies on its way. */
+	/** How far from a deposit's side it hangs while it mines. */
 	UPROPERTY(Config)
-	float Cruise = 900.0f;
+	float Beside = 150.0f;
+
+	/** How fast it rises and sinks to keep its height over ground that rises and falls. */
+	UPROPERTY(Config)
+	float Climb = 700.0f;
 
 	/** How long it takes to take one unit. */
 	UPROPERTY(Config)
@@ -156,6 +165,30 @@ public:
 	/** How much it takes to shoot it down. */
 	UPROPERTY(Config)
 	int32 StartHealth = 60;
+
+	/**
+	 * How it moves, which is drawn on each machine and changes nothing it does: how far it bobs up and down
+	 * as it hangs in the air and how many times a second, how far it tips from side to side, and how far it
+	 * dips each time it takes a unit.
+	 */
+	UPROPERTY(Config)
+	float Bob = 14.0f;
+	UPROPERTY(Config)
+	float BobsASecond = 0.45f;
+	UPROPERTY(Config)
+	float Sway = 5.0f;
+	UPROPERTY(Config)
+	float Dip = 22.0f;
+
+	/** The beam it mines with, from it down to its deposit: its model (a rod one metre long, drawn stretched) and how thick it is. */
+	UPROPERTY(Config)
+	FSoftObjectPath Beam;
+	UPROPERTY(Config)
+	float BeamThick = 9.0f;
+
+	/** How long a droid shot down falls and lies before it is gone. */
+	UPROPERTY(Config)
+	float DownSeconds = 2.5f;
 
 	/** How far off a deposit a player can send it to, and how near the player's aim has to pass the deposit. */
 	UPROPERTY(Config)
@@ -178,11 +211,19 @@ public:
 	UPROPERTY(Replicated)
 	TObjectPtr<ASennitePlayerState> Miner;
 
+	/** How many units it has taken: each machine sees it dip as this goes up. */
+	UPROPERTY(Replicated)
+	int32 Taken = 0;
+
+	/** It was shot down: it falls, tumbling, and is gone a moment after. */
+	UPROPERTY(Replicated)
+	bool bDown = false;
+
 	/**
-	 * Take a player's robot out, by the hero, on the server. None when the player has one out already,
+	 * Take a player's droid out, by the hero, on the server. None when the player has one out already,
 	 * or theirs was shot down this match.
 	 */
-	static ASenniteMiningRobot* Launch(ASenniteCharacter* By);
+	static ASenniteMiningDroid* Launch(ASenniteCharacter* By);
 
 	/** Send it to a deposit, on the server. */
 	void SendTo(ASenniteDeposit* Deposit);
@@ -193,7 +234,7 @@ public:
 	 */
 	void TakeHit(float Damage, ASenniteCharacter* Shooter);
 
-	/** What the HUD says of a player's robot: not out, on its way, mining, idle, or down. */
+	/** What the HUD says of a player's droid: not out, on its way, mining, idle, or down. */
 	static FString Status(const ASennitePlayerState* Of);
 
 	virtual void PostInitializeComponents() override;
@@ -202,12 +243,33 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
-	/** Where it hangs to mine its deposit. */
-	FVector Over(const ASenniteDeposit* Deposit) const;
+	/** Where it hangs to mine its deposit: at its side, on the side it was sent from, just above the ground. */
+	FVector At(const ASenniteDeposit* Deposit) const;
+	/** How high the ground is at a place: the land, or what stands on it there. */
+	double GroundUnder(const FVector& Place) const;
+
+	/** Which side of its deposit it comes in at: from the deposit toward where it was when it was sent. On the server. */
+	FVector Side = FVector::ForwardVector;
 
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> Body;
 
+	/** The beam, shown while it mines. */
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> Ray;
+
 	/** How long it has been at the unit it is taking. */
 	float Taking = 0.0f;
+
+	/** Where its model sits on it at rest: it is drawn moved from there. */
+	FVector Rest = FVector::ZeroVector;
+	/** How many units this machine has seen it take, and how far into a dip it is (1 at the take, falling to 0). */
+	int32 SeenTaken = 0;
+	float Dipped = 0.0f;
+	/** How fast it falls, and how far it has tumbled, once shot down. */
+	float Falling = 0.0f;
+	float Tumbled = 0.0f;
+
+	/** Draw it as it moves now: hanging, dipping, mining with its beam, or falling. On every machine that draws. */
+	void Animate(float DeltaTime);
 };

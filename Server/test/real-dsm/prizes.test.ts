@@ -223,27 +223,27 @@ describe("a match's prize", () => {
     await conserved("alice collected");
   });
 
-  it("gives each player's wallet what its robot mined, once, out of the publisher's own holdings", async () => {
+  it("gives each player's wallet what its droid mined, once, out of the publisher's own holdings", async () => {
     const [alice, carol] = [player(s, "alice"), player(s, "carol")];
     const before = await publishers();
-    const [aliceWood, carolSteel] = [(await holds(alice.wallet, "WOOD")).available, (await holds(carol.wallet, "STEEL")).available];
+    const [aliceWood, carolStone] = [(await holds(alice.wallet, "WOOD")).available, (await holds(carol.wallet, "STONE")).available];
 
     // More than the match's arena held was not mined: the report is refused whole, and nothing is given.
     await expect(pub.matches.mined("match-1", [{ signingKey: key("alice"), resource: "WOOD", units: 121 }])).rejects.toThrow(Refused);
     expect(record().matches["match-1"]?.mined).toBeUndefined();
 
-    // The winner and the loser both mined: what a robot took is its player's whoever won.
+    // The winner and the loser both mined: what a droid took is its player's whoever won.
     const mined = await pub.matches.mined("match-1", [
       { signingKey: key("alice"), resource: "WOOD", units: 70 },
-      { signingKey: key("carol"), resource: "STEEL", units: 9 },
+      { signingKey: key("carol"), resource: "STONE", units: 9 },
     ]);
     expect(mined.map((m) => [m.resource, m.units, m.given])).toEqual([
       ["WOOD", 70, true],
-      ["STEEL", 9, true],
+      ["STONE", 9, true],
     ]);
-    await until("alice's wallet holds the wood her robot mined", 240_000, async () => ((await holds(alice.wallet, "WOOD")).available === aliceWood + 70n ? true : null));
-    await until("carol's wallet holds the steel her robot mined", 240_000, async () => ((await holds(carol.wallet, "STEEL")).available === carolSteel + 9n ? true : null));
-    const after = { WOOD: before.WOOD - 70n, STONE: before.STONE, STEEL: before.STEEL - 9n };
+    await until("alice's wallet holds the wood her droid mined", 240_000, async () => ((await holds(alice.wallet, "WOOD")).available === aliceWood + 70n ? true : null));
+    await until("carol's wallet holds the stone her droid mined", 240_000, async () => ((await holds(carol.wallet, "STONE")).available === carolStone + 9n ? true : null));
+    const after = { WOOD: before.WOOD - 70n, STONE: before.STONE - 9n, STEEL: before.STEEL };
     await until("the publisher's account holds that much less", 240_000, async () => (JSON.stringify(await publishers(), (_k, v) => String(v)) === JSON.stringify(after, (_k, v) => String(v)) ? true : null));
 
     // The first report stands: told again, or told otherwise, nothing more is given.

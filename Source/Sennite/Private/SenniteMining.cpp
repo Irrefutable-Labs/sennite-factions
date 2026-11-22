@@ -13,6 +13,9 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogSenniteMining, Log, All);
 
+/** How far off the player's line a deposit may be for each unit of how far away it is: about five degrees. */
+static constexpr double AimSpread = 0.09;
+
 namespace
 {
 	/**
@@ -202,18 +205,24 @@ ASenniteDeposit* ASenniteDeposit::Aimed(const UWorld* World, const FVector& From
 		if (Along <= 0.0 || Along > Range) {
 			continue;
 		}
+		// How far the line passes it, as the player sees it: a far deposit is small on the screen, and a thumb
+		// aims no finer at it than at a near one, so what counts as aimed at widens with how far off it is.
+		// Of those the line passes near enough, the one it passes nearest for how near it had to: a deposit
+		// close by is taken before one far off that happens to lie behind it.
 		const double Aside = (To - Line * Along).Size();
-		if (Aside <= Off + It->Size.GetMax() * 0.5 && Aside < Best) {
-			Best = Aside;
+		const double Room = Off + It->Size.GetMax() * 0.5 + Along * AimSpread;
+		const double Miss = Aside / Room;
+		if (Miss <= 1.0 && Miss < Best) {
+			Best = Miss;
 			Found = *It;
 		}
 	}
 	return Found;
 }
 
-// ── the robot ───────────────────────────────────────────────────────────────
+// ── the droid ───────────────────────────────────────────────────────────────
 
-ASenniteMiningRobot::ASenniteMiningRobot()
+ASenniteMiningDroid::ASenniteMiningDroid()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	bReplicates = true;
@@ -225,24 +234,43 @@ ASenniteMiningRobot::ASenniteMiningRobot()
 	Body->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
 	Body->SetGenerateOverlapEvents(true);
 	Body->SetCanEverAffectNavigation(false);
+	// the beam is seen only: it stops nothing, and is placed in the world each frame
+	Ray = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Ray"));
+	Ray->SetupAttachment(RootComponent);
+	Ray->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Ray->SetGenerateOverlapEvents(false);
+	Ray->SetCastShadow(false);
+	Ray->SetUsingAbsoluteLocation(true);
+	Ray->SetUsingAbsoluteRotation(true);
+	Ray->SetUsingAbsoluteScale(true);
+	Ray->SetVisibility(false);
 }
 
-void ASenniteMiningRobot::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+void ASenniteMiningDroid::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	DOREPLIFETIME(ASenniteMiningRobot, Health);
-	DOREPLIFETIME(ASenniteMiningRobot, Target);
-	DOREPLIFETIME(ASenniteMiningRobot, bMining);
-	DOREPLIFETIME(ASenniteMiningRobot, Miner);
+	DOREPLIFETIME(ASenniteMiningDroid, Health);
+	DOREPLIFETIME(ASenniteMiningDroid, Target);
+	DOREPLIFETIME(ASenniteMiningDroid, bMining);
+	DOREPLIFETIME(ASenniteMiningDroid, Miner);
+	DOREPLIFETIME(ASenniteMiningDroid, Taken);
+	DOREPLIFETIME(ASenniteMiningDroid, bDown);
 }
 
-void ASenniteMiningRobot::PostInitializeComponents()
+void ASenniteMiningDroid::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
-	Wear(Body, Model, Across, false, TEXT("The mining robot"));
+	Wear(Body, Model, Across, false, TEXT("The mining droid"));
+	Rest = Body->GetRelativeLocation();
+	if (UStaticMesh* Rod = Cast<UStaticMesh>(Beam.TryLoad())) {
+		Ray->SetStaticMesh(Rod);
+	}
+	else {
+		UE_LOG(LogSenniteMining, Error, TEXT("The mining droid's beam '%s' did not load"), *Beam.ToString());
+	}
 }
 
-void ASenniteMiningRobot::BeginPlay()
+void ASenniteMiningDroid::BeginPlay()
 {
 	Super::BeginPlay();
 	if (HasAuthority() && Health <= 0) {
@@ -250,28 +278,28 @@ void ASenniteMiningRobot::BeginPlay()
 	}
 }
 
-ASenniteMiningRobot* ASenniteMiningRobot::Launch(ASenniteCharacter* By)
+ASenniteMiningDroid* ASenniteMiningDroid::Launch(ASenniteCharacter* By)
 {
 	ASennitePlayerState* State = By != nullptr ? By->GetPlayerState<ASennitePlayerState>() : nullptr;
 	UWorld* World = By != nullptr ? By->GetWorld() : nullptr;
-	if (World == nullptr || State == nullptr || !By->HasAuthority() || State->bRobotDown || State->Robot != nullptr) {
+	if (World == nullptr || State == nullptr || !By->HasAuthority() || State->bDroidDown || State->Droid != nullptr) {
 		return nullptr;
 	}
 	// out of the hero's hands: a little ahead of it and above its head
 	const FVector Ahead = By->GetActorForwardVector().GetSafeNormal2D();
 	const FTransform Out(FRotator(0.0, Ahead.Rotation().Yaw, 0.0), By->GetActorLocation() + Ahead * 120.0 + FVector(0.0, 0.0, 160.0));
-	ASenniteMiningRobot* Robot = World->SpawnActorDeferred<ASenniteMiningRobot>(ASenniteMiningRobot::StaticClass(), Out, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-	if (Robot == nullptr) {
+	ASenniteMiningDroid* Droid = World->SpawnActorDeferred<ASenniteMiningDroid>(ASenniteMiningDroid::StaticClass(), Out, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (Droid == nullptr) {
 		return nullptr;
 	}
-	Robot->Miner = State;
-	Robot->Health = Robot->StartHealth;
-	Robot->FinishSpawning(Out);
-	State->Robot = Robot;
-	return Robot;
+	Droid->Miner = State;
+	Droid->Health = Droid->StartHealth;
+	Droid->FinishSpawning(Out);
+	State->Droid = Droid;
+	return Droid;
 }
 
-void ASenniteMiningRobot::SendTo(ASenniteDeposit* Deposit)
+void ASenniteMiningDroid::SendTo(ASenniteDeposit* Deposit)
 {
 	if (!HasAuthority() || Deposit == Target) {
 		return;
@@ -279,20 +307,95 @@ void ASenniteMiningRobot::SendTo(ASenniteDeposit* Deposit)
 	Target = Deposit;
 	bMining = false;
 	Taking = 0.0f;
+	// it comes in at the side of the deposit it sets out toward it from
+	if (Deposit != nullptr) {
+		const FVector From = (GetActorLocation() - Deposit->GetActorLocation()).GetSafeNormal2D();
+		Side = From.IsNearlyZero() ? GetActorForwardVector().GetSafeNormal2D() : From;
+	}
 }
 
-FVector ASenniteMiningRobot::Over(const ASenniteDeposit* Deposit) const
+double ASenniteMiningDroid::GroundUnder(const FVector& Place) const
 {
-	return Deposit->GetActorLocation() + FVector(0.0, 0.0, Deposit->Height() + Above);
+	// what stands there, from above it down: a rock, a floor, the land's own ground. Heroes and droids are not ground.
+	FHitResult Ground;
+	FCollisionQueryParams Past(SCENE_QUERY_STAT(SenniteDroidGround), false, this);
+	if (GetWorld()->LineTraceSingleByObjectType(Ground, Place + FVector(0.0, 0.0, 400.0), Place - FVector(0.0, 0.0, 4000.0), FCollisionObjectQueryParams(ECC_WorldStatic), Past)) {
+		return Ground.ImpactPoint.Z;
+	}
+	TActorIterator<ASenniteArena> Arena(GetWorld());
+	return Arena && Arena->IsBuilt() ? ASenniteArena::GroundHeight(Arena->GetPlan(), Place.X, Place.Y) : Place.Z - Hover;
 }
 
-void ASenniteMiningRobot::Tick(float DeltaTime)
+FVector ASenniteMiningDroid::At(const ASenniteDeposit* Deposit) const
+{
+	const FVector Base = Deposit->GetActorLocation();
+	FVector Place = Base + Side * (Deposit->Width() * 0.5 + Beside);
+	// just above the ground its deposit stands on
+	Place.Z = Base.Z + Hover;
+	return Place;
+}
+
+void ASenniteMiningDroid::Animate(float DeltaTime)
+{
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (bDown) {
+		// shot down: it tumbles as it falls, and its beam is out
+		Tumbled += 420.0f * DeltaTime;
+		Body->SetRelativeLocation(Rest);
+		Body->SetRelativeRotation(FRotator(Tumbled, Tumbled * 0.6f, Tumbled * 1.3f));
+		Ray->SetVisibility(false);
+		return;
+	}
+	// each unit it takes, it dips, and comes back up
+	if (Taken != SeenTaken) {
+		SeenTaken = Taken;
+		Dipped = 1.0f;
+	}
+	Dipped = FMath::Max(0.0f, Dipped - DeltaTime * 3.0f);
+	// hanging in the air it bobs and tips a little, each droid out of step with the next
+	const double Phase = Now * 2.0 * PI * BobsASecond + GetUniqueID() % 16;
+	Body->SetRelativeLocation(Rest + FVector(0.0, 0.0, FMath::Sin(Phase) * Bob - Dipped * Dip));
+	Body->SetRelativeRotation(FRotator(FMath::Sin(Phase * 0.7) * Sway * 0.6, 0.0, FMath::Cos(Phase * 0.5) * Sway));
+	// the beam, from under it to the top of its deposit, while it mines: it flickers, and swells at each take
+	const ASenniteDeposit* To = Target;
+	const bool bBeam = bMining && To != nullptr && To->Left > 0 && Ray->GetStaticMesh() != nullptr;
+	Ray->SetVisibility(bBeam);
+	if (bBeam) {
+		// across from it into the deposit's side, at its own height or as high as the deposit stands
+		const FVector From = Body->GetComponentLocation();
+		const FVector Base = To->GetActorLocation();
+		const FVector Onto(Base.X, Base.Y, FMath::Min(From.Z, Base.Z + To->Height() * 0.6));
+		const FVector Along = Onto - From;
+		const double Long = FMath::Max(1.0, Along.Size());
+		const double Thick = BeamThick * (0.75 + 0.25 * FMath::Sin(Now * 31.0) + Dipped * 0.8) / 100.0;
+		Ray->SetWorldLocation(From + Along * 0.5);
+		Ray->SetWorldRotation(FRotationMatrix::MakeFromZ(Along / Long).Rotator());
+		Ray->SetWorldScale3D(FVector(Thick, Thick, Long / 100.0));
+	}
+}
+
+void ASenniteMiningDroid::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	if (GetNetMode() != NM_DedicatedServer) {
+		Animate(DeltaTime);
+	}
 	if (!HasAuthority()) {
 		return;
 	}
-	// a robot is its player's: with its player gone from the game, so is it
+	if (bDown) {
+		// it falls to the land and lies there until it is gone
+		Falling += 980.0f * DeltaTime;
+		FVector At = GetActorLocation();
+		At.Z -= Falling * DeltaTime;
+		TActorIterator<ASenniteArena> Land(GetWorld());
+		if (Land && Land->IsBuilt()) {
+			At.Z = FMath::Max(At.Z, ASenniteArena::GroundHeight(Land->GetPlan(), At.X, At.Y) + Across * 0.25);
+		}
+		SetActorLocation(At);
+		return;
+	}
+	// a droid is its player's: with its player gone from the game, so is it
 	if (Miner == nullptr) {
 		Destroy();
 		return;
@@ -304,24 +407,22 @@ void ASenniteMiningRobot::Tick(float DeltaTime)
 		Taking = 0.0f;
 		return;
 	}
+	// Over the ground toward the place beside its deposit, keeping its height above whatever it is over;
+	// once there it turns to face the deposit.
 	const FVector Here = GetActorLocation();
-	const FVector Goal = Over(To);
-	FVector Step = Goal - Here;
-	if (Step.Size2D() > 400.0) {
-		// on its way it keeps above the land; over its deposit it comes down to it
-		double Floor = Goal.Z;
-		TActorIterator<ASenniteArena> Arena(GetWorld());
-		if (Arena && Arena->IsBuilt()) {
-			Floor = FMath::Max(Floor, ASenniteArena::GroundHeight(Arena->GetPlan(), Here.X, Here.Y) + Cruise);
-		}
-		Step.Z = Floor - Here.Z;
-		SetActorRotation(FRotator(0.0, Step.Rotation().Yaw, 0.0));
-	}
-	const double Far = Step.Size();
+	const FVector Goal = At(To);
+	const FVector Flat(Goal.X - Here.X, Goal.Y - Here.Y, 0.0);
+	const double Far = Flat.Size();
 	const double Reach = Speed * DeltaTime;
-	const FVector Next = Far <= Reach ? Here + Step : Here + Step / Far * Reach;
+	FVector Next = Far <= Reach ? FVector(Goal.X, Goal.Y, Here.Z) : Here + Flat / Far * Reach;
+	const double Level = Far <= Reach ? Goal.Z : GroundUnder(Next) + Hover;
+	Next.Z = Here.Z + FMath::Clamp(Level - Here.Z, -Climb * DeltaTime, Climb * DeltaTime);
 	SetActorLocation(Next);
-	if (FVector::Dist(Next, Goal) > 20.0) {
+	const FVector Facing = Far > 50.0 ? Flat : To->GetActorLocation() - Next;
+	if (Facing.Size2D() > 1.0) {
+		SetActorRotation(FRotator(0.0, Facing.Rotation().Yaw, 0.0));
+	}
+	if (FVector::Dist(Next, Goal) > 25.0) {
 		bMining = false;
 		Taking = 0.0f;
 		return;
@@ -336,6 +437,7 @@ void ASenniteMiningRobot::Tick(float DeltaTime)
 			break;
 		}
 		// its player builds with it at once, and it is counted as mined
+		Taken += Got;
 		const int32 Kind = Target->Material;
 		if (Miner->MaterialCounts.IsValidIndex(Kind)) {
 			Miner->MaterialCounts[Kind] += Got;
@@ -349,9 +451,9 @@ void ASenniteMiningRobot::Tick(float DeltaTime)
 	}
 }
 
-void ASenniteMiningRobot::TakeHit(float Damage, ASenniteCharacter* Shooter)
+void ASenniteMiningDroid::TakeHit(float Damage, ASenniteCharacter* Shooter)
 {
-	if (!HasAuthority() || Health <= 0) {
+	if (!HasAuthority() || Health <= 0 || bDown) {
 		return;
 	}
 	const ASennitePlayerState* By = Shooter != nullptr ? Shooter->GetPlayerState<ASennitePlayerState>() : nullptr;
@@ -368,30 +470,35 @@ void ASenniteMiningRobot::TakeHit(float Damage, ASenniteCharacter* Shooter)
 	if (Health > 0) {
 		return;
 	}
-	UE_LOG(LogSenniteMining, Display, TEXT("A mining robot was shot down"));
+	UE_LOG(LogSenniteMining, Display, TEXT("A mining droid was shot down"));
 	if (Miner != nullptr) {
 		// gone for the rest of the match
-		Miner->bRobotDown = true;
-		Miner->Robot = nullptr;
+		Miner->bDroidDown = true;
+		Miner->Droid = nullptr;
 	}
-	Destroy();
+	// it mines no more and stops no more shots: it falls, and is gone a moment after
+	bDown = true;
+	bMining = false;
+	Target = nullptr;
+	SetActorEnableCollision(false);
+	SetLifeSpan(FMath::Max(0.1f, DownSeconds));
 }
 
-FString ASenniteMiningRobot::Status(const ASennitePlayerState* Of)
+FString ASenniteMiningDroid::Status(const ASennitePlayerState* Of)
 {
 	if (Of == nullptr) {
 		return FString();
 	}
-	if (Of->bRobotDown) {
-		return FString(TEXT("ROBOT DOWN"));
+	if (Of->bDroidDown) {
+		return FString(TEXT("DROID DOWN"));
 	}
-	const ASenniteMiningRobot* Robot = Of->Robot;
-	if (Robot == nullptr) {
-		return FString(TEXT("ROBOT READY"));
+	const ASenniteMiningDroid* Droid = Of->Droid;
+	if (Droid == nullptr) {
+		return FString(TEXT("DROID READY"));
 	}
-	const ASenniteDeposit* To = Robot->Target;
+	const ASenniteDeposit* To = Droid->Target;
 	if (To != nullptr && To->Left > 0) {
-		return FString::Printf(TEXT("ROBOT %s %s"), Robot->bMining ? TEXT("MINING") : TEXT("GOING TO"), ASenniteDeposit::NameOf(To->Material));
+		return FString::Printf(TEXT("DROID %s %s"), Droid->bMining ? TEXT("MINING") : TEXT("GOING TO"), ASenniteDeposit::NameOf(To->Material));
 	}
-	return FString(TEXT("ROBOT IDLE"));
+	return FString(TEXT("DROID IDLE"));
 }

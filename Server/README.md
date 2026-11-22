@@ -142,7 +142,7 @@ The publisher's match server opens and decides matches with the secret the serve
   structures, and `mining`, the whole units of each material the arena's deposits hold between them
   (`world/matches.json`).
 - `POST /matches/<id>/mined` with `{"mined": [{"signingKey", "resource", "units"}, ...]}`, once the
-  match is decided, says what each member's mining robot took. The publisher's account gives each
+  match is decided, says what each member's mining droid took. The publisher's account gives each
   member's wallet that much, out of its own holdings: at once to a wallet that is connected, and to
   the others when they next are. Only a member the prize was shared among is paid, only for a material
   the arena held, and all of them together no more of it than the arena held; a report that says

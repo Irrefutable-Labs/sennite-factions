@@ -1,16 +1,19 @@
-"""Bring in what mining is drawn with (Source/Sennite/Public/SenniteMining.h): the mining robot, from
+"""Bring in what mining is drawn with (Source/Sennite/Public/SenniteMining.h): the mining droid, from
 the Fab pack "FREE SciFi Drone", and the steel deposit, from the Fab pack "Slate Rock", into /Game/Mining,
 at a phone's size.
 
   UnrealEditor-Cmd Sennite.uproject -run=pythonscript -script="$PWD/Tools/import_mining.py" -unattended -nullrhi
 
 FREE SciFi Drone is one drone as one mesh of about 1.3 million triangles with one material and no
-textures of its own. It comes in as SM_MiningRobot, cut to ROBOT_TRIANGLES with the engine's own geometry
-scripting, wearing M_MiningRobot: dark painted metal.
+textures of its own. It comes in as SM_MiningDroid, cut to about DROID_TRIANGLES with the engine's own geometry
+scripting, wearing M_MiningDroid: dark painted metal.
 
 Slate Rock is one rock, sculpted, in a heavy and a light file, with no textures in the pack. The light
 one comes in as SM_SteelDeposit, cut to DEPOSIT_TRIANGLES, solid by its own shape (a shot and a hero meet
 it as it is drawn), wearing M_SteelOre: bare metal, so it reads as a seam of ore among the arena's rocks.
+
+The beam the droid mines with is SM_MiningBeam: the engine's own rod (a cylinder a metre long), copied
+here so it ships with the game, wearing M_MiningBeam, a colour that glows and takes no light.
 
 Neither pack carries a picture to wear, so both materials are plain colours with no texture. The wood and
 stone deposits use models the game already has (DefaultGame.ini).
@@ -25,7 +28,7 @@ import unreal
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LIBRARY = os.environ.get("MINING_SOURCE", "/Users/Shared/UnrealEngine/Launcher/VaultCache/FabLibrary")
 DEST = "/Game/Mining"
-ROBOT_TRIANGLES = 6000
+DROID_TRIANGLES = 6000
 DEPOSIT_TRIANGLES = 3000
 
 eal = unreal.EditorAssetLibrary
@@ -101,8 +104,12 @@ def model(source, name, mat, triangles, solid):
     if before > triangles:
         work = unreal.DynamicMesh()
         unreal.GeometryScript_AssetUtils.copy_mesh_from_static_mesh(made, work, unreal.GeometryScriptCopyMeshFromAssetOptions(), unreal.GeometryScriptMeshReadLOD())
-        unreal.GeometryScript_MeshSimplification.apply_simplify_to_triangle_count(work, triangles, unreal.GeometryScriptSimplifyMeshOptions())
-        unreal.GeometryScript_AssetUtils.copy_mesh_to_static_mesh(work, made, unreal.GeometryScriptCopyMeshToAssetOptions(), unreal.GeometryScriptMeshWriteLOD())
+        # the cut does not always reach the count asked for in one pass: it is cut again until it has
+        for _ in range(4):
+            unreal.GeometryScript_MeshSimplification.apply_simplify_to_triangle_count(work, triangles, unreal.GeometryScriptSimplifyMeshOptions())
+            unreal.GeometryScript_AssetUtils.copy_mesh_to_static_mesh(work, made, unreal.GeometryScriptCopyMeshToAssetOptions(), unreal.GeometryScriptMeshWriteLOD())
+            if made.get_num_triangles(0) <= triangles * 1.05:
+                break
         note("%s: cut from %d to %d triangles" % (name, before, made.get_num_triangles(0)))
     for slot in range(max(1, len(made.get_editor_property("static_materials")))):
         made.set_material(slot, mat)
@@ -125,8 +132,37 @@ def model(source, name, mat, triangles, solid):
     return made
 
 
-robot = found(os.path.join("FREE_SciFi_Drone-*", "obj", "*", "Free-Drone", "Free-Drone", "Free_drone", "Drone.FBX"), "the FREE SciFi Drone pack's Drone.FBX")
+def glowing(name, colour, strength):
+    """A material that glows in one colour and takes no light."""
+    fresh("%s/%s" % (DEST, name))
+    mat = tools.create_asset(name, DEST, unreal.Material, unreal.MaterialFactoryNew())
+    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    tint = mel.create_material_expression(mat, unreal.MaterialExpressionConstant3Vector, -400, 0)
+    tint.set_editor_property("constant", unreal.LinearColor(colour[0] * strength, colour[1] * strength, colour[2] * strength, 1.0))
+    if not mel.connect_material_property(tint, "", P.MP_EMISSIVE_COLOR):
+        raise RuntimeError("%s: could not connect its glow" % name)
+    mel.recompile_material(mat)
+    eal.save_loaded_asset(mat)
+    return mat
+
+
+def beam():
+    """The engine's rod, copied into the game's own folder, wearing the beam's glow."""
+    path = DEST + "/SM_MiningBeam"
+    fresh(path)
+    rod = eal.duplicate_asset("/Engine/BasicShapes/Cylinder", path)
+    if rod is None or not isinstance(rod, unreal.StaticMesh):
+        raise RuntimeError("the engine's cylinder could not be copied to " + path)
+    rod.set_material(0, glowing("M_MiningBeam", (0.25, 0.85, 1.0), 6.0))
+    unreal.EditorStaticMeshLibrary.remove_collisions(rod)
+    eal.save_loaded_asset(rod)
+    box = rod.get_bounding_box()
+    note("SM_MiningBeam (%s): x %.0f to %.0f, y %.0f to %.0f, z %.0f to %.0f cm" % (rod.get_path_name(), box.min.x, box.max.x, box.min.y, box.max.y, box.min.z, box.max.z))
+
+
+droid = found(os.path.join("FREE_SciFi_Drone-*", "obj", "*", "Free-Drone", "Free-Drone", "Free_drone", "Drone.FBX"), "the FREE SciFi Drone pack's Drone.FBX")
 rock = found(os.path.join("Slate_Rock-*", "fbx", "*", "Slate_Rock_Low.fbx"), "the Slate Rock pack's Slate_Rock_Low.fbx")
-model(robot, "SM_MiningRobot", plain("M_MiningRobot", (0.045, 0.05, 0.06), 0.85, 0.38), ROBOT_TRIANGLES, False)
+model(droid, "SM_MiningDroid", plain("M_MiningDroid", (0.045, 0.05, 0.06), 0.85, 0.38), DROID_TRIANGLES, False)
 model(rock, "SM_SteelDeposit", plain("M_SteelOre", (0.33, 0.36, 0.42), 1.0, 0.32), DEPOSIT_TRIANGLES, True)
+beam()
 note("done")

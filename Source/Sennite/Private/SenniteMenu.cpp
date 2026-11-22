@@ -1932,7 +1932,7 @@ void ASenniteMenuHUD::DrawMaterials(ASenniteMenuController* Menu)
 	if (!Server->Message.IsEmpty() && (Server->bBusy || Menu->bMaterialsSaid)) {
 		Text(TEXT("shop"), Server->Message.ToUpper(), (Left + 2.0f) * S, (BY + 80.0f) * S, 12, SenniteUi::Gold, 0.0f, false);
 	}
-	Text(TEXT("rule"), TEXT("THE SHOP PAYS A QUARTER LESS FOR A PACK THAN IT SELLS ONE FOR. WHAT A MATCH PAYS AND WHAT YOUR ROBOT MINES ARE YOURS THE SAME WAY."),
+	Text(TEXT("rule"), TEXT("THE SHOP PAYS A QUARTER LESS FOR A PACK THAN IT SELLS ONE FOR. WHAT A MATCH PAYS AND WHAT YOUR MINING DROID MINES ARE YOURS THE SAME WAY."),
 		(Left + 2.0f) * S, (BY + 104.0f) * S, 11, SenniteUi::Dim, 0.0f, false);
 }
 

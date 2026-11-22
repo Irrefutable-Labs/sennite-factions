@@ -1,14 +1,14 @@
 // Mining check (SenniteMining.h; owner, 2026-11-22). Run in the game on an arena of two bases, which
 // stands deposits of wood, stone and steel on each base's side:
 // - the deposits hold between them what DefaultGame.ini says an arena with no publisher holds;
-// - with no deposit aimed at, the SendRobot key takes no robot out;
-// - aimed at a wood deposit, it takes the player's robot out and sends it there; the robot flies to it
+// - with no deposit aimed at, the SendDroid key takes no droid out;
+// - aimed at a wood deposit, it takes the player's droid out and sends it there; the droid flies to it
 //   and takes wood, a unit at a time: the deposit holds that much less, the player has that much more to
 //   build with, and it is counted as mined;
-// - aimed at a stone deposit, the same key sends the same robot there, and it mines stone;
-// - the robot goes on mining with its player far away: once it is out, it is out;
+// - aimed at a stone deposit, the same key sends the same droid there, and it mines stone;
+// - the droid goes on mining with its player far away: once it is out, it is out;
 // - its own player's shots do not count on it; another player's shoot it down, and then the player has
-//   no robot for the rest of the game, whatever they aim at.
+//   no droid for the rest of the game, whatever they aim at.
 // Each shot is landed as a bullet's is (AProjectileActor::Land).
 
 #include "Misc/AutomationTest.h"
@@ -121,7 +121,7 @@ namespace
 				return Fail(TEXT("The arena has no wood or no stone deposit"));
 			}
 			WoodStart = State->MaterialCounts[0];
-			Test->TestEqual(TEXT("A player starts with no robot out"), ASenniteMiningRobot::Status(State), FString(TEXT("ROBOT READY")));
+			Test->TestEqual(TEXT("A player starts with no droid out"), ASenniteMiningDroid::Status(State), FString(TEXT("DROID READY")));
 			Test->TestTrue(TEXT("A player starts having mined nothing"), State->Mined.Num() == ASenniteDeposit::Kinds && State->Mined[0] + State->Mined[1] + State->Mined[2] == 0);
 			// looking straight up, at no deposit
 			Controller->SetControlRotation(FRotator(89.0, Hero->GetActorRotation().Yaw, 0.0));
@@ -131,7 +131,7 @@ namespace
 		if (Hero == nullptr || State == nullptr || Hud == nullptr || !Wood.IsValid() || !Stone.IsValid()) {
 			return Fail(TEXT("The hero, the HUD or a deposit went away during the check"));
 		}
-		ASenniteMiningRobot* Robot = State->Robot;
+		ASenniteMiningDroid* Droid = State->Droid;
 
 		switch (Phase) {
 		case EPhase::NoAim:
@@ -142,7 +142,7 @@ namespace
 			if (Elapsed(World) < 1.5) {
 				return false;
 			}
-			Test->TestTrue(TEXT("With no deposit aimed at, no robot is taken out"), Robot == nullptr);
+			Test->TestTrue(TEXT("With no deposit aimed at, no droid is taken out"), Droid == nullptr);
 			Face(Controller, Hero, Wood.Get());
 			Enter(EPhase::SendToWood, World);
 			return false;
@@ -155,29 +155,42 @@ namespace
 			if (Elapsed(World) < 2.0) {
 				return false;
 			}
-			if (Robot == nullptr) {
-				return Fail(TEXT("Aimed at a wood deposit, the SendRobot key took no robot out"));
+			if (Droid == nullptr) {
+				return Fail(TEXT("Aimed at a wood deposit, the SendDroid key took no droid out"));
 			}
-			Test->TestTrue(TEXT("The robot is sent to the deposit aimed at"), Robot->Target == Wood.Get());
-			Test->TestTrue(TEXT("The robot is the player's"), Robot->Miner == State);
-			Test->TestTrue(TEXT("The robot wears its model"), Robot->GetComponentsBoundingBox().GetSize().GetMax() > 60.0);
-			Test->TestEqual(TEXT("The robot starts whole"), Robot->Health, GetDefault<ASenniteMiningRobot>()->StartHealth);
+			Test->TestTrue(TEXT("The droid is sent to the deposit aimed at"), Droid->Target == Wood.Get());
+			Test->TestTrue(TEXT("The droid is the player's"), Droid->Miner == State);
+			Test->TestTrue(TEXT("The droid wears its model"), Droid->GetComponentsBoundingBox().GetSize().GetMax() > 60.0);
+			Test->TestEqual(TEXT("The droid starts whole"), Droid->Health, GetDefault<ASenniteMiningDroid>()->StartHealth);
 			Enter(EPhase::MineWood, World);
 			return false;
 
 		case EPhase::MineWood:
-			// the robot at its deposit, as the player sees it from where they sent it
+			// the droid at its deposit's side, seen from a step aside of where the player sent it from
 			if (Step == 0 && State->Mined[0] >= 1) {
 				Step = 1;
+				const FVector Aside = Wood->GetActorRotation().Vector().GetSafeNormal2D().RotateAngleAxis(90.0, FVector::UpVector);
+				Hero->SetActorLocation(Hero->GetActorLocation() + Aside * 450.0 + FVector(0.0, 0.0, 60.0));
+				// looking a little to one side of it, so the hero does not stand in front of what is looked at
+				Controller->SetControlRotation((Wood->GetActorLocation() + FVector(0.0, 0.0, 150.0) - Hero->GetActorLocation()).Rotation() + FRotator(0.0, -16.0, 0.0));
+				PhaseStart = World->GetTimeSeconds();
+			}
+			if (Step == 1 && Elapsed(World) > 0.8) {
+				Step = 2;
+				// low, beside its deposit: not in the air over it
+				if (Droid != nullptr) {
+					Test->TestTrue(TEXT("The droid hangs just above the ground"), Droid->GetActorLocation().Z - Wood->GetActorLocation().Z < 250.0);
+					Test->TestTrue(TEXT("The droid hangs beside its deposit, not over it"), FVector::Dist2D(Droid->GetActorLocation(), Wood->GetActorLocation()) > Wood->Width() * 0.5);
+				}
 				GameCheck::Shot(TEXT("Mining"), TEXT("mining_wood.png"));
 			}
 			if (State->Mined[0] < 3) {
-				return Elapsed(World) > 60.0 ? Fail(FString::Printf(TEXT("The robot did not mine 3 wood in 60 s: mined %d, %s"), State->Mined[0], *ASenniteMiningRobot::Status(State))) : false;
+				return Elapsed(World) > 60.0 ? Fail(FString::Printf(TEXT("The droid did not mine 3 wood in 60 s: mined %d, %s"), State->Mined[0], *ASenniteMiningDroid::Status(State))) : false;
 			}
-			Test->TestTrue(TEXT("The robot mines at its deposit"), Robot != nullptr && Robot->bMining);
+			Test->TestTrue(TEXT("The droid mines at its deposit"), Droid != nullptr && Droid->bMining);
 			Test->TestEqual(TEXT("What is mined comes out of the deposit"), Wood->Left, Wood->Held - State->Mined[0]);
 			Test->TestEqual(TEXT("What is mined is the player's to build with"), State->MaterialCounts[0], WoodStart + State->Mined[0]);
-			Test->TestEqual(TEXT("The HUD says the robot is mining wood"), ASenniteMiningRobot::Status(State), FString(TEXT("ROBOT MINING WOOD")));
+			Test->TestEqual(TEXT("The HUD says the droid is mining wood"), ASenniteMiningDroid::Status(State), FString(TEXT("DROID MINING WOOD")));
 			UE_LOG(LogMiningCheck, Display, TEXT("GAMECHECK mined %d wood in %.1f s; the deposit holds %d of %d"), State->Mined[0], Elapsed(World), Wood->Left, Wood->Held);
 			Face(Controller, Hero, Stone.Get());
 			Enter(EPhase::SendToStone, World);
@@ -191,15 +204,15 @@ namespace
 			if (Elapsed(World) < 2.0) {
 				return false;
 			}
-			Test->TestTrue(TEXT("The same robot is sent on to the stone deposit"), Robot != nullptr && Robot->Target == Stone.Get());
-			// far from the robot and its deposit: it goes on without its player
+			Test->TestTrue(TEXT("The same droid is sent on to the stone deposit"), Droid != nullptr && Droid->Target == Stone.Get());
+			// far from the droid and its deposit: it goes on without its player
 			Hero->SetActorLocation(Hero->GetActorLocation() + Stone->GetActorRotation().Vector().GetSafeNormal2D() * 9000.0 + FVector(0.0, 0.0, 600.0));
 			Enter(EPhase::MineStone, World);
 			return false;
 
 		case EPhase::MineStone:
 			if (State->Mined[1] < 2) {
-				return Elapsed(World) > 90.0 ? Fail(FString::Printf(TEXT("The robot did not mine 2 stone in 90 s: mined %d, %s"), State->Mined[1], *ASenniteMiningRobot::Status(State))) : false;
+				return Elapsed(World) > 90.0 ? Fail(FString::Printf(TEXT("The droid did not mine 2 stone in 90 s: mined %d, %s"), State->Mined[1], *ASenniteMiningDroid::Status(State))) : false;
 			}
 			Test->TestEqual(TEXT("Stone comes out of the stone deposit"), Stone->Left, Stone->Held - State->Mined[1]);
 			StoneMark = State->Mined[1];
@@ -208,20 +221,20 @@ namespace
 
 		case EPhase::Away:
 			if (State->Mined[1] < StoneMark + 2) {
-				return Elapsed(World) > 30.0 ? Fail(TEXT("With its player far away the robot stopped mining")) : false;
+				return Elapsed(World) > 30.0 ? Fail(TEXT("With its player far away the droid stopped mining")) : false;
 			}
-			Test->TestTrue(TEXT("The robot is still out, with its player 90 m off"), Robot != nullptr && FVector::Dist(Robot->GetActorLocation(), Hero->GetActorLocation()) > 6000.0);
-			UE_LOG(LogMiningCheck, Display, TEXT("GAMECHECK the robot mined on with its player away: %d stone"), State->Mined[1]);
+			Test->TestTrue(TEXT("The droid is still out, with its player 90 m off"), Droid != nullptr && FVector::Dist(Droid->GetActorLocation(), Hero->GetActorLocation()) > 6000.0);
+			UE_LOG(LogMiningCheck, Display, TEXT("GAMECHECK the droid mined on with its player away: %d stone"), State->Mined[1]);
 			Enter(EPhase::Shots, World);
 			return false;
 
 		case EPhase::Shots: {
-			if (Robot == nullptr) {
-				return Fail(TEXT("The robot went away before it was shot at"));
+			if (Droid == nullptr) {
+				return Fail(TEXT("The droid went away before it was shot at"));
 			}
 			// its own player's shot stops on it and does not count
-			Test->TestTrue(TEXT("A robot stops a bullet"), AProjectileActor::Land(Robot, 1000.0f, 1, Hero));
-			Test->TestEqual(TEXT("Its own player's shot does not count on it"), Robot->Health, GetDefault<ASenniteMiningRobot>()->StartHealth);
+			Test->TestTrue(TEXT("A droid stops a bullet"), AProjectileActor::Land(Droid, 1000.0f, 1, Hero));
+			Test->TestEqual(TEXT("Its own player's shot does not count on it"), Droid->Health, GetDefault<ASenniteMiningDroid>()->StartHealth);
 			// another player's hero: three rifle rounds shoot it down
 			FActorSpawnParameters Spawn;
 			Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -231,11 +244,11 @@ namespace
 				return Fail(TEXT("Another player's hero could not be made"));
 			}
 			Other->SetPlayerState(Theirs);
-			const int32 Health = Robot->Health;
-			AProjectileActor::Land(Robot, 20.0f, 1, Other);
-			Test->TestEqual(TEXT("Another player's round takes its damage from the robot"), Robot->Health, Health - 20);
-			AProjectileActor::Land(Robot, 20.0f, 1, Other);
-			AProjectileActor::Land(Robot, 20.0f, 1, Other);
+			const int32 Health = Droid->Health;
+			AProjectileActor::Land(Droid, 20.0f, 1, Other);
+			Test->TestEqual(TEXT("Another player's round takes its damage from the droid"), Droid->Health, Health - 20);
+			AProjectileActor::Land(Droid, 20.0f, 1, Other);
+			AProjectileActor::Land(Droid, 20.0f, 1, Other);
 			Other->Destroy();
 			Theirs->Destroy();
 			StoneMark = State->Mined[1];
@@ -252,16 +265,16 @@ namespace
 			if (Elapsed(World) < 4.0) {
 				return false;
 			}
-			Test->TestTrue(TEXT("Shot down, the robot is gone"), State->Robot == nullptr && State->bRobotDown);
-			Test->TestEqual(TEXT("The HUD says the robot is down"), ASenniteMiningRobot::Status(State), FString(TEXT("ROBOT DOWN")));
+			Test->TestTrue(TEXT("Shot down, the droid is gone"), State->Droid == nullptr && State->bDroidDown);
+			Test->TestEqual(TEXT("The HUD says the droid is down"), ASenniteMiningDroid::Status(State), FString(TEXT("DROID DOWN")));
 			Test->TestEqual(TEXT("Nothing more is mined once it is down"), State->Mined[1], StoneMark);
 			Test->TestTrue(TEXT("What was mined before stays mined"), State->Mined[0] >= 3 && State->Mined[1] >= 4);
 			int32 Out = 0;
-			for (TActorIterator<ASenniteMiningRobot> It(World); It; ++It) {
+			for (TActorIterator<ASenniteMiningDroid> It(World); It; ++It) {
 				Out += 1;
 			}
-			Test->TestEqual(TEXT("Aimed at a deposit again, no other robot is taken out this game"), Out, 0);
-			GameCheck::Shot(TEXT("Mining"), TEXT("robot_down.png"));
+			Test->TestEqual(TEXT("Aimed at a deposit again, no other droid is taken out this game"), Out, 0);
+			GameCheck::Shot(TEXT("Mining"), TEXT("droid_down.png"));
 			Enter(EPhase::Done, World);
 			return false;
 		}
@@ -279,7 +292,7 @@ namespace
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSenniteMiningTest, "Sennite.Mining.RobotMinesAndIsShotDown",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSenniteMiningTest, "Sennite.Mining.DroidMinesAndIsShotDown",
 	EAutomationTestFlags::ClientContext | EAutomationTestFlags::ProductFilter)
 
 bool FSenniteMiningTest::RunTest(const FString& Parameters)
