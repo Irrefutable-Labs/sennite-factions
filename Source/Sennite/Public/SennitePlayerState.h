@@ -7,6 +7,7 @@
 #include "SennitePlayerState.generated.h"
 
 class ASenniteCharacter;
+class ASenniteMiningRobot;
 
 /**
  * 
@@ -66,6 +67,24 @@ public:
 	/** In a match: the wallet's DSM identity, as people read it. */
 	UPROPERTY(Replicated)
 	FString Wallet;
+
+	/** In a match, on the server: the wallet's signing key (lowercase hex), as the publisher's server names a member by. */
+	FString SigningKey;
+
+	/**
+	 * What this player's mining robot has taken of each material this game (SenniteMining.h), in the order
+	 * of MaterialCounts. It is kept through a fall: what was mined stays mined.
+	 */
+	UPROPERTY(Replicated)
+	TArray<int32> Mined;
+
+	/** This player's mining robot, while it is out. */
+	UPROPERTY(Replicated)
+	TObjectPtr<ASenniteMiningRobot> Robot;
+
+	/** This player's mining robot was shot down: it is gone until the next game. */
+	UPROPERTY(Replicated)
+	bool bRobotDown = false;
 
 	/** Which hero this player is (USenniteHeroes): what they logged in with (Hero=), or chose in the lobby since. */
 	UPROPERTY(Replicated)

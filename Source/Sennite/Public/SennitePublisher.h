@@ -43,6 +43,18 @@ struct FSenniteHeroForSale
 	int32 Price = 0;
 };
 
+/**
+ * A pack of a building material as the publisher's shop trades it: how many units it holds, what it costs
+ * in D-bucks, and what the shop pays for one sold back.
+ */
+struct FSenniteMaterialPack
+{
+	FString Symbol;
+	int32 Units = 0;
+	int32 Price = 0;
+	int32 BuyBack = 0;
+};
+
 /** An object the publisher's vaults trade: what a swap is between. */
 struct FSenniteSwapToken
 {
@@ -242,7 +254,19 @@ public:
 	void AskMatchTicket(const FString& MatchId, TFunction<void(bool /* bOk */, const FString& /* Said */, const FString& /* Ticket */)> Done);
 
 	/** Whose a ticket is and which of the match's factions they play for. The match server's to ask. */
-	void EnterMatch(const FString& MatchId, const FString& Ticket, TFunction<void(bool /* bOk */, const FString& /* Said */, const FString& /* FactionId */, const FString& /* Wallet */)> Done);
+	void EnterMatch(const FString& MatchId, const FString& Ticket, TFunction<void(bool /* bOk */, const FString& /* Said */, const FString& /* FactionId */, const FString& /* Wallet */, const FString& /* SigningKey */)> Done);
+
+	/**
+	 * What a match's arena holds to mine, as the publisher's server said with the match's bases: the whole
+	 * units of each material (by its symbol) its deposits hold between them. Empty until the bases are had.
+	 */
+	TMap<FString, int32> MatchMining;
+
+	/**
+	 * Tell the publisher's server what each wallet's robot mined in a match that is over: for each wallet
+	 * (by its signing key) and material (by its symbol), the whole units. The match server's to say, once.
+	 */
+	void ReportMined(const FString& MatchId, const TArray<TTuple<FString, FString, int32>>& Mined, TFunction<void(bool /* bOk */, const FString& /* Said */)> Done);
 
 	/** Tell the publisher's server how a match ended: the faction that won, or "void". The match server's to say. */
 	void ReportOutcome(const FString& MatchId, const FString& Outcome, TFunction<void(bool /* bOk */, const FString& /* Said */)> Done);
@@ -338,6 +362,16 @@ public:
 	const FSenniteHeroForSale* HeroForSale(const FString& HeroId) const { return ShopHeroes.FindByPredicate([&HeroId](const FSenniteHeroForSale& H) { return H.Id == HeroId; }); }
 	/** Buy a hero from the shop with D-bucks. */
 	void BuyHero(const FString& HeroId);
+
+	/** Whether the shop has said what it sells. */
+	bool HasShop() const { return bShop; }
+	/** The building materials the shop trades, a pack of each. */
+	TArray<FSenniteMaterialPack> ShopMaterials;
+	/**
+	 * Buy a pack of a material from the shop with D-bucks, or sell one back to it for D-bucks. Either way
+	 * the wallet's half waits in the wallet for the player; what the wallet then holds is what it proves.
+	 */
+	void TradeMaterial(const FString& Symbol, bool bSell);
 	/** A hero the shop sold and gave that the wallet has not proved it owns yet: it is on its way. */
 	FString HeroOnItsWay;
 

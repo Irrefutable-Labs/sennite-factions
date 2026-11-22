@@ -223,6 +223,37 @@ describe("a match's prize", () => {
     await conserved("alice collected");
   });
 
+  it("gives each player's wallet what its robot mined, once, out of the publisher's own holdings", async () => {
+    const [alice, carol] = [player(s, "alice"), player(s, "carol")];
+    const before = await publishers();
+    const [aliceWood, carolSteel] = [(await holds(alice.wallet, "WOOD")).available, (await holds(carol.wallet, "STEEL")).available];
+
+    // More than the match's arena held was not mined: the report is refused whole, and nothing is given.
+    await expect(pub.matches.mined("match-1", [{ signingKey: key("alice"), resource: "WOOD", units: 121 }])).rejects.toThrow(Refused);
+    expect(record().matches["match-1"]?.mined).toBeUndefined();
+
+    // The winner and the loser both mined: what a robot took is its player's whoever won.
+    const mined = await pub.matches.mined("match-1", [
+      { signingKey: key("alice"), resource: "WOOD", units: 70 },
+      { signingKey: key("carol"), resource: "STEEL", units: 9 },
+    ]);
+    expect(mined.map((m) => [m.resource, m.units, m.given])).toEqual([
+      ["WOOD", 70, true],
+      ["STEEL", 9, true],
+    ]);
+    await until("alice's wallet holds the wood her robot mined", 240_000, async () => ((await holds(alice.wallet, "WOOD")).available === aliceWood + 70n ? true : null));
+    await until("carol's wallet holds the steel her robot mined", 240_000, async () => ((await holds(carol.wallet, "STEEL")).available === carolSteel + 9n ? true : null));
+    const after = { WOOD: before.WOOD - 70n, STONE: before.STONE, STEEL: before.STEEL - 9n };
+    await until("the publisher's account holds that much less", 240_000, async () => (JSON.stringify(await publishers(), (_k, v) => String(v)) === JSON.stringify(after, (_k, v) => String(v)) ? true : null));
+
+    // The first report stands: told again, or told otherwise, nothing more is given.
+    await pub.matches.mined("match-1", [{ signingKey: key("bob"), resource: "WOOD", units: 50 }]);
+    await pub.matches.tick();
+    expect(await publishers()).toEqual(after);
+    expect((await holds(alice.wallet, "WOOD")).available).toBe(aliceWood + 70n);
+    await conserved("what was mined is given");
+  });
+
   it("cannot be collected at the game's asking: a connected wallet collects only a two-player staked match", async () => {
     const bob = player(s, "bob");
     const steel = vaultOf("match-1", "bob", "STEEL");
@@ -369,6 +400,7 @@ describe("a match's prize", () => {
         expect((await call("POST", "/matches/match-3", token, { factions: [first, second] })).status).toBe(401);
         expect((await call("POST", "/matches/match-1/outcome", token, { outcome: second })).status).toBe(401);
         expect((await call("GET", "/matches/match-1", token)).status).toBe(401);
+        expect((await call("POST", "/matches/match-1/mined", token, { mined: [{ signingKey: key("bob"), resource: "WOOD", units: 50 }] })).status).toBe(401);
       }
       expect(await publishers()).toEqual(before);
       expect(Object.keys(record().matches).sort()).toEqual(["match-1", "match-2"]);

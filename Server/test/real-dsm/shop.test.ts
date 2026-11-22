@@ -15,7 +15,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { until } from "./hosts.js";
 import { player, stage, type Stage } from "./stage.js";
-import { becomeContacts, send, spendable, takeUp } from "./wallets.js";
+import { approving, becomeContacts, send, spendable, takeUp } from "./wallets.js";
 
 const DBUCKS = "DBUCKS";
 let s: Stage;
@@ -44,7 +44,8 @@ async function buyDbucks(name: string, era: string): Promise<bigint> {
   const before = await dbucksOf(name);
   const quoted = await s.publisher.shop.price(p.connection, era);
   expect(quoted).toBeGreaterThan(0);
-  const traded = await s.publisher.shop.buyDbucks(p.connection, era, Math.floor(quoted * 0.97));
+  // the trade is in no grant: it waits in the wallet until the player approves it
+  const traded = await approving(p.wallet, s.publisher.shop.buyDbucks(p.connection, era, Math.floor(quoted * 0.97)));
   expect(traded.ok, traded.why).toBe(true);
   return until(`${name}'s wallet holds the D-bucks it traded for`, 240_000, async () => {
     const now = await dbucksOf(name);
@@ -86,7 +87,7 @@ describe("D-bucks and the shop", () => {
 
   it("the shop sells a skin for D-bucks: one object, issued once the payment is accepted, given to the wallet", async () => {
     const [dbucksBefore, takings] = [await dbucksOf("alice"), await publishers(DBUCKS)];
-    const sold = await s.publisher.shop.buySkin(player(s, "alice").connection, "magma");
+    const sold = await approving(player(s, "alice").wallet, s.publisher.shop.buySkin(player(s, "alice").connection, "magma"));
     if (!sold.ok) throw new Error(sold.why);
     expect(sold.skin).toMatchObject({ skinId: "magma", name: "Dekker Magma", serial: 1 });
 
@@ -105,7 +106,7 @@ describe("D-bucks and the shop", () => {
 
   it("a wallet with no D-bucks is sold nothing: no payment, no skin", async () => {
     expect(await dbucksOf("bob")).toBe(0n);
-    const refused = await s.publisher.shop.buySkin(player(s, "bob").connection, "frost");
+    const refused = await approving(player(s, "bob").wallet, s.publisher.shop.buySkin(player(s, "bob").connection, "frost"));
     expect(refused.ok).toBe(false);
     expect(s.publisher.shop.skinsAmong(new Map([[skin.object, 1n]]))).toHaveLength(1);
     expect((await purse("bob")).skins).toEqual([]);
@@ -152,7 +153,7 @@ describe("D-bucks and the shop", () => {
     const price = BigInt(s.publisher.shop.hero("crunch").price);
     const [dbucksBefore, takings] = [await dbucksOf("alice"), await publishers(DBUCKS)];
     expect(dbucksBefore).toBeGreaterThanOrEqual(price);
-    const sold = await s.publisher.shop.buyHero(player(s, "alice").connection, "crunch");
+    const sold = await approving(player(s, "alice").wallet, s.publisher.shop.buyHero(player(s, "alice").connection, "crunch"));
     if (!sold.ok) throw new Error(sold.why);
     expect(sold.hero).toMatchObject({ heroId: "crunch", name: "Crunch", serial: 2 });
 

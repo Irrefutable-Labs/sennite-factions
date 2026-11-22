@@ -49,6 +49,31 @@ export interface WeaponForSale {
   price: string;
 }
 
+/**
+ * The building materials the shop sells and buys back (owner, 2026-11-22: "they should be sold in the shop
+ * as well"; "Server should offer to buy it back at a reduced rate ... like a 25% reduction"; "you should
+ * only be able to sell it back to the game"). A pack of a material is sold for its price in D-bucks, and
+ * bought back for `buyBackPercent` hundredths of that price, rounded down.
+ */
+export interface MaterialsForSale {
+  /** How many whole units of a material one pack holds. */
+  pack: number;
+  /** resource symbol -> a pack's price in D-bucks, in whole units. A resource with no price is not sold. */
+  price: Record<string, string>;
+  /** What a pack sold back pays, in hundredths of its price: 75 pays a quarter under. Always under 100. */
+  buyBackPercent: number;
+}
+
+/** A pack of a material as the shop trades it now: what it holds, what it costs, and what selling it back pays. */
+export interface MaterialPack {
+  symbol: string;
+  name: string;
+  units: number;
+  /** In D-bucks, whole units. */
+  price: number;
+  buyBack: number;
+}
+
 /** The game's currency, the publisher's vault that sells it for ERA, and the shop (spec 10.5). */
 export interface ShopWorld {
   /** D-bucks: an object the publisher's account issues with a fixed maximum supply. */
@@ -58,6 +83,8 @@ export interface ShopWorld {
   skins: SkinForSale[];
   heroes: HeroForSale[];
   weapons: WeaponForSale[];
+  /** The materials the shop sells in packs and buys back; a shop with none trades no materials. */
+  materials?: MaterialsForSale;
 }
 
 /**
@@ -67,6 +94,13 @@ export interface ShopWorld {
  */
 export interface MatchWorld {
   prize: Record<string, number>;
+  /**
+   * What a match's arena holds to mine (owner, 2026-11-22): for each material, the whole units its deposits
+   * hold between them. A player's mining robot takes from them, and what it took is given to the player's
+   * wallet when the match is over. It is the most a match can pay out in mining, whoever mines it; every
+   * unit of it is new supply entering circulation, as a prize's is. A match with none has nothing to mine.
+   */
+  mining?: Record<string, number>;
 }
 
 export interface World {
@@ -95,12 +129,34 @@ export function loadWorld(dir: string = WORLD_DIR): World {
   // a wallet's heroes and guns are told to a game in one list, by these ids: no gun has a hero's id, or another gun's
   const owned = [...shop.heroes.map((h) => h.id), ...shop.weapons.map((w) => w.id)];
   if (new Set(owned).size !== owned.length) throw new Error("the shop lists a gun twice, or under a hero's id");
+  if (shop.materials !== undefined) checkMaterials(shop.materials, catalogue.resources);
   const matches = JSON.parse(new TextDecoder().decode(bytes("matches.json"))) as MatchWorld;
   for (const [resource, amount] of Object.entries(matches.prize)) {
     if (!catalogue.resources.includes(resource)) throw new Error(`a match's prize names ${resource}, which is not a resource`);
     if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error(`a match's prize of ${resource} is not a whole number of units above zero`);
   }
+  for (const [resource, amount] of Object.entries(matches.mining ?? {})) {
+    if (!catalogue.resources.includes(resource)) throw new Error(`a match's mining names ${resource}, which is not a resource`);
+    if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error(`a match's mining of ${resource} is not a whole number of units above zero`);
+  }
   return { catalogue, parcels: readParcels(bytes("parcels.json")), economy, shop, matches };
+}
+
+/**
+ * What the shop's file says of materials, or an error naming what is wrong with it. A pack sold back pays
+ * less than it costs and at least one D-buck: a shop that paid as much as it charged, or more, would hand
+ * out D-bucks to anyone who bought and sold in a circle.
+ */
+export function checkMaterials(materials: MaterialsForSale, resources: readonly string[]): void {
+  if (!Number.isSafeInteger(materials.pack) || materials.pack <= 0) throw new Error("a pack of a material is not a whole number of units above zero");
+  if (!Number.isSafeInteger(materials.buyBackPercent) || materials.buyBackPercent <= 0 || materials.buyBackPercent >= 100) {
+    throw new Error("what the shop pays for a pack sold back is not a whole percent of its price above 0 and under 100");
+  }
+  for (const [resource, price] of Object.entries(materials.price)) {
+    if (!resources.includes(resource)) throw new Error(`the shop prices ${resource}, which is not a resource`);
+    if (!/^[1-9][0-9]{0,8}$/.test(price)) throw new Error(`the shop's price for a pack of ${resource} is not a whole number of D-bucks above zero`);
+    if (Math.floor((Number(price) * materials.buyBackPercent) / 100) < 1) throw new Error(`a pack of ${resource} sold back would pay nothing`);
+  }
 }
 
 /**

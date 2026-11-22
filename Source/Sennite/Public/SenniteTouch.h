@@ -87,6 +87,8 @@ private:
 		FKey Key;
 		int32 Weapon;
 		int32 Healing;
+		/** The mining robot: nothing comes to hand, it is sent where the player aims (SenniteMining.h). */
+		bool bRobot = false;
 	};
 
 	static const TArray<FButton>& Buttons();

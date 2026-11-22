@@ -3,6 +3,7 @@
 #include "SenniteArena.h"
 #include "SenniteCharacter.h"
 #include "SenniteCrate.h"
+#include "SenniteMining.h"
 #include "SennitePlayerController.h"
 #include "SennitePlayerState.h"
 #include "SennitePublisher.h"
@@ -216,6 +217,18 @@ void ASenniteMatch::BasesPlaced(const TArray<FString>& InFactions, const TArray<
 	}
 	bBases = true;
 	ASenniteCrate::Stock(GetWorld(), Starts, Built);
+	// what the arena holds to mine is the publisher's to say: its server said it with the bases
+	if (const USennitePublisher* Server = GetGameInstance() != nullptr ? GetGameInstance()->GetSubsystem<USennitePublisher>() : nullptr) {
+		TArray<int32> Totals;
+		Totals.Init(0, ASenniteDeposit::Kinds);
+		for (const TPair<FString, int32>& Each : Server->MatchMining) {
+			const int32 Kind = ASenniteDeposit::MaterialOf(Each.Key);
+			if (Totals.IsValidIndex(Kind)) {
+				Totals[Kind] = Each.Value;
+			}
+		}
+		ASenniteDeposit::Stock(GetWorld(), Totals);
+	}
 	UE_LOG(LogSenniteMatch, Display, TEXT("Match %s: %d factions; first to %d kills, %.0f s"), *MatchId, Factions.Num(), Target, Length);
 }
 
@@ -237,7 +250,7 @@ void ASenniteMatch::Enter(ASennitePlayerController* Player, const FString& Ticke
 		Player->ClientMatchSaid(TEXT("this server is not the publisher's match server"));
 		return;
 	}
-	Server->EnterMatch(MatchId, Ticket, [this, Alive = TWeakObjectPtr<ASenniteMatch>(this), Who = TWeakObjectPtr<ASennitePlayerController>(Player)](bool bOk, const FString& Told, const FString& FactionId, const FString& Wallet) {
+	Server->EnterMatch(MatchId, Ticket, [this, Alive = TWeakObjectPtr<ASenniteMatch>(this), Who = TWeakObjectPtr<ASennitePlayerController>(Player)](bool bOk, const FString& Told, const FString& FactionId, const FString& Wallet, const FString& SigningKey) {
 		if (!Alive.IsValid() || !Who.IsValid()) {
 			return;
 		}
@@ -266,6 +279,7 @@ void ASenniteMatch::Enter(ASennitePlayerController* Player, const FString& Ticke
 		}
 		Entering->FactionId = FactionId;
 		Entering->Wallet = Wallet;
+		Entering->SigningKey = SigningKey;
 		Faction->Players += 1;
 		Who->ClientMatchSaid(FString());
 		UE_LOG(LogSenniteMatch, Display, TEXT("Match %s: %s plays for faction %s"), *MatchId, *Wallet, *FactionId);
@@ -412,14 +426,8 @@ void ASenniteMatch::Report(int32 Tries)
 		if (bOk) {
 			bRecorded = true;
 			UE_LOG(LogSenniteMatch, Display, TEXT("Match %s: the publisher's server recorded the outcome %s"), *MatchId, *Outcome);
-			// the arena is the match's own, and goes with it
-			if (GetNetMode() == NM_DedicatedServer) {
-				FTimerHandle Closing;
-				GetWorldTimerManager().SetTimer(Closing, FTimerDelegate::CreateWeakLambda(this, [this]() {
-					UE_LOG(LogSenniteMatch, Display, TEXT("Match %s: the match server closes"), *MatchId);
-					FPlatformMisc::RequestExit(false);
-				}), FMath::Max(0.1f, CloseSeconds), false);
-			}
+			// the match is over for the publisher: it takes what was mined now, and then the match server closes
+			TellMined(0);
 			return;
 		}
 		if (Tries >= 40) {
@@ -429,6 +437,65 @@ void ASenniteMatch::Report(int32 Tries)
 		FTimerHandle Again;
 		GetWorldTimerManager().SetTimer(Again, FTimerDelegate::CreateWeakLambda(this, [this, Tries]() { Report(Tries + 1); }), 3.0f, false);
 	});
+}
+
+void ASenniteMatch::Mined(const ASennitePlayerState* By, int32 Material, int32 Units)
+{
+	// what is mined counts while the match can still be played: nothing is added once it is over
+	if (!HasAuthority() || By == nullptr || By->SigningKey.IsEmpty() || Units <= 0 || Material < 0 || Material >= ASenniteDeposit::Kinds
+		|| State == EMatchState::Over || State == EMatchState::Failed) {
+		return;
+	}
+	MinedBy.FindOrAdd(By->SigningKey)[Material] += Units;
+}
+
+void ASenniteMatch::TellMined(int32 Tries)
+{
+	USennitePublisher* Server = GetGameInstance() != nullptr ? GetGameInstance()->GetSubsystem<USennitePublisher>() : nullptr;
+	TArray<TTuple<FString, FString, int32>> Told;
+	for (const TPair<FString, FIntVector>& Each : MinedBy) {
+		for (int32 Kind = 0; Kind < ASenniteDeposit::Kinds; ++Kind) {
+			if (Each.Value[Kind] > 0) {
+				Told.Emplace(Each.Key, FString(ASenniteDeposit::NameOf(Kind)), Each.Value[Kind]);
+			}
+		}
+	}
+	if (Server == nullptr || !Server->IsMatchServer() || Told.Num() == 0) {
+		bMinedTold = true;
+		Close();
+		return;
+	}
+	Server->ReportMined(MatchId, Told, [this, Alive = TWeakObjectPtr<ASenniteMatch>(this), Tries, Count = Told.Num()](bool bOk, const FString& Refused) {
+		if (!Alive.IsValid()) {
+			return;
+		}
+		if (bOk) {
+			bMinedTold = true;
+			UE_LOG(LogSenniteMatch, Display, TEXT("Match %s: the publisher's server has what was mined (%d shares)"), *MatchId, Count);
+			Close();
+			return;
+		}
+		if (Tries >= 40) {
+			UE_LOG(LogSenniteMatch, Error, TEXT("Match %s: the publisher's server did not take what was mined: %s"), *MatchId, *Refused);
+			Close();
+			return;
+		}
+		FTimerHandle Again;
+		GetWorldTimerManager().SetTimer(Again, FTimerDelegate::CreateWeakLambda(this, [this, Tries]() { TellMined(Tries + 1); }), 3.0f, false);
+	});
+}
+
+void ASenniteMatch::Close()
+{
+	// the arena is the match's own, and goes with it
+	if (GetNetMode() != NM_DedicatedServer) {
+		return;
+	}
+	FTimerHandle Closing;
+	GetWorldTimerManager().SetTimer(Closing, FTimerDelegate::CreateWeakLambda(this, [this]() {
+		UE_LOG(LogSenniteMatch, Display, TEXT("Match %s: the match server closes"), *MatchId);
+		FPlatformMisc::RequestExit(false);
+	}), FMath::Max(0.1f, CloseSeconds), false);
 }
 
 void ASenniteMatch::Tick(float DeltaTime)

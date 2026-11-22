@@ -582,6 +582,19 @@ protected:
 	UFUNCTION(Client, Reliable)
 	void ClientCrateGave(int32 NewGuns, int32 InStore, bool bRounds, int32 Bandages, int32 Potions);
 
+	/**
+	 * Send this player's mining robot to the deposit the player aims at (SenniteMining.h): the first time,
+	 * it is taken out. The player's game says where it looks from and along what line.
+	 */
+	void SendRobot();
+
+	UFUNCTION(Server, Reliable)
+	void ServerSendRobot(FVector_NetQuantize Eye, FVector_NetQuantizeNormal Toward);
+
+	/** What became of sending the robot, for the HUD to say. */
+	UFUNCTION(Client, Reliable)
+	void ClientRobotSaid(const FString& Said);
+
 
 	/*UFUNCTION(Server, WithValidation)
 	void ServerSetAnimInstance(UThirdPersonAnimInstance* AnimInstance);*/

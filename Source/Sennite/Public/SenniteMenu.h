@@ -65,6 +65,8 @@ enum class ESenniteMenuPage : uint8
 	Swap,
 	Join,
 	Lobby,
+	/** The store's materials section. Last, so every page before it keeps its number. */
+	Materials,
 };
 
 /** A button as the last frame drew it: what it does, where it is on the screen (in the screen's own measure, as taps and clicks come), and whether it does anything now. */
@@ -109,7 +111,10 @@ public:
 	int32 BrowseSkin = 0;
 
 	/** Whether a page is one of the store's sections. */
-	static bool InStore(ESenniteMenuPage Which) { return Which == ESenniteMenuPage::Heroes || Which == ESenniteMenuPage::Skins || Which == ESenniteMenuPage::Weapons || Which == ESenniteMenuPage::Swap; }
+	static bool InStore(ESenniteMenuPage Which) { return Which == ESenniteMenuPage::Heroes || Which == ESenniteMenuPage::Skins || Which == ESenniteMenuPage::Weapons || Which == ESenniteMenuPage::Swap || Which == ESenniteMenuPage::Materials; }
+
+	/** Whether the player has bought or sold a material on this visit to the store's materials: what the shop says of it is shown. */
+	bool bMaterialsSaid = false;
 
 	/** The gun the store's weapons section shows, by its place in the shop's list. */
 	int32 BrowseWeapon = 0;
@@ -301,6 +306,7 @@ private:
 	void DrawSkins(ASenniteMenuController* Menu);
 	void DrawWeapons(ASenniteMenuController* Menu);
 	void DrawSwap(ASenniteMenuController* Menu);
+	void DrawMaterials(ASenniteMenuController* Menu);
 
 	/** The top of every section of the store: BACK, the sections' names, and the wallet's D-bucks top right. */
 	void StoreTop(ASenniteMenuController* Menu);

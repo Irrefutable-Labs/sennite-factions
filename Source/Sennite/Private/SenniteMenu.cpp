@@ -722,6 +722,24 @@ void ASenniteMenuController::Act(FName Action)
 			Server->BuyWeapon(Server->ShopWeapons[BrowseWeapon].Id);
 		}
 	}
+	else if (Name == TEXT("tab:materials")) {
+		if (USennitePublisher* Seller = GetGameInstance() != nullptr ? GetGameInstance()->GetSubsystem<USennitePublisher>() : nullptr) {
+			Seller->RefreshShop();
+		}
+		Page = ESenniteMenuPage::Materials;
+		bMaterialsSaid = false;
+		Note.Reset();
+	}
+	else if (Name.StartsWith(TEXT("mat:buy:")) || Name.StartsWith(TEXT("mat:sell:"))) {
+		const UGameInstance* Game = GetGameInstance();
+		USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+		if (Server == nullptr || !Server->IsOn() || !Server->bConnected || Server->bBusy) {
+			return;
+		}
+		const bool bSell = Name.StartsWith(TEXT("mat:sell:"));
+		bMaterialsSaid = true;
+		Server->TradeMaterial(Name.RightChop(bSell ? 9 : 8), bSell);
+	}
 	else if (Name == TEXT("tab:swap")) {
 		Page = ESenniteMenuPage::Swap;
 		bSwapSaid = false;
@@ -1194,6 +1212,7 @@ void ASenniteMenuHUD::DrawHUD()
 	case ESenniteMenuPage::Skins: DrawSkins(Menu); break;
 	case ESenniteMenuPage::Weapons: DrawWeapons(Menu); break;
 	case ESenniteMenuPage::Swap: DrawSwap(Menu); break;
+	case ESenniteMenuPage::Materials: DrawMaterials(Menu); break;
 	case ESenniteMenuPage::Join: DrawJoin(Menu); break;
 	case ESenniteMenuPage::Lobby: DrawLobby(Menu); break;
 	}
@@ -1382,12 +1401,13 @@ void ASenniteMenuHUD::StoreTop(ASenniteMenuController* Menu)
 	};
 	float X = 232.0f;
 	for (const FSection& Each : { FSection{ TEXT("tab:heroes"), TEXT("HEROES"), ESenniteMenuPage::Heroes }, FSection{ TEXT("tab:skins"), TEXT("SKINS"), ESenniteMenuPage::Skins },
-			FSection{ TEXT("tab:weapons"), TEXT("WEAPONS"), ESenniteMenuPage::Weapons }, FSection{ TEXT("tab:swap"), TEXT("SWAP"), ESenniteMenuPage::Swap } }) {
-		Button(Each.Action, Each.Name, X, 24.0f, 160.0f, 58.0f, true, 16, Menu->Page == Each.Page);
+			FSection{ TEXT("tab:weapons"), TEXT("WEAPONS"), ESenniteMenuPage::Weapons }, FSection{ TEXT("tab:materials"), TEXT("MATERIALS"), ESenniteMenuPage::Materials },
+			FSection{ TEXT("tab:swap"), TEXT("SWAP"), ESenniteMenuPage::Swap } }) {
+		Button(Each.Action, Each.Name, X, 24.0f, 148.0f, 58.0f, true, 15, Menu->Page == Each.Page);
 		if (Menu->Page == Each.Page) {
 			Drawing.Add(FString::Printf(TEXT("section=%s"), Each.Name));
 		}
-		X += 168.0f;
+		X += 154.0f;
 	}
 	// top right, where things are sold: what the player's wallet holds, as it proved it
 	const USennitePublisher* Seller = Shop(Menu);
@@ -1855,6 +1875,65 @@ void ASenniteMenuHUD::DrawSwap(ASenniteMenuController* Menu)
 		const bool bEnabled = bDelete ? !Menu->SwapAmount.IsEmpty() : Key == TEXT(".") ? From->Decimals > 0 : true;
 		Button(FName(*(TEXT("num:") + Key)), bDelete ? FString(TEXT("DEL")) : Key, X0 + (Index % 3) * (KW + Gap), Y0 + (Index / 3) * (KH + Gap), KW, KH, bEnabled, bDelete ? 16 : 28);
 	}
+}
+
+void ASenniteMenuHUD::DrawMaterials(ASenniteMenuController* Menu)
+{
+	const FLinearColor White = FLinearColor::White;
+	// the whole screen is shaded, as the swap's is: a list is read over the stage
+	SenniteUi::Fade(Canvas, Screen(), FLinearColor(0.0f, 0.0f, 0.0f, 0.66f), FLinearColor(0.0f, 0.0f, 0.0f, 0.4f), false);
+	StoreTop(Menu);
+
+	const float Left = 48.0f;
+	const USennitePublisher* Server = Shop(Menu);
+	Text(TEXT("count"), TEXT("BUILDING MATERIALS: BOUGHT FROM THE SHOP, AND SOLD BACK TO IT, FOR D-BUCKS"), Left * S, 102.0f * S, 12, SenniteUi::Gold);
+	if (Server == nullptr || !Server->IsOn()) {
+		Button(TEXT("mat:none"), TEXT("NO SHOP ON THIS GAME"), Left, 150.0f, 340.0f, 66.0f, false, 14);
+		Text(TEXT("hint"), TEXT("THIS GAME IS NOT CONNECTED TO THE PUBLISHER'S"), (Left + 2.0f) * S, 230.0f * S, 12, White, 0.0f, false);
+		Text(TEXT("hint2"), TEXT("SERVER, WHERE MATERIALS ARE SOLD FOR D-BUCKS."), (Left + 2.0f) * S, 254.0f * S, 12, White, 0.0f, false);
+		return;
+	}
+	if (Server->ShopMaterials.Num() == 0) {
+		Text(TEXT("status"), Server->HasShop() ? TEXT("THE SHOP TRADES NO MATERIALS NOW") : TEXT("ASKING THE SHOP WHAT IT TRADES ..."), (Left + 2.0f) * S, 150.0f * S, 13, SenniteUi::Gold);
+		return;
+	}
+
+	// a row for each material: what the wallet proved it holds, a pack bought, a pack sold back
+	const bool bKnown = Server->bConnected && Server->bMaterialsKnown;
+	const bool bFree = Server->bConnected && !Server->bBusy;
+	float Y = 140.0f;
+	for (int32 Index = 0; Index < Server->ShopMaterials.Num(); ++Index) {
+		const FSenniteMaterialPack& Pack = Server->ShopMaterials[Index];
+		const int32 Has = Server->Materials.FindRef(Pack.Symbol);
+		Text(TEXT("name"), Pack.Symbol, Left * S, (Y + 4.0f) * S, 26, White);
+		Text(TEXT("holds"), bKnown ? FString::Printf(TEXT("YOUR WALLET HAS %s"), *SenniteUi::Grouped(Has)) : FString(), (Left + 2.0f) * S, (Y + 44.0f) * S, 12, SenniteUi::Dim, 0.0f, false);
+		// with nothing proved, neither is held back here: the wallet says whether it holds enough
+		const bool bCanBuy = bFree && (!bKnown || Server->DBucks >= Pack.Price);
+		const bool bCanSell = bFree && (!bKnown || Has >= Pack.Units);
+		Button(FName(*(FString(TEXT("mat:buy:")) + Pack.Symbol)), FString::Printf(TEXT("BUY %d FOR %s D-BUCKS"), Pack.Units, *SenniteUi::Grouped(Pack.Price)), Left + 250.0f, Y, 330.0f, 62.0f, bCanBuy, 14, true);
+		Button(FName(*(FString(TEXT("mat:sell:")) + Pack.Symbol)), FString::Printf(TEXT("SELL %d FOR %s D-BUCKS"), Pack.Units, *SenniteUi::Grouped(Pack.BuyBack)), Left + 592.0f, Y, 330.0f, 62.0f, bCanSell, 14);
+		Drawing.Add(FString::Printf(TEXT("material%d=%s units=%d price=%d back=%d held=%s buy=%d sell=%d"), Index, *Pack.Symbol, Pack.Units, Pack.Price, Pack.BuyBack,
+			bKnown ? *FString::FromInt(Has) : TEXT("?"), bCanBuy ? 1 : 0, bCanSell ? 1 : 0));
+		Y += 84.0f;
+	}
+
+	// under the rows: with no wallet connected, the way to connect one; while one waits in the wallet, the way to it
+	const float BY = Y + 16.0f;
+	if (!Server->bConnected) {
+		Button(TEXT("wallet"), TEXT("CONNECT YOUR WALLET"), Left, BY, 340.0f, 66.0f, !Server->ConnectCode.IsEmpty(), 16, true);
+		Text(TEXT("hint"), TEXT("MATERIALS ARE BOUGHT AND SOLD WITH YOUR DSM WALLET."), (Left + 2.0f) * S, (BY + 80.0f) * S, 12, White, 0.0f, false);
+		return;
+	}
+	if (Server->bBusy && Server->bOnWallet && Server->bWalletHere) {
+		// it waits in the wallet for the player, who is here: the way back to it, on the approval
+		Button(TEXT("openwallet"), TEXT("OPEN YOUR WALLET"), Left, BY, 340.0f, 66.0f, true, 16, true);
+	}
+	// what the publisher's server says of what was bought or sold here: waiting, done, or why not
+	if (!Server->Message.IsEmpty() && (Server->bBusy || Menu->bMaterialsSaid)) {
+		Text(TEXT("shop"), Server->Message.ToUpper(), (Left + 2.0f) * S, (BY + 80.0f) * S, 12, SenniteUi::Gold, 0.0f, false);
+	}
+	Text(TEXT("rule"), TEXT("THE SHOP PAYS A QUARTER LESS FOR A PACK THAN IT SELLS ONE FOR. WHAT A MATCH PAYS AND WHAT YOUR ROBOT MINES ARE YOURS THE SAME WAY."),
+		(Left + 2.0f) * S, (BY + 104.0f) * S, 11, SenniteUi::Dim, 0.0f, false);
 }
 
 void ASenniteMenuHUD::DrawJoin(ASenniteMenuController* Menu)

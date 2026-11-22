@@ -4,6 +4,7 @@
 #include "Engine/Canvas.h"
 #include "Blueprint/UserWidget.h"
 #include "Engine/Engine.h"
+#include "EngineUtils.h"
 #include "CanvasItem.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
@@ -11,6 +12,7 @@
 #include "SenniteCharacter.h"
 #include "SenniteCrate.h"
 #include "SenniteMatch.h"
+#include "SenniteMining.h"
 #include "SennitePlayerState.h"
 #include "SennitePlayerController.h"
 #include "SenniteTouch.h"
@@ -261,6 +263,20 @@ void ASenniteHUD::DrawStatus()
 			Now.Materials[Material] > 0 ? White : Dim);
 	}
 
+	// under the materials: the player's mining robot, and what it has mined this game
+	if (const ASennitePlayerState* Mining = PlayerOwner ? Cast<ASennitePlayerState>(PlayerOwner->PlayerState) : nullptr) {
+		const FString Robot = ASenniteMiningRobot::Status(Mining);
+		int32 MinedAll = 0;
+		for (const int32 Each : Mining->Mined) {
+			MinedAll += Each;
+		}
+		const FString Line = MinedAll > 0 ? FString::Printf(TEXT("%s  +%d"), *Robot, MinedAll) : Robot;
+		const float RobotW = SenniteUi::Measure(Line, 11, S).X + 24.0f * S;
+		const float RobotY = MatY + 96.0f * S;
+		HudPlate(Canvas, W - 16.0f * S - RobotW, RobotY, RobotW, 26.0f * S);
+		Label(TEXT("robot"), Line, W - 4.0f * S - RobotW, RobotY + 6.0f * S, 11, Mining->bRobotDown ? Dim : White);
+	}
+
 	// top right: players left and this player's kills
 	HudPlate(Canvas, W - 222.0f * S, 16.0f * S, 198.0f * S, 34.0f * S);
 	Label(TEXT("alive"), FString::Printf(TEXT("%d ALIVE"), Now.Alive), W - 210.0f * S, 24.0f * S, 14, White);
@@ -289,6 +305,39 @@ void ASenniteHUD::DrawMatch()
 		if (ASenniteCrate::Nearest(GetWorld(), Hero->GetActorLocation(), Rules->Reach + Rules->Across, true) != nullptr) {
 			HudPlate(Canvas, W * 0.5f - 110.0f * S, H * 0.62f, 220.0f * S, 34.0f * S);
 			Label(TEXT("crate"), TEXT("E   OPEN THE CRATE"), W * 0.5f - 92.0f * S, H * 0.62f + 8.0f * S, 14, White);
+		}
+	}
+	// The deposits that hold something, marked where they stand: a tree or a rock that is one looks as any other.
+	// The one the player aims at says how to send the robot to it.
+	if (const ASenniteCharacter* Miner = Cast<ASenniteCharacter>(GetOwningPawn())) {
+		const ASenniteMiningRobot* Rules = GetDefault<ASenniteMiningRobot>();
+		FVector Eye;
+		FRotator Look;
+		PlayerOwner->GetPlayerViewPoint(Eye, Look);
+		const ASenniteDeposit* Aimed = ASenniteDeposit::Aimed(GetWorld(), Eye, Look.Vector(), Rules->SendRange, Rules->SendOff);
+		for (TActorIterator<ASenniteDeposit> It(GetWorld()); It; ++It) {
+			if (It->Left <= 0 || FVector::Dist(It->GetActorLocation(), Eye) > Rules->SendRange) {
+				continue;
+			}
+			const FVector On = Canvas->Project(It->GetActorLocation() + FVector(0.0, 0.0, It->Height() + 60.0));
+			if (On.Z <= 0.0 || On.X < 0.0 || On.X > W || On.Y < 0.0 || On.Y > H) {
+				continue;
+			}
+			const bool bAimed = *It == Aimed;
+			const FString Says = FString::Printf(TEXT("%s %d"), ASenniteDeposit::NameOf(It->Material), It->Left);
+			const float SaysW = SenniteUi::Measure(Says, bAimed ? 13 : 11, S).X + 20.0f * S;
+			HudPlate(Canvas, On.X - SaysW * 0.5f, On.Y - 26.0f * S, SaysW, (bAimed ? 26.0f : 22.0f) * S);
+			Label(*FString::Printf(TEXT("deposit%d"), It->Material), Says, On.X - SaysW * 0.5f + 10.0f * S, On.Y - 21.0f * S, bAimed ? 13 : 11, White);
+		}
+		const ASennitePlayerState* Mining = Miner->GetPlayerState<ASennitePlayerState>();
+		if (Aimed != nullptr && Mining != nullptr && !Mining->bRobotDown) {
+			// by touch the robot is on the wheel; on a keyboard it has its key
+			ASennitePlayerController* Touching = Cast<ASennitePlayerController>(PlayerOwner);
+			const FString How = Touching != nullptr && Touching->GetTouchControls() != nullptr ? FString(TEXT("ROBOT, ON THE WHEEL, SENDS YOUR ROBOT TO MINE IT"))
+				: FString(TEXT("T   SEND YOUR ROBOT TO MINE IT"));
+			const float HowW = SenniteUi::Measure(How, 14, S).X + 36.0f * S;
+			HudPlate(Canvas, W * 0.5f - HowW * 0.5f, H * 0.56f, HowW, 34.0f * S);
+			Label(TEXT("sendrobot"), How, W * 0.5f - HowW * 0.5f + 18.0f * S, H * 0.56f + 8.0f * S, 14, White);
 		}
 	}
 	// just opened a crate: what it gave

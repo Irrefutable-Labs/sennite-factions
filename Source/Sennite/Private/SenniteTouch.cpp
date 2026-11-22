@@ -97,6 +97,8 @@ const TArray<USenniteTouchControls::FWheelPlace>& USenniteTouchControls::WheelPl
 		{ TEXT("KATANA"), EKeys::Nine, 6, INDEX_NONE },
 		{ TEXT("BANDAGE"), EKeys::Four, INDEX_NONE, 0 },
 		{ TEXT("POTION"), EKeys::Five, INDEX_NONE, 1 },
+		// the mining robot: let go on it, and it goes to the deposit the player aims at
+		{ TEXT("ROBOT"), EKeys::T, INDEX_NONE, INDEX_NONE, true },
 	};
 	return All;
 }
@@ -235,6 +237,10 @@ bool USenniteTouchControls::Has(const FWheelPlace& Place) const
 	if (State == nullptr) {
 		return false;
 	}
+	if (Place.bRobot) {
+		// a robot shot down is gone until the next game: it is not on the wheel
+		return !State->bRobotDown && Controller->GetPawn() != nullptr;
+	}
 	if (Place.Healing != INDEX_NONE) {
 		return State->HealingItemCounts.IsValidIndex(Place.Healing) && State->HealingItemCounts[Place.Healing] > 0;
 	}
@@ -246,7 +252,7 @@ bool USenniteTouchControls::InHand(const FWheelPlace& Place) const
 {
 	const ASenniteCharacter* Hero = Controller ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
 	const ASennitePlayerState* State = Controller ? Controller->GetPlayerState<ASennitePlayerState>() : nullptr;
-	if (Hero == nullptr || State == nullptr || State->InBuildMode) {
+	if (Hero == nullptr || State == nullptr || State->InBuildMode || Place.bRobot) {
 		return false;
 	}
 	if (Place.Healing != INDEX_NONE) {
@@ -319,7 +325,8 @@ void USenniteTouchControls::NextInHand()
 	int32 Now = Places.IndexOfByPredicate([this](const FWheelPlace& Place) { return InHand(Place); });
 	for (int32 Step = 1; Step < Places.Num(); ++Step) {
 		const FWheelPlace& Next = Places[(FMath::Max(Now, 0) + Step) % Places.Num()];
-		if (Has(Next) && !InHand(Next)) {
+		// a tap goes through what is held in hand: the robot is sent from the open wheel, never by a tap
+		if (!Next.bRobot && Has(Next) && !InHand(Next)) {
 			USenniteSounds::Play(Controller, TEXT("ui.press"));
 			Key(Next.Key, IE_Pressed);
 			Key(Next.Key, IE_Released);

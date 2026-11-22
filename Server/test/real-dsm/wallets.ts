@@ -178,3 +178,29 @@ export async function takeUp(host: { url: string; secretFile: string }, object: 
   const envelope = pb.Envelope.fromBinary(answer.result.value.subarray(1));
   if (envelope.payload.case === "error") throw new IngressError(route, envelope.payload.value.code, envelope.payload.value.message);
 }
+
+/**
+ * As a player does in their wallet while the game waits on them: approve what waits there, until what the
+ * game was doing is done. The shop puts every payment and every trade outside the grant (owner,
+ * 2026-11-19: "you got to go to the wallet"), so each one waits in the wallet until the player approves it.
+ */
+export async function approving<T>(wallet: WalletAccount, doing: Promise<T>): Promise<T> {
+  let done = false;
+  const settled = doing.finally(() => {
+    done = true;
+  });
+  // a failure of what the game was doing is the caller's to see, once: not an unhandled one here
+  settled.catch(() => undefined);
+  while (!done) {
+    try {
+      await wallet.sync();
+      for (const waiting of await wallet.pending()) {
+        if (!waiting.approved) await wallet.respond(waiting.rawConnection, waiting.seq, "approve");
+      }
+    } catch {
+      // the wallet could not be asked this time: it is asked again
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  return settled;
+}

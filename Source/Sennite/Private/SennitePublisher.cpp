@@ -107,12 +107,23 @@ const FSenniteParcel* USennitePublisher::FindParcel(const FString& Id) const
 
 void USennitePublisher::AskMatchBases(const FString& MatchId, TFunction<void(bool, const FString&, const TArray<FSenniteMatchBaseView>&)> Done)
 {
-	Send(TEXT("GET"), FString::Printf(TEXT("/matches/%s/bases"), *MatchId), nullptr, [Done = MoveTemp(Done)](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+	Send(TEXT("GET"), FString::Printf(TEXT("/matches/%s/bases"), *MatchId), nullptr, [Holds = &MatchMining, Done = MoveTemp(Done)](int32 Status, const TSharedPtr<FJsonObject>& Json) {
 		TArray<FSenniteMatchBaseView> Bases;
 		const TArray<TSharedPtr<FJsonValue>>* Listed = nullptr;
 		if (Status != 200 || !Json.IsValid() || !Json->TryGetArrayField(TEXT("bases"), Listed)) {
 			Done(false, ErrorOf(Status, Json), Bases);
 			return;
+		}
+		// with the bases, what the arena holds to mine
+		Holds->Reset();
+		const TSharedPtr<FJsonObject>* Mining = nullptr;
+		if (Json->TryGetObjectField(TEXT("mining"), Mining)) {
+			for (const auto& Each : (*Mining)->Values) {
+				int32 Units = 0;
+				if (Each.Value.IsValid() && Each.Value->TryGetNumber(Units) && Units > 0) {
+					Holds->Add(FString(Each.Key), Units);
+				}
+			}
 		}
 		for (const TSharedPtr<FJsonValue>& Value : *Listed) {
 			const TSharedPtr<FJsonObject> Entry = Value->AsObject();
@@ -174,7 +185,7 @@ void USennitePublisher::AskMatchTicket(const FString& MatchId, TFunction<void(bo
 	});
 }
 
-void USennitePublisher::EnterMatch(const FString& MatchId, const FString& Ticket, TFunction<void(bool, const FString&, const FString&, const FString&)> Done)
+void USennitePublisher::EnterMatch(const FString& MatchId, const FString& Ticket, TFunction<void(bool, const FString&, const FString&, const FString&, const FString&)> Done)
 {
 	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
 	Body->SetStringField(TEXT("ticket"), Ticket);
@@ -182,11 +193,32 @@ void USennitePublisher::EnterMatch(const FString& MatchId, const FString& Ticket
 		FString InFaction;
 		FString InWallet;
 		if (Status != 200 || !Json.IsValid() || !Json->TryGetStringField(TEXT("factionId"), InFaction) || !Json->TryGetStringField(TEXT("wallet"), InWallet)) {
-			Done(false, ErrorOf(Status, Json), FString(), FString());
+			Done(false, ErrorOf(Status, Json), FString(), FString(), FString());
 			return;
 		}
-		Done(true, FString(), InFaction, InWallet);
+		// the member's signing key: what the publisher's server names a member's mining by
+		FString InKey;
+		Json->TryGetStringField(TEXT("signingKey"), InKey);
+		Done(true, FString(), InFaction, InWallet, InKey);
 	}, MatchSecret);
+}
+
+void USennitePublisher::ReportMined(const FString& MatchId, const TArray<TTuple<FString, FString, int32>>& Mined, TFunction<void(bool, const FString&)> Done)
+{
+	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+	TArray<TSharedPtr<FJsonValue>> Listed;
+	for (const TTuple<FString, FString, int32>& Each : Mined) {
+		const TSharedRef<FJsonObject> One = MakeShared<FJsonObject>();
+		One->SetStringField(TEXT("signingKey"), Each.Get<0>());
+		One->SetStringField(TEXT("resource"), Each.Get<1>());
+		One->SetNumberField(TEXT("units"), Each.Get<2>());
+		Listed.Add(MakeShared<FJsonValueObject>(One));
+	}
+	Body->SetArrayField(TEXT("mined"), Listed);
+	// the publisher's account gives each wallet what it mined before the server answers: it is given time
+	Send(TEXT("POST"), FString::Printf(TEXT("/matches/%s/mined"), *MatchId), Body, [Done = MoveTemp(Done)](int32 Status, const TSharedPtr<FJsonObject>& Json) {
+		Done(Status == 200, Status == 200 ? FString() : ErrorOf(Status, Json));
+	}, MatchSecret, 300.0f);
 }
 
 void USennitePublisher::ReportOutcome(const FString& MatchId, const FString& Outcome, TFunction<void(bool, const FString&)> Done)
@@ -460,6 +492,21 @@ void USennitePublisher::AskShop()
 				ShopWeapons.Add(MoveTemp(Gun));
 			}
 		}
+		ShopMaterials.Reset();
+		const TArray<TSharedPtr<FJsonValue>>* Packs = nullptr;
+		if (Json->TryGetArrayField(TEXT("materials"), Packs)) {
+			for (const TSharedPtr<FJsonValue>& Value : *Packs) {
+				// an entry that is not a pack of something, at a price, that sells back for something is not listed
+				const TSharedPtr<FJsonObject>* One = nullptr;
+				FSenniteMaterialPack Pack;
+				if (!Value.IsValid() || !Value->TryGetObject(One) || !(*One)->TryGetStringField(TEXT("symbol"), Pack.Symbol) || Pack.Symbol.IsEmpty()
+					|| !(*One)->TryGetNumberField(TEXT("units"), Pack.Units) || !(*One)->TryGetNumberField(TEXT("price"), Pack.Price)
+					|| !(*One)->TryGetNumberField(TEXT("buyBack"), Pack.BuyBack) || Pack.Units <= 0 || Pack.Price <= 0 || Pack.BuyBack <= 0) {
+					continue;
+				}
+				ShopMaterials.Add(MoveTemp(Pack));
+			}
+		}
 		bShop = true;
 	});
 }
@@ -634,6 +681,20 @@ void USennitePublisher::BuyHero(const FString& HeroId)
 	AskToPay(TEXT("/shop/heroes"), Body, TEXT("approve the payment for the hero in your DSM wallet (Apps, Waiting), then come back"));
 	bProveAfter = bBusy;
 	BuyingHero = HeroId;
+}
+
+void USennitePublisher::TradeMaterial(const FString& Symbol, bool bSell)
+{
+	const TSharedRef<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("symbol"), Symbol.ToUpper());
+	Body->SetStringField(TEXT("way"), bSell ? TEXT("sell") : TEXT("buy"));
+	if (bBusy) {
+		return;
+	}
+	AskToPay(TEXT("/shop/materials"), Body, bSell ? TEXT("approve sending the materials in your DSM wallet (Apps, Waiting), then come back")
+		: TEXT("approve the payment for the materials in your DSM wallet (Apps, Waiting), then come back"));
+	// what the wallet holds after the trade is what it proves
+	bProveAfter = bBusy;
 }
 
 void USennitePublisher::BuyWeapon(const FString& WeaponId)

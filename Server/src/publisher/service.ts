@@ -451,7 +451,36 @@ export class Service {
     // The shop: the game's currency and the skins and heroes the publisher sells for it (spec 10.5).
     if (is("GET", "shop")) {
       const shop = publisher.shop.world;
-      return { status: 200, body: { currency: { symbol: shop.currency.symbol, name: shop.currency.name }, skins: shop.skins, heroes: shop.heroes, weapons: shop.weapons } };
+      return {
+        status: 200,
+        body: { currency: { symbol: shop.currency.symbol, name: shop.currency.name }, skins: shop.skins, heroes: shop.heroes, weapons: shop.weapons, materials: publisher.shop.packs() },
+      };
+    }
+
+    // The wallet buys a pack of a material from the shop, or sells one back to it (owner, 2026-11-22). Buying,
+    // the wallet pays the pack's price in D-bucks and is given the pack; selling, it sends the pack and is paid
+    // what a pack sold back pays. Either way the wallet's half waits in the wallet for the player, and the shop
+    // gives its half only once the publisher's account has the wallet's.
+    if (is("POST", "shop", "materials")) {
+      const player = this.player(req);
+      const connection = await this.connected(player);
+      const asked = await body(req);
+      const pack = publisher.shop.pack(text(asked.symbol, "symbol"));
+      const way = text(asked.way, "way");
+      if (way !== "buy" && way !== "sell") throw new HttpError(400, "way is buy or sell");
+      return {
+        status: 202,
+        body: this.start(player, async (say) => {
+          const traded = way === "buy" ? await publisher.shop.buyMaterial(connection, pack.symbol, say) : await publisher.shop.sellMaterial(connection, pack.symbol, say);
+          if (!traded.ok) return { ok: false, message: traded.why };
+          const { units, resource, dbucks } = traded.trade;
+          if (!traded.given) {
+            // the wallet's half landed; the shop's is given once the wallet has taken that in, which it does when it is next open
+            return { ok: true, message: way === "buy" ? `paid: your ${units} ${resource} are on their way to your wallet` : `the shop has your ${units} ${resource}: your ${dbucks} D-bucks are on their way to your wallet` };
+          }
+          return { ok: true, message: way === "buy" ? `${units} ${resource} are the wallet's, for ${dbucks} D-bucks` : `${units} ${resource} sold to the shop for ${dbucks} D-bucks` };
+        }),
+      };
     }
 
     // The wallet trades ERA for D-bucks through the publisher's vault, at the price the vault's reserves set.
@@ -811,6 +840,13 @@ export class Service {
       return { status: 200, body: await publisher.matches.decide(b, text((await body(req)).outcome, "outcome")) };
     }
 
+    // The publisher's match server says what each player's robot mined, once the match is over (owner,
+    // 2026-11-22): the publisher's account gives it to each player's wallet. Recorded once.
+    if (is("POST", "matches", null, "mined") && b !== undefined) {
+      this.matchServer(req, "reports what a match's players mined");
+      return { status: 200, body: { mined: await publisher.matches.mined(b, (await body(req)).mined) } };
+    }
+
     // A player's game asks to enter a match. The server says which of the match's factions the
     // connected wallet is a member of, as a ticket the game hands the match server: good once, for
     // this match alone. Nothing of the player's place at this server crosses the match's own wire.
@@ -845,7 +881,8 @@ export class Service {
     // The publisher's match server reads what the match is assembled from: each faction's parcel and built structures (spec 10.3).
     if (is("GET", "matches", null, "bases") && b !== undefined) {
       this.matchServer(req, "reads a match's bases");
-      return { status: 200, body: { matchId: b, bases: await publisher.matchBases(b) } };
+      // with the bases, what the arena holds to mine: the match server stands that much in deposits
+      return { status: 200, body: { matchId: b, bases: await publisher.matchBases(b), mining: publisher.matches.mining } };
     }
 
     if (is("GET", "matches", null) && b !== undefined) {
