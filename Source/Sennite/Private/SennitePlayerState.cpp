@@ -76,6 +76,7 @@ void ASennitePlayerState::GetLifetimeReplicatedProps(TArray< FLifetimeProperty >
 	DOREPLIFETIME(ASennitePlayerState, Mined);
 	DOREPLIFETIME(ASennitePlayerState, Droid);
 	DOREPLIFETIME(ASennitePlayerState, bDroidDown);
+	DOREPLIFETIME(ASennitePlayerState, bDroidInHand);
 	DOREPLIFETIME(ASennitePlayerState, HeroId);
 	DOREPLIFETIME_CONDITION(ASennitePlayerState, HeroAudience, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(ASennitePlayerState, GunsOwned, COND_OwnerOnly);
@@ -209,6 +210,8 @@ void ASennitePlayerState::CopyProperties(APlayerState* PlayerState) {
 }
 
 void ASennitePlayerState::StartOver() {
+	// a hero starts with its own weapon in hand, not the droid
+	bDroidInHand = false;
 	InBuildMode = false;
 	BuildMode = FString("None");
 	HoldingWeapon = true;

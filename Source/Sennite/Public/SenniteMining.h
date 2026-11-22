@@ -1,11 +1,13 @@
 // Mining: where a player's building materials come from in play (owner, 2026-11-22).
 //
 // Deposits of wood, stone and steel stand on the land between the bases of an arena. Each holds so many
-// units; both sides take from the same ones. A player has one mining droid a match. It is not out until
-// the player sends it: the player aims at a deposit and sends the droid (the SendDroid key; DROID on the
-// touch wheel). It goes there low, just above the ground, and comes in at the deposit's side, the side it
-// set out from, where it hangs and takes a unit every so often until the deposit is empty or the player
-// sends it to another. It does not fly over the arena, where it would be shot down at once (owner,
+// units and no more: it shrinks as they are taken, and with the last one it is destroyed. Both sides take
+// from the same ones. A player has one mining droid a match. It is taken in hand as a weapon is (the
+// HoldDroid key; DROID on the touch wheel), and while it is in hand the fire button fires nothing and sends
+// it to the deposit the player aims at (owner, 2026-11-22: "You just have it in place of a weapon"). It is
+// not out until it is first sent. It goes there low, just above the ground, and comes in at the deposit's
+// side, the side it set out from, where it hangs and takes a unit every so often until the deposit is used
+// up or the player sends it to another. It does not fly over the arena, where it would be shot down at once (owner,
 // 2026-11-22: "I thought they'd hover just above the ground ... coming at it from an side angle").
 // Once it is out it stays out, whatever becomes of its player's hero. Anyone
 // it is not safe from can shoot it down; a droid shot down is gone for the rest of the match.
@@ -67,6 +69,10 @@ public:
 	UPROPERTY(Config)
 	TArray<float> Way;
 
+	/** How small a deposit is drawn with one unit left, as a part of its full size. */
+	UPROPERTY(Config)
+	float Spent = 0.5f;
+
 	/** How far apart, across that way, the deposits of one base's side stand. */
 	UPROPERTY(Config)
 	float Apart = 2400.0f;
@@ -74,7 +80,11 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_Material)
 	int32 Material = 0;
 
-	/** How many units it holds now. An empty deposit is gone from the arena. */
+	/**
+	 * How many units it holds now. It holds so many and no more: it is seen to shrink as they are taken,
+	 * and with the last one it is destroyed (owner, 2026-11-22: "once it's dried up, it needs to destroy the
+	 * resource ... You can't just keep mining it infinitely").
+	 */
 	UPROPERTY(ReplicatedUsing = OnRep_Left)
 	int32 Left = 0;
 
@@ -115,8 +125,12 @@ private:
 
 	/** Wear the material's model, at its size, standing on the ground at the actor's place. */
 	void Dress();
-	/** An empty deposit is not seen and stops nothing. */
+	/** Drawn as big as what it still holds: whole when full, down to Spent of that with one unit left. */
 	void Show();
+
+	/** How its model sits on it at its full size: its scale and where it is put. */
+	FVector Grown = FVector::OneVector;
+	FVector Put = FVector::ZeroVector;
 
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> Body;

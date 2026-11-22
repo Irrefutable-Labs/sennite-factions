@@ -86,6 +86,15 @@ public:
 	UPROPERTY(Replicated)
 	bool bDroidDown = false;
 
+	/**
+	 * The mining droid is what this player has in hand, in a weapon's place (owner, 2026-11-22: "you should
+	 * select the droid from that menu, and then the fire button becomes your send the droid button ... You
+	 * just have it in place of a weapon"). While it is, the fire button fires nothing and sends the droid.
+	 * Taking a weapon or a healing item in hand puts it away.
+	 */
+	UPROPERTY(Replicated)
+	bool bDroidInHand = false;
+
 	/** Which hero this player is (USenniteHeroes): what they logged in with (Hero=), or chose in the lobby since. */
 	UPROPERTY(Replicated)
 	FName HeroId;

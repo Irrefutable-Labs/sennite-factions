@@ -103,6 +103,9 @@ void ASenniteDeposit::Dress()
 		return;
 	}
 	Size = Wear(Body, Rules->Models[Material], Rules->Across[Material], true, TEXT("A deposit"));
+	Grown = Body->GetRelativeScale3D();
+	Put = Body->GetRelativeLocation();
+	Show();
 }
 
 void ASenniteDeposit::Show()
@@ -110,6 +113,11 @@ void ASenniteDeposit::Show()
 	const bool bHolds = Left > 0;
 	SetActorHiddenInGame(!bHolds);
 	SetActorEnableCollision(bHolds);
+	// as much of it as is left, standing on the ground it stood on
+	const float Part = Held > 0 ? FMath::Clamp(static_cast<float>(Left) / Held, 0.0f, 1.0f) : 1.0f;
+	const float Drawn = FMath::Lerp(FMath::Clamp(GetDefault<ASenniteDeposit>()->Spent, 0.1f, 1.0f), 1.0f, Part);
+	Body->SetRelativeScale3D(Grown * Drawn);
+	Body->SetRelativeLocation(Put * Drawn);
 }
 
 int32 ASenniteDeposit::Take(int32 Units)
@@ -117,10 +125,15 @@ int32 ASenniteDeposit::Take(int32 Units)
 	if (!HasAuthority()) {
 		return 0;
 	}
+	if (Left <= 0) {
+		return 0; // used up, and gone
+	}
 	const int32 Got = FMath::Clamp(Units, 0, Left);
 	Left -= Got;
+	Show();
 	if (Left <= 0) {
-		Show();
+		// used up: it is destroyed, on every machine
+		Destroy();
 	}
 	return Got;
 }
@@ -432,13 +445,13 @@ void ASenniteMiningDroid::Tick(float DeltaTime)
 	const float One = FMath::Max(0.05f, UnitSeconds);
 	while (Taking >= One) {
 		Taking -= One;
+		const int32 Kind = Target->Material;
 		const int32 Got = Target->Take(1);
 		if (Got <= 0) {
 			break;
 		}
 		// its player builds with it at once, and it is counted as mined
 		Taken += Got;
-		const int32 Kind = Target->Material;
 		if (Miner->MaterialCounts.IsValidIndex(Kind)) {
 			Miner->MaterialCounts[Kind] += Got;
 		}
@@ -448,6 +461,12 @@ void ASenniteMiningDroid::Tick(float DeltaTime)
 		if (ASenniteMatch* Match = ASenniteMatch::Find(GetWorld())) {
 			Match->Mined(Miner, Kind, Got);
 		}
+	}
+	if (Target->Left <= 0) {
+		// it took the last of it, and the deposit is destroyed: it hangs here until it is sent to another
+		Target = nullptr;
+		bMining = false;
+		Taking = 0.0f;
 	}
 }
 
@@ -472,8 +491,9 @@ void ASenniteMiningDroid::TakeHit(float Damage, ASenniteCharacter* Shooter)
 	}
 	UE_LOG(LogSenniteMining, Display, TEXT("A mining droid was shot down"));
 	if (Miner != nullptr) {
-		// gone for the rest of the match
+		// gone for the rest of the match, and out of its player's hand
 		Miner->bDroidDown = true;
+		Miner->bDroidInHand = false;
 		Miner->Droid = nullptr;
 	}
 	// it mines no more and stops no more shots: it falls, and is gone a moment after

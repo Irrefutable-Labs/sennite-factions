@@ -97,7 +97,7 @@ const TArray<USenniteTouchControls::FWheelPlace>& USenniteTouchControls::WheelPl
 		{ TEXT("KATANA"), EKeys::Nine, 6, INDEX_NONE },
 		{ TEXT("BANDAGE"), EKeys::Four, INDEX_NONE, 0 },
 		{ TEXT("POTION"), EKeys::Five, INDEX_NONE, 1 },
-		// the mining droid: let go on it, and it goes to the deposit the player aims at
+		// the mining droid: in hand as a weapon is, and the fire button sends it to the deposit the player aims at
 		{ TEXT("DROID"), EKeys::T, INDEX_NONE, INDEX_NONE, true },
 	};
 	return All;
@@ -252,8 +252,12 @@ bool USenniteTouchControls::InHand(const FWheelPlace& Place) const
 {
 	const ASenniteCharacter* Hero = Controller ? Cast<ASenniteCharacter>(Controller->GetPawn()) : nullptr;
 	const ASennitePlayerState* State = Controller ? Controller->GetPlayerState<ASennitePlayerState>() : nullptr;
-	if (Hero == nullptr || State == nullptr || State->InBuildMode || Place.bDroid) {
+	if (Hero == nullptr || State == nullptr || State->InBuildMode) {
 		return false;
+	}
+	// with the droid in hand, nothing else is
+	if (Place.bDroid || State->bDroidInHand) {
+		return Place.bDroid && State->bDroidInHand;
 	}
 	if (Place.Healing != INDEX_NONE) {
 		return Hero->CurrentHealingItem != nullptr && Hero->CurrentHealingItem->HealingType == Place.Healing;
@@ -325,8 +329,7 @@ void USenniteTouchControls::NextInHand()
 	int32 Now = Places.IndexOfByPredicate([this](const FWheelPlace& Place) { return InHand(Place); });
 	for (int32 Step = 1; Step < Places.Num(); ++Step) {
 		const FWheelPlace& Next = Places[(FMath::Max(Now, 0) + Step) % Places.Num()];
-		// a tap goes through what is held in hand: the droid is sent from the open wheel, never by a tap
-		if (!Next.bDroid && Has(Next) && !InHand(Next)) {
+		if (Has(Next) && !InHand(Next)) {
 			USenniteSounds::Play(Controller, TEXT("ui.press"));
 			Key(Next.Key, IE_Pressed);
 			Key(Next.Key, IE_Released);
@@ -391,6 +394,10 @@ FString USenniteTouchControls::LabelOf(const FButton& Button) const
 	if (Button.Key == EKeys::LeftMouseButton && Hero != nullptr) {
 		if (bBuilding) {
 			return TEXT("BUILD");
+		}
+		if (State != nullptr && State->bDroidInHand) {
+			// the mining droid in hand: the button sends it
+			return TEXT("SEND");
 		}
 		if (Hero->CurrentHealingItem != nullptr) {
 			return TEXT("USE");

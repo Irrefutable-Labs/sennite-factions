@@ -1,14 +1,20 @@
 // Mining check (SenniteMining.h; owner, 2026-11-22). Run in the game on an arena of two bases, which
 // stands deposits of wood, stone and steel on each base's side:
 // - the deposits hold between them what DefaultGame.ini says an arena with no publisher holds;
-// - with no deposit aimed at, the SendDroid key takes no droid out;
-// - aimed at a wood deposit, it takes the player's droid out and sends it there; the droid flies to it
-//   and takes wood, a unit at a time: the deposit holds that much less, the player has that much more to
-//   build with, and it is counted as mined;
-// - aimed at a stone deposit, the same key sends the same droid there, and it mines stone;
+// - with the droid not in hand, the fire button sends none;
+// - the HoldDroid key takes the droid in hand, in a weapon's place; with no deposit aimed at, the fire
+//   button then takes no droid out;
+// - aimed at a wood deposit, the fire button takes the player's droid out and sends it there; the droid
+//   goes to it and takes wood, a unit at a time: the deposit holds that much less, the player has that
+//   much more to build with, and it is counted as mined;
+// - taking the hero's own weapon in hand puts the droid away, and the fire button then sends it nowhere;
+// - in hand again and aimed at a stone deposit, the fire button sends the same droid there, and it mines
+//   stone;
 // - the droid goes on mining with its player far away: once it is out, it is out;
+// - a deposit is drawn smaller as it is used up, and with its last unit it is destroyed: the player has
+//   that unit, and the droid has nothing to mine until it is sent to another;
 // - its own player's shots do not count on it; another player's shoot it down, and then the player has
-//   no droid for the rest of the game, whatever they aim at.
+//   no droid for the rest of the game: it is not taken in hand, and none is sent.
 // Each shot is landed as a bullet's is (AProjectileActor::Land).
 
 #include "Misc/AutomationTest.h"
@@ -37,7 +43,7 @@ namespace
 		virtual bool Update() override;
 
 	private:
-		enum class EPhase { WaitForPawn, NoAim, SendToWood, MineWood, SendToStone, MineStone, Away, Shots, Down, Done };
+		enum class EPhase { WaitForPawn, NotInHand, NoAim, SendToWood, MineWood, PutAway, SendToStone, MineStone, Away, UsedUp, Shots, Down, Done };
 
 		void Enter(EPhase Next, UWorld* World) { Phase = Next; PhaseStart = World->GetTimeSeconds(); Step = 0; }
 		double Elapsed(UWorld* World) const { return World->GetTimeSeconds() - PhaseStart; }
@@ -80,6 +86,10 @@ namespace
 		TWeakObjectPtr<ASenniteDeposit> Stone;
 		int32 WoodStart = 0;
 		int32 StoneMark = 0;
+		/** How tall the stone deposit stood when whole, how many deposits stood, and that the stone one was used up. */
+		double StoneTall = 0.0;
+		int32 Deposits = 0;
+		bool bStoneUsedUp = false;
 	};
 
 	bool FMiningRun::Update()
@@ -121,23 +131,42 @@ namespace
 				return Fail(TEXT("The arena has no wood or no stone deposit"));
 			}
 			WoodStart = State->MaterialCounts[0];
+			StoneTall = Stone->GetComponentsBoundingBox().GetSize().Z;
+			Deposits = Stood[0] + Stood[1] + Stood[2];
+			Test->TestFalse(TEXT("A player starts with the droid not in hand"), State->bDroidInHand);
 			Test->TestEqual(TEXT("A player starts with no droid out"), ASenniteMiningDroid::Status(State), FString(TEXT("DROID READY")));
 			Test->TestTrue(TEXT("A player starts having mined nothing"), State->Mined.Num() == ASenniteDeposit::Kinds && State->Mined[0] + State->Mined[1] + State->Mined[2] == 0);
-			// looking straight up, at no deposit
-			Controller->SetControlRotation(FRotator(89.0, Hero->GetActorRotation().Yaw, 0.0));
-			Enter(EPhase::NoAim, World);
+			Face(Controller, Hero, Wood.Get());
+			Enter(EPhase::NotInHand, World);
 			return false;
 		}
-		if (Hero == nullptr || State == nullptr || Hud == nullptr || !Wood.IsValid() || !Stone.IsValid()) {
+		if (Hero == nullptr || State == nullptr || Hud == nullptr || !Wood.IsValid() || (!Stone.IsValid() && !bStoneUsedUp && Phase != EPhase::UsedUp)) {
 			return Fail(TEXT("The hero, the HUD or a deposit went away during the check"));
 		}
 		ASenniteMiningDroid* Droid = State->Droid;
 
 		switch (Phase) {
+		case EPhase::NotInHand:
+			// aimed at a wood deposit, with the hero's own weapon in hand
+			if (Step == 0 && Elapsed(World) > 1.0) {
+				Step = 1;
+				Tap(Controller, EKeys::LeftMouseButton);
+			}
+			if (Elapsed(World) < 2.0) {
+				return false;
+			}
+			Test->TestTrue(TEXT("With the droid not in hand, the fire button sends none"), Droid == nullptr);
+			Tap(Controller, EKeys::T);
+			// looking straight up, at no deposit
+			Controller->SetControlRotation(FRotator(89.0, Hero->GetActorRotation().Yaw, 0.0));
+			Enter(EPhase::NoAim, World);
+			return false;
+
 		case EPhase::NoAim:
 			if (Step == 0 && Elapsed(World) > 0.5) {
 				Step = 1;
-				Tap(Controller, EKeys::T);
+				Test->TestTrue(TEXT("The HoldDroid key takes the droid in hand"), State->bDroidInHand);
+				Tap(Controller, EKeys::LeftMouseButton);
 			}
 			if (Elapsed(World) < 1.5) {
 				return false;
@@ -150,13 +179,13 @@ namespace
 		case EPhase::SendToWood:
 			if (Step == 0 && Elapsed(World) > 1.0) {
 				Step = 1;
-				Tap(Controller, EKeys::T);
+				Tap(Controller, EKeys::LeftMouseButton);
 			}
 			if (Elapsed(World) < 2.0) {
 				return false;
 			}
 			if (Droid == nullptr) {
-				return Fail(TEXT("Aimed at a wood deposit, the SendDroid key took no droid out"));
+				return Fail(TEXT("With the droid in hand and a wood deposit aimed at, the fire button took no droid out"));
 			}
 			Test->TestTrue(TEXT("The droid is sent to the deposit aimed at"), Droid->Target == Wood.Get());
 			Test->TestTrue(TEXT("The droid is the player's"), Droid->Miner == State);
@@ -193,13 +222,30 @@ namespace
 			Test->TestEqual(TEXT("The HUD says the droid is mining wood"), ASenniteMiningDroid::Status(State), FString(TEXT("DROID MINING WOOD")));
 			UE_LOG(LogMiningCheck, Display, TEXT("GAMECHECK mined %d wood in %.1f s; the deposit holds %d of %d"), State->Mined[0], Elapsed(World), Wood->Left, Wood->Held);
 			Face(Controller, Hero, Stone.Get());
+			// the hero's own weapon in hand again
+			Tap(Controller, EKeys::One);
+			Enter(EPhase::PutAway, World);
+			return false;
+
+		case EPhase::PutAway:
+			if (Step == 0 && Elapsed(World) > 1.0) {
+				Step = 1;
+				Test->TestFalse(TEXT("Taking a weapon in hand puts the droid away"), State->bDroidInHand);
+				Tap(Controller, EKeys::LeftMouseButton);
+			}
+			if (Elapsed(World) < 2.0) {
+				return false;
+			}
+			Test->TestTrue(TEXT("With a weapon in hand the fire button sends the droid nowhere"), Droid != nullptr && Droid->Target == Wood.Get());
+			Tap(Controller, EKeys::T);
 			Enter(EPhase::SendToStone, World);
 			return false;
 
 		case EPhase::SendToStone:
 			if (Step == 0 && Elapsed(World) > 1.0) {
 				Step = 1;
-				Tap(Controller, EKeys::T);
+				Test->TestTrue(TEXT("The droid is taken in hand again"), State->bDroidInHand);
+				Tap(Controller, EKeys::LeftMouseButton);
 			}
 			if (Elapsed(World) < 2.0) {
 				return false;
@@ -225,8 +271,48 @@ namespace
 			}
 			Test->TestTrue(TEXT("The droid is still out, with its player 90 m off"), Droid != nullptr && FVector::Dist(Droid->GetActorLocation(), Hero->GetActorLocation()) > 6000.0);
 			UE_LOG(LogMiningCheck, Display, TEXT("GAMECHECK the droid mined on with its player away: %d stone"), State->Mined[1]);
+			Enter(EPhase::UsedUp, World);
+			return false;
+
+		case EPhase::UsedUp: {
+			if (Step == 0) {
+				Step = 1;
+				// all but the last two of it taken, as other droids take from the same deposit
+				Stone->Take(Stone->Left - 2);
+				StoneMark = State->Mined[1];
+				const double Tall = Stone->GetComponentsBoundingBox().GetSize().Z;
+				Test->TestTrue(FString::Printf(TEXT("A deposit nearly used up is drawn smaller (%.0f of %.0f cm tall)"), Tall, StoneTall), Tall < StoneTall * 0.65 && Tall > StoneTall * 0.4);
+				// seen from beside it
+				Hero->SetActorLocation(Stone->GetActorLocation() + Stone->GetActorRotation().Vector().GetSafeNormal2D() * 1300.0 + FVector(0.0, 0.0, 400.0));
+				Hero->GetCharacterMovement()->StopMovementImmediately();
+				Controller->SetControlRotation((Stone->GetActorLocation() + FVector(0.0, 0.0, 100.0) - Hero->GetActorLocation()).Rotation() + FRotator(0.0, -16.0, 0.0));
+				GameCheck::Shot(TEXT("Mining"), TEXT("deposit_nearly_used_up.png"));
+				return false;
+			}
+			if (Stone.IsValid()) {
+				return Elapsed(World) > 30.0 ? Fail(FString::Printf(TEXT("The droid did not use the stone deposit up in 30 s: it holds %d, %s"), Stone->Left, *ASenniteMiningDroid::Status(State))) : false;
+			}
+			if (!bStoneUsedUp) {
+				bStoneUsedUp = true;
+				PhaseStart = World->GetTimeSeconds();
+				return false;
+			}
+			if (Elapsed(World) < 3.0) {
+				return false;
+			}
+			Test->TestEqual(TEXT("The player has the deposit's last units, and no more than it held"), State->Mined[1], StoneMark + 2);
+			int32 Standing = 0;
+			for (TActorIterator<ASenniteDeposit> It(World); It; ++It) {
+				Standing += 1;
+			}
+			Test->TestEqual(TEXT("A deposit used up is destroyed"), Standing, Deposits - 1);
+			Test->TestTrue(TEXT("The droid has nothing to mine once its deposit is used up"), Droid != nullptr && Droid->Target == nullptr && !Droid->bMining);
+			Test->TestEqual(TEXT("The HUD says the droid is idle"), ASenniteMiningDroid::Status(State), FString(TEXT("DROID IDLE")));
+			GameCheck::Shot(TEXT("Mining"), TEXT("deposit_used_up.png"));
+			UE_LOG(LogMiningCheck, Display, TEXT("GAMECHECK the stone deposit was used up and destroyed: %d of %d deposits stand"), Standing, Deposits);
 			Enter(EPhase::Shots, World);
 			return false;
+		}
 
 		case EPhase::Shots: {
 			if (Droid == nullptr) {
@@ -260,7 +346,13 @@ namespace
 		case EPhase::Down: {
 			if (Step == 0 && Elapsed(World) > 1.0) {
 				Step = 1;
+				Test->TestFalse(TEXT("Shot down, the droid is out of its player's hand"), State->bDroidInHand);
 				Tap(Controller, EKeys::T);
+			}
+			if (Step == 1 && Elapsed(World) > 2.0) {
+				Step = 2;
+				Test->TestFalse(TEXT("A droid shot down is not taken in hand"), State->bDroidInHand);
+				Tap(Controller, EKeys::LeftMouseButton);
 			}
 			if (Elapsed(World) < 4.0) {
 				return false;
@@ -268,7 +360,7 @@ namespace
 			Test->TestTrue(TEXT("Shot down, the droid is gone"), State->Droid == nullptr && State->bDroidDown);
 			Test->TestEqual(TEXT("The HUD says the droid is down"), ASenniteMiningDroid::Status(State), FString(TEXT("DROID DOWN")));
 			Test->TestEqual(TEXT("Nothing more is mined once it is down"), State->Mined[1], StoneMark);
-			Test->TestTrue(TEXT("What was mined before stays mined"), State->Mined[0] >= 3 && State->Mined[1] >= 4);
+			Test->TestTrue(TEXT("What was mined before stays mined"), State->Mined[0] >= 3 && State->Mined[1] >= 6);
 			int32 Out = 0;
 			for (TActorIterator<ASenniteMiningDroid> It(World); It; ++It) {
 				Out += 1;

@@ -405,7 +405,7 @@ void ASenniteCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerI
 	PlayerInputComponent->BindAction("Ironsights", IE_Pressed, this, &ASenniteCharacter::AimGunIn);
 	PlayerInputComponent->BindAction("Ironsights", IE_Released, this, &ASenniteCharacter::AimGunOut);
 	PlayerInputComponent->BindAction("OpenCrate", IE_Pressed, this, &ASenniteCharacter::OpenCrate);
-	PlayerInputComponent->BindAction("SendDroid", IE_Pressed, this, &ASenniteCharacter::SendDroid);
+	PlayerInputComponent->BindAction("HoldDroid", IE_Pressed, this, &ASenniteCharacter::HoldDroid);
 	PlayerInputComponent->BindAction("EditPiece", IE_Pressed, this, &ASenniteCharacter::EditPiece);
 
 	// We have 2 versions of the rotation bindings to handle different kinds of devices differently
@@ -985,6 +985,11 @@ void ASenniteCharacter::ShootGun() {
 		}
 		return;
 	}
+	// with the mining droid in hand the fire button sends it, and fires nothing
+	if (const ASennitePlayerState* Holding = GetPlayerState<ASennitePlayerState>(); Holding != nullptr && Holding->bDroidInHand) {
+		SendDroid();
+		return;
+	}
 	ServerFireWeapon();
 	// A gun that fires while held goes on firing: a shot is asked for again a little slower than the
 	// server lets one out, so every one asked for is fired.
@@ -1211,6 +1216,33 @@ void ASenniteCharacter::ServerOpenCrate_Implementation() {
 	}
 }
 
+void ASenniteCharacter::HoldDroid() {
+	ServerHoldDroid();
+}
+
+void ASenniteCharacter::ServerHoldDroid_Implementation() {
+	ASennitePlayerState* State = GetPlayerState<ASennitePlayerState>();
+	if (State == nullptr || State->bDroidInHand) {
+		return;
+	}
+	if (State->bDroidDown) {
+		ClientDroidSaid(TEXT("YOUR MINING DROID WAS SHOT DOWN: IT IS BACK NEXT MATCH"));
+		return;
+	}
+	if ((State->HoldingWeapon && State->AimedIn) || State->JustUsedHealingItem || State->JustReloadedRifle || State->JustReloadedShotgun) {
+		return; // aiming in, healing or reloading: what is in hand stays
+	}
+	if (State->InBuildMode) {
+		State->InBuildMode = false;
+		State->BuildMode = FString("None");
+		if (BuildingPreview != nullptr) {
+			BuildingPreview->Destroy();
+			BuildingPreview = nullptr;
+		}
+	}
+	State->bDroidInHand = true;
+}
+
 void ASenniteCharacter::SendDroid() {
 	const APlayerController* Own = Cast<APlayerController>(GetController());
 	if (Own == nullptr) {
@@ -1224,8 +1256,8 @@ void ASenniteCharacter::SendDroid() {
 
 void ASenniteCharacter::ServerSendDroid_Implementation(FVector_NetQuantize Eye, FVector_NetQuantizeNormal Toward) {
 	ASennitePlayerState* State = GetPlayerState<ASennitePlayerState>();
-	// a player looks from near their hero: an eye far from it is not this player's
-	if (State == nullptr || FVector::Dist(Eye, GetActorLocation()) > 3000.0) {
+	// a player looks from near their hero: an eye far from it is not this player's. It is sent from the hand.
+	if (State == nullptr || !State->bDroidInHand || FVector::Dist(Eye, GetActorLocation()) > 3000.0) {
 		return;
 	}
 	if (State->bDroidDown) {
@@ -1603,7 +1635,8 @@ void ASenniteCharacter::ServerSetBuildModeWall_Implementation() {
 				State->BuildMode = FString("Wall");
 			}
 			else {
-				// getting into build mode
+				// getting into build mode: the fire button builds, so the mining droid is put away
+				State->bDroidInHand = false;
 				State->InBuildMode = true;
 				State->BuildMode = FString("Wall");
 				State->HoldingWeapon = false;
@@ -1667,7 +1700,8 @@ void ASenniteCharacter::ServerSetBuildModeRamp_Implementation() {
 				State->BuildMode = FString("Ramp");
 			}
 			else {
-				// getting into build mode
+				// getting into build mode: the fire button builds, so the mining droid is put away
+				State->bDroidInHand = false;
 				State->InBuildMode = true;
 				State->BuildMode = FString("Ramp");
 				State->HoldingWeapon = false;
@@ -1730,7 +1764,8 @@ void ASenniteCharacter::ServerSetBuildModeFloor_Implementation() {
 				State->BuildMode = FString("Floor");
 			}
 			else {
-				// getting into build mode
+				// getting into build mode: the fire button builds, so the mining droid is put away
+				State->bDroidInHand = false;
 				State->InBuildMode = true;
 				State->BuildMode = FString("Floor");
 				State->HoldingWeapon = false;
@@ -1763,7 +1798,8 @@ bool ASenniteCharacter::ServerSetBuildModeFloor_Validate() {
 
 void ASenniteCharacter::ServerFireWeapon_Implementation() {
 	ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
-	if (State == nullptr || !State->HoldingWeapon) {
+	// with the mining droid in hand there is nothing in hand to fire
+	if (State == nullptr || !State->HoldingWeapon || State->bDroidInHand) {
 		return;
 	}
 	// by the server's own clock: too soon after the last shot, or while reloading, nothing is let out
@@ -1931,6 +1967,8 @@ void ASenniteCharacter::ServerSwitchToPickaxe_Implementation() {
 	if (GetController()) {
 		ASennitePlayerState* State = Cast<ASennitePlayerState>(GetController()->PlayerState);
 		if (State) {
+			// taking a weapon in hand puts the mining droid away, even when that weapon was in hand under it
+			State->bDroidInHand = false;
 			if (State->CurrentWeapon == 0 && !State->InBuildMode) {
 				return; // currently holding a pickaxe while not in build mode
 			}
@@ -1972,6 +2010,10 @@ void ASenniteCharacter::ServerHoldGun_Implementation(int32 Type) {
 	ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
 	if (State == nullptr || !IsGun(Type)) {
 		return;
+	}
+	// taking a weapon the player has in hand puts the mining droid away, even when that weapon was in hand under it
+	if (State->EquippedWeapons.Contains(Type)) {
+		State->bDroidInHand = false;
 	}
 	if (State->CurrentWeapon == Type && !State->InBuildMode) {
 		return; // in hand already
@@ -2017,6 +2059,10 @@ void ASenniteCharacter::ServerSwitchToHealingItem_Implementation(int HealingItem
 			}
 			if (State->HoldingWeapon && State->AimedIn) {
 				return; // currently aimed down sight
+			}
+			// taking a healing item the player has in hand puts the mining droid away, even when that item was in hand under it
+			if (State->HealingItemCounts.IsValidIndex(HealingItemType) && State->HealingItemCounts[HealingItemType] > 0) {
+				State->bDroidInHand = false;
 			}
 			if (State->CurrentHealingItem == HealingItemType && !State->InBuildMode) {
 				return; // already holding healing items while not in build mode

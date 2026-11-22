@@ -87,7 +87,7 @@ private:
 		FKey Key;
 		int32 Weapon;
 		int32 Healing;
-		/** The mining droid: nothing comes to hand, it is sent where the player aims (SenniteMining.h). */
+		/** The mining droid: in hand in a weapon's place, where the fire button sends it (SenniteMining.h). */
 		bool bDroid = false;
 	};
 
