@@ -11,8 +11,8 @@ What is here:
 |---|---|
 | `src/faction/` | The faction state machine with no game and no account attached: the committed state, the kinds of change, the validity rules of spec section 7, and the mirror that walks a lineage. |
 | `src/dsm/` | What the server asks of the publisher's account: cell writes and their facts, contributions and the funding read, authored objects. |
-| `src/publisher/` | The publisher's server: parcel assignments, proposing members' changes, the 48-hour clock, what stands in play, the shop (`shop.ts`: D-bucks, the vault that sells them for ERA, skins), matches and their prizes (`matches.ts`), and what the game client asks of it over HTTP (`service.ts`). `main.ts` starts it. |
-| `world/` | The publisher's game assets: the prefab catalogue, the parcel registry, what the account issues, the shop (`shop.json`: D-bucks, the vault's opening reserves and fee, the skins and their prices), and what a match pays (`matches.json`). |
+| `src/publisher/` | The publisher's server: parcel assignments, proposing members' changes, the 48-hour clock, what stands in play, the shop (`shop.ts`: D-bucks, the vault that sells them for ERA, skins, heroes and guns), swaps through the publisher's vaults (`swap.ts`), matches and their prizes (`matches.ts`), and what the game client asks of it over HTTP (`service.ts`). `main.ts` starts it. |
+| `world/` | The publisher's game assets: the prefab catalogue, the parcel registry, what the account issues, the shop (`shop.json`: D-bucks, the vault's opening reserves and fee, the skins, heroes and weapons and their prices), and what a match pays (`matches.json`). |
 | `vendor/` | DSM's TypeScript client, packed from DSM `main` at `262050ec0` (`clients/typescript`, `npm pack`; 0.1.1-beta.4). It needs a `dsm-app-host` from the same DSM: `wait` holds on the host's `/activity/{after}/wait`. |
 | `docs/dsm-gaps.md` | What the specification needs that DSM's app surface does not offer yet. |
 | `formal/` | Formal models of the lineage and of supply (spec 12.4), in TLA+, and the script that checks them. |
@@ -57,7 +57,7 @@ DSM_APP_HOST_BIN=<...> DSM_ENV_CONFIG=<...> DSM_STORAGE_NODE_BIN=<dsm checkout>/
 Every seat is serving again when they end, whatever happened.
 
 The game itself, with the same two settings and Unreal Engine on this machine. It runs the Unreal
-game headless against this server, six times, with real wallets answering. Five are on the test
+game headless against this server, nine times, with real wallets answering. Five are on the test
 range: the base editor (plan, commit, built in play), the faction's people (join, vote, invite), the
 shop (D-bucks, a skin bought, worn and sold on), the server killed while a player plans (the game
 shows the base, says there is no live session, and builds on the same base when a server is back),
@@ -71,7 +71,10 @@ a traffic deck between the bases. Once the time runs out and nobody wins, and th
 a faction is first to the kills to win, and its member has the prize to collect; once a faction's
 base is wiped, it is out, and this server has the structure as destroyed. The match server itself
 tells this server how each ended. A third game, whose wallet is in neither faction, joins the first
-match: it is given no ticket and no hero, and the match server puts it out:
+match: it is given no ticket and no hero, and the match server puts it out. The other three are on the menu, by
+taps: a hero bought with D-bucks, chosen, and played once the lobby's server has checked the hero pass; a swap of 2 ERA
+for D-bucks and 500 D-bucks back in the store's SWAP; and a gun bought in WEAPONS, which the game's server takes from a
+hero pass and a crate then gives with its rounds:
 
 ```bash
 DSM_APP_HOST_BIN=<...> DSM_ENV_CONFIG=<...> ../Tools/check_base_editor.sh
@@ -123,7 +126,7 @@ What the models are, and are not:
 - **Written by hand from the rules.** `Judge`, `Applied` and `Settled` follow `judge`, `applied` and
   `settled` in `src/faction/validity.ts`; `Walk` follows `Mirror.walk`; `Counts` and `Funded` follow
   `Contributions.funding`. Nothing checks by machine that the TypeScript and the models agree.
-- **Small.** Two mirrors, up to three members and one more key, one spot on the parcel, three
+- **Small.** Two mirrors, three founding members and one more key that may be invited and join, one spot on the parcel, three
   successor cells (`CELLS=4` for four), two vaults of one resource. Placement geometry is one rule:
   a spot holds one structure.
 - **Not the negative tests on real devices** that 12.4 also asks for. Those are not done: every
@@ -131,8 +134,9 @@ What the models are, and are not:
 
 ## Matches
 
-The publisher's match server opens and decides matches with the secret the server writes to
-`<SENNITE_DATA_DIR>/match-secret` at each launch (the same one it records destruction with):
+A match is opened with the secret the server writes to `<SENNITE_DATA_DIR>/match-secret` at each launch
+(`POST /matches/<id>`; in this repository only the suites send it). The publisher's match server, the game itself, then
+reads its bases, lets players in and decides it with the same secret, which also records destruction:
 
 - `POST /matches/<id>` with `{"factions": [...]}` opens a match and locks its prize. Asked again, it
   locks only what is not locked yet.
@@ -188,6 +192,9 @@ npm run build
 ```bash
 DSM_APP_HOST=http://127.0.0.1:8787 DSM_APP_HOST_SECRET_FILE=<ingress-secret-dir>/ingress-token DSM_ENV_CONFIG=<env config> npm start
 ```
+
+`SENNITE_DATA_DIR` is where the server keeps its record and the match secret (default `./data`); `SENNITE_BIND` is where it
+serves the game (default `127.0.0.1:8790`).
 
 It serves the game on `http://127.0.0.1:8790`. The game finds it by `PublisherUrl` in
 `Config/DefaultGame.ini` (`[/Script/Sennite.SennitePublisher]`) or `-PublisherUrl=` on its command
