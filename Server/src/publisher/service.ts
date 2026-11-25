@@ -145,7 +145,7 @@ export class Service {
   /** Tickets into matches that no match server has taken yet. Kept in memory: a game asks again. */
   readonly #tickets = new Map<string, Ticket>();
   /** The heroes each wallet (by signing key) proved it owns at its last proof here, and when. Kept in memory, oldest first: a game proves again on connecting. */
-  readonly #provenHeroes = new Map<string, { heroes: string[]; at: number }>();
+  readonly #provenHeroes = new Map<string, { heroes: string[]; skins: string[]; at: number }>();
   /** The last answer each game was given to each read, so that only a change is written down (said). */
   readonly #saidLast = new Map<string, number>();
   /** Hero passes: pass -> the wallet it speaks for, the one game that may ask with it, and until when. One live pass per wallet. */
@@ -215,15 +215,15 @@ export class Service {
     }
   }
 
-  /** Keep the heroes a wallet just proved it owns: proofs over an hour old are dropped, and no more than MAX_PROVEN wallets are kept, the oldest going first. */
-  private keepProvenHeroes(signingKey: string, heroes: string[]): void {
+  /** Keep the heroes (and guns) and the skins a wallet just proved it owns: proofs over an hour old are dropped, and no more than MAX_PROVEN wallets are kept, the oldest going first. */
+  private keepProvenHeroes(signingKey: string, heroes: string[], skins: string[]): void {
     const now = Date.now();
     this.#provenHeroes.delete(signingKey);
     for (const [key, proven] of this.#provenHeroes) {
       if (now - proven.at <= PROOF_FRESH_MS && this.#provenHeroes.size < MAX_PROVEN) break;
       this.#provenHeroes.delete(key);
     }
-    this.#provenHeroes.set(signingKey, { heroes, at: now });
+    this.#provenHeroes.set(signingKey, { heroes, skins, at: now });
   }
 
   /** The player a request comes from, by the token the server gave their game. */
@@ -600,8 +600,8 @@ export class Service {
       return { status: 201, body: { pass, seconds: PASS_MS / 1000 } };
     }
 
-    // The game server a hero pass is for asks what it speaks for: whose wallet, and the heroes that wallet proved
-    // it owns at a proof no older than an hour. It asks with its own token (or the match server's secret); to
+    // The game server a hero pass is for asks what it speaks for: whose wallet, and the heroes (with its guns) and
+    // the skins that wallet proved it owns at a proof no older than an hour. It asks with its own token (or the match server's secret); to
     // any other asker the pass is no pass. The asking uses the pass up.
     if (is("GET", "hero-passes", null) && b !== undefined) {
       const held = this.#passes.get(b);
@@ -610,8 +610,8 @@ export class Service {
       else if (audienceOf(this.player(req)) !== held.audience) throw new HttpError(404, "that is no hero pass");
       this.#passes.delete(b);
       const proven = this.#provenHeroes.get(held.signingKey);
-      const heroes = proven !== undefined && Date.now() - proven.at <= PROOF_FRESH_MS ? proven.heroes : [];
-      return { status: 200, body: { heroes, signingKey: held.signingKey, wallet: held.wallet } };
+      const fresh = proven !== undefined && Date.now() - proven.at <= PROOF_FRESH_MS ? proven : undefined;
+      return { status: 200, body: { heroes: fresh?.heroes ?? [], skins: fresh?.skins ?? [], signingKey: held.signingKey, wallet: held.wallet } };
     }
 
     // The wallets connected to the game that are in no faction: who a member can invite.
@@ -636,9 +636,14 @@ export class Service {
         status: 202,
         body: this.start(player, async () => {
           const holdings = await publisher.holdings(connection);
-          // what a hero pass speaks for: the heroes and the guns the wallet proved it owns, by the shop's ids, in one list
+          // what a hero pass speaks for: the heroes and the guns the wallet proved it owns, by the shop's ids, in one list,
+          // and its skins, so that a game server shows the skin a player wears to everyone in the game
           if (holdings !== undefined) {
-            this.keepProvenHeroes(hex(connection.opponent.signingKey), [...holdings.heroes.map((h) => h.heroId), ...holdings.weapons.map((w) => w.weaponId)]);
+            this.keepProvenHeroes(
+              hex(connection.opponent.signingKey),
+              [...holdings.heroes.map((h) => h.heroId), ...holdings.weapons.map((w) => w.weaponId)],
+              holdings.skins.map((k) => k.skinId),
+            );
           }
           return holdings === undefined
             ? { ok: false, message: "the wallet proved nothing about what it holds" }

@@ -330,8 +330,18 @@ public:
 	TArray<FString> OwnedSkins;
 	/** The same skins, one by one, as the inventory lists them. */
 	TArray<FSenniteOwnedSkin> Inventory;
-	/** The skin the player chose to wear. It is worn only while the wallet proves it owns it. */
+	/**
+	 * The skin the player chose to wear, or last bought. It is worn only while the wallet proves it owns it, on the
+	 * hero it is a skin of: on the menu's stage, in a lobby, in the arena and in a match, until another is chosen.
+	 * The owner, 2026-11-25: "make sure that when you buy a skin or a weapon, it actually applies to the character".
+	 */
 	FString Wearing;
+	/**
+	 * The gun or blade bought in the store that the player chose to carry, or last bought (by its shop id): the hero
+	 * holds it on the menu's stage and in a lobby, and has it in hand when it starts in the arena or a match, while
+	 * the wallet proves it owns it, until another is chosen or it is put away.
+	 */
+	FString Carrying;
 	/** A skin the shop sold and gave that the wallet has not proved it owns yet: it is on its way. */
 	FString OnItsWay;
 
@@ -399,7 +409,7 @@ public:
 	 * A game server: ask what a hero pass a joined player showed it speaks for. Done(false) if it is no pass for
 	 * this server, or the publisher's server cannot be reached.
 	 */
-	void CheckHeroPass(const FString& Pass, TFunction<void(bool /* bOk */, const TArray<FString>& /* Heroes */, const FString& /* SigningKey */, const FString& /* Wallet */)> Done);
+	void CheckHeroPass(const FString& Pass, TFunction<void(bool /* bOk */, const TArray<FString>& /* Heroes */, const TArray<FString>& /* Skins */, const FString& /* SigningKey */, const FString& /* Wallet */)> Done);
 	/** Trade ERA for D-bucks through the publisher's vault. */
 	void BuyDBucks(const FString& InEra);
 
@@ -430,6 +440,8 @@ public:
 	void BuySkin(const FString& SkinId);
 	/** Wear an owned skin, or with an empty id, none. */
 	void Wear(const FString& SkinId);
+	/** Carry an owned gun or blade, by its shop id, or with an empty id, none. */
+	void Carry(const FString& WeaponId);
 
 	/** What the wallet has won in matches and not collected yet, as the server last read it. */
 	TArray<FSennitePrize> Prizes;
@@ -446,6 +458,13 @@ public:
 	bool bBusy = false;
 	/** Whether a proof of what the wallet holds is wanted or in flight. A proof never holds up what the player asks. */
 	bool ProofPending() const { return bProofWanted || bProving; }
+	/**
+	 * Ask the wallet again what it holds when the last proof began more than this many seconds ago: what the store
+	 * shows as the player's is what the wallet holds now, a purchase finished while this game was not waiting on it
+	 * included (the game started anew while the player approved it).
+	 */
+	void ProveIfOlder(double Seconds);
+	double LastProofStarted = 0.0;
 	/** What became of the last thing asked, in the server's words. */
 	FString Message;
 	/** Whether the last thing asked was carried out. */

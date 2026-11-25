@@ -256,12 +256,12 @@ describe("the game's side of the publisher's server", () => {
     const forMatch = await call("POST", "/players/me/hero-pass", game.alice, { audience: "match" });
     expect((await call("GET", `/hero-passes/${forMatch.body.pass}`, game.bob)).status).toBe(401);
 
-    // The server it is for learns whose wallet it is and the heroes it proved; asking uses it up.
+    // The server it is for learns whose wallet it is and the heroes and skins it proved; asking uses it up.
     const fresh = await call("POST", "/players/me/hero-pass", game.alice, { audience: host });
     const asked = await call("GET", `/hero-passes/${fresh.body.pass}`, game.bob);
     expect(asked.status).toBe(200);
     const alice = (await call("GET", "/players/me", game.alice)).body;
-    expect(asked.body).toEqual({ heroes: [], signingKey: alice.signingKey, wallet: alice.wallet });
+    expect(asked.body).toEqual({ heroes: [], skins: [], signingKey: alice.signingKey, wallet: alice.wallet });
     expect((await call("GET", `/hero-passes/${fresh.body.pass}`, game.bob)).status).toBe(404);
 
     // A pass the wallet's next one replaced is no pass, and a pass is asked for a game's audience only.

@@ -160,10 +160,25 @@ public:
 
 	/** The mesh on the body now: the hero's own, or the skin's the player wears. */
 	FSoftObjectPath WornMesh;
+	/** The skin last put on, or found not to fit this hero: what the body was last dressed for. */
+	FString DressedFor;
+	bool bDressed = false;
 
-	/** The player's own machine: the skin the player chose in the store is on the hero wherever it plays, only while the
-	 * wallet's proof says it owns it and only on the hero it is a skin of; otherwise the hero as it ships. */
+	/**
+	 * The skin the player wears is on the hero wherever it plays, on every machine, only on the hero it is a skin of;
+	 * otherwise the hero as it ships. On the player's own machine, the skin they chose while their wallet's proof says
+	 * it owns it; everyone else sees the skin the server was shown the wallet owns (ASennitePlayerState::WornSkin).
+	 */
 	void WearChosenSkin();
+
+	/**
+	 * The player's own machine: the gun or blade the player carries (USennitePublisher::Carrying) is put in the hero's
+	 * hand once, when the hero first has it in a game. A later choice of weapon is the player's.
+	 */
+	void TakeCarriedInHand();
+	bool bCarriedTaken = false;
+	double CarriedAskedAt = 0.0;
+	double CarriedFirstSeen = 0.0;
 
 	/** The hero's own attack, loaded. */
 	UPROPERTY()
@@ -212,6 +227,8 @@ public:
 
 	/** How much larger than its model a gun is in this hero's hands: the hero's arm against GunArm, between GunSizeLeast and GunSizeMost. */
 	float GunSize() const;
+	/** The same for a hero's mesh anywhere, as the menu's stage holds a gun in a hero's hands. */
+	static float GunSizeFor(const USkeletalMesh* Body);
 
 	/** The arm, shoulder to wrist in cm, the guns' models are the right size for; and how small and how large a gun is made for a hero. */
 	UPROPERTY(EditDefaultsOnly, Category = "Hero")

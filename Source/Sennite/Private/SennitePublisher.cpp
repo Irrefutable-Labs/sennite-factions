@@ -83,6 +83,7 @@ void USennitePublisher::Initialize(FSubsystemCollectionBase& Collection)
 			Token = Json->GetStringField(TEXT("player"));
 			ConnectCode = Json->GetStringField(TEXT("code"));
 			Json->TryGetStringField(TEXT("wearing"), Wearing);
+			Json->TryGetStringField(TEXT("carrying"), Carrying);
 		}
 	}
 	TickHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateUObject(this, &USennitePublisher::Tick), 0.1f);
@@ -417,8 +418,9 @@ void USennitePublisher::AskPlayer()
 		}
 		Token = Json->GetStringField(TEXT("player"));
 		ConnectCode = Json->GetStringField(TEXT("code"));
-		// a new player at the server has chosen nothing to wear yet
+		// a new player at the server has chosen nothing to wear or carry yet
 		Wearing.Reset();
+		Carrying.Reset();
 		SaveToken();
 	});
 }
@@ -430,6 +432,7 @@ void USennitePublisher::SaveToken() const
 	Keep->SetStringField(TEXT("player"), Token);
 	Keep->SetStringField(TEXT("code"), ConnectCode);
 	Keep->SetStringField(TEXT("wearing"), Wearing);
+	Keep->SetStringField(TEXT("carrying"), Carrying);
 	FString Text;
 	FJsonSerializer::Serialize(Keep, TJsonWriterFactory<>::Create(&Text));
 	FFileHelper::SaveStringToFile(Text, *TokenFile());
@@ -737,33 +740,47 @@ bool USennitePublisher::IsHeroPass(const FString& Pass)
 	return true;
 }
 
-void USennitePublisher::CheckHeroPass(const FString& Pass, TFunction<void(bool, const TArray<FString>&, const FString&, const FString&)> Done)
+void USennitePublisher::CheckHeroPass(const FString& Pass, TFunction<void(bool, const TArray<FString>&, const TArray<FString>&, const FString&, const FString&)> Done)
 {
 	if (!IsOn() || !IsHeroPass(Pass)) {
-		Done(false, TArray<FString>(), FString(), FString());
+		Done(false, TArray<FString>(), TArray<FString>(), FString(), FString());
 		return;
 	}
 	// the pass is good only for this server: it asks with what it is, its own token or the match server's secret
 	Send(TEXT("GET"), FString::Printf(TEXT("/hero-passes/%s"), *Pass), nullptr, [Done = MoveTemp(Done)](int32 Status, const TSharedPtr<FJsonObject>& Json) {
 		TArray<FString> Heroes;
+		TArray<FString> Skins;
 		FString SigningKey;
 		FString Wallet;
 		const TArray<TSharedPtr<FJsonValue>>* Listed = nullptr;
 		if (Status != 200 || !Json.IsValid() || !Json->TryGetArrayField(TEXT("heroes"), Listed)
 			|| !Json->TryGetStringField(TEXT("signingKey"), SigningKey) || !Json->TryGetStringField(TEXT("wallet"), Wallet)) {
-			Done(false, Heroes, FString(), FString());
+			Done(false, Heroes, Skins, FString(), FString());
 			return;
 		}
 		for (const TSharedPtr<FJsonValue>& Value : *Listed) {
 			Heroes.Add(Value->AsString());
 		}
-		Done(true, Heroes, SigningKey, Wallet);
+		// the skins the wallet proved it owns: a publisher's server from before skins were listed lists none
+		const TArray<TSharedPtr<FJsonValue>>* SkinsListed = nullptr;
+		if (Json->TryGetArrayField(TEXT("skins"), SkinsListed)) {
+			for (const TSharedPtr<FJsonValue>& Value : *SkinsListed) {
+				Skins.Add(Value->AsString());
+			}
+		}
+		Done(true, Heroes, Skins, SigningKey, Wallet);
 	}, IsMatchServer() ? MatchSecret : FString(), 10.0f);
 }
 
 void USennitePublisher::Wear(const FString& SkinId)
 {
 	Wearing = SkinId;
+	SaveToken();
+}
+
+void USennitePublisher::Carry(const FString& WeaponId)
+{
+	Carrying = WeaponId;
 	SaveToken();
 }
 
@@ -974,20 +991,25 @@ void USennitePublisher::AskRequest()
 		bLastOk = Json->GetBoolField(TEXT("ok"));
 		UE_LOG(LogSennitePublisher, Display, TEXT("What was asked of the wallet is done, %s: %s"), bLastOk ? TEXT("carried out") : TEXT("not carried out"), *Json->GetStringField(TEXT("message")));
 		if (!BuyingSkin.IsEmpty()) {
-			// bought and given: it is the wallet's once the wallet has taken it in and proves it
+			// bought and given: it is the wallet's once the wallet has taken it in and proves it. A skin bought is the
+			// one worn from then on, until another is chosen (it shows once the wallet proves it owns it).
 			if (bLastOk) {
 				OnItsWay = BuyingSkin;
 				ArrivalProofs = 0;
 				NextArrival = FPlatformTime::Seconds() + 2.0;
+				Wear(BuyingSkin);
 			}
 			BuyingSkin.Reset();
 		}
 		if (!BuyingHero.IsEmpty()) {
-			// the same for a hero
+			// the same for a hero, and for a gun or blade, which is the one carried from then on
 			if (bLastOk) {
 				HeroOnItsWay = BuyingHero;
 				ArrivalProofs = 0;
 				NextArrival = FPlatformTime::Seconds() + 2.0;
+				if (WeaponForSale(BuyingHero) != nullptr) {
+					Carry(BuyingHero);
+				}
 			}
 			BuyingHero.Reset();
 		}
@@ -1113,10 +1135,18 @@ void USennitePublisher::ProveMaterials()
 	}
 }
 
+void USennitePublisher::ProveIfOlder(double Seconds)
+{
+	if (bConnected && !ProofPending() && FPlatformTime::Seconds() - LastProofStarted > Seconds) {
+		bProofWanted = true;
+	}
+}
+
 void USennitePublisher::StartProof()
 {
 	bProofWanted = false;
 	bProving = true;
+	LastProofStarted = FPlatformTime::Seconds();
 	Send(TEXT("POST"), TEXT("/players/me/materials"), MakeShared<FJsonObject>(), [this](int32 Status, const TSharedPtr<FJsonObject>& Json) {
 		FString Request;
 		if (Status == 202 && Json.IsValid() && Json->TryGetStringField(TEXT("request"), Request)) {

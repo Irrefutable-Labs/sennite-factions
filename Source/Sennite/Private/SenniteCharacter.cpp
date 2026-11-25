@@ -4,6 +4,7 @@
 #include "SenniteSounds.h"
 #include "SennitePlayerController.h"
 #include "SennitePlayerState.h"
+#include "HAL/PlatformTime.h"
 #include "ThirdPersonAnimInstance.h"
 #include "ProjectileActor.h"
 #include "StormActor.h"
@@ -239,8 +240,16 @@ void ASenniteCharacter::BuildPlacement(const FString& PieceKind, FVector& OutLoc
 
 float ASenniteCharacter::GunSize() const
 {
+	return GunSizeFor(GetMesh() != nullptr ? GetMesh()->GetSkeletalMeshAsset() : nullptr);
+}
+
+float ASenniteCharacter::GunSizeFor(const USkeletalMesh* Body)
+{
 	// the arm of the hero's own skeleton as it was made, shoulder to wrist, against the arm the guns are sized for
-	const USkeletalMesh* Body = GetMesh() != nullptr ? GetMesh()->GetSkeletalMeshAsset() : nullptr;
+	const ASenniteCharacter* Sizes = GetDefault<ASenniteCharacter>();
+	const float GunArm = Sizes->GunArm;
+	const float GunSizeLeast = Sizes->GunSizeLeast;
+	const float GunSizeMost = Sizes->GunSizeMost;
 	if (Body == nullptr || GunArm <= 0.0f) {
 		return 1.0f;
 	}
@@ -344,6 +353,8 @@ void ASenniteCharacter::ApplyHero()
 	else {
 		UE_LOG(LogSenniteCharacter, Error, TEXT("Hero mesh '%s' did not load; the character has no body"), *HeroMesh.ToString());
 	}
+	// a new hero is dressed again: the skin worn may be this one's, or not
+	bDressed = false;
 	if (UClass* AnimClass = HeroAnimClass.TryLoadClass<UAnimInstance>()) {
 		Body->SetAnimInstanceClass(AnimClass);
 	}
@@ -562,9 +573,9 @@ void ASenniteCharacter::Tick(float DeltaTime) {
 	Super::Tick(DeltaTime);
 	// The skin the player wears is on the hero in every world it plays in: the arena and a match as much as the
 	// faction's land. The owner, 2026-11-19: "It doesn't actually play as that skin in the demo, in the gameplay".
-	if (const APlayerController* Mine = Cast<APlayerController>(GetController()); Mine != nullptr && Mine->IsLocalController()) {
-		WearChosenSkin();
-	}
+	// Everyone sees it: the owner, 2026-11-25, "they should be represented that way in the game".
+	WearChosenSkin();
+	TakeCarriedInHand();
 	// Editing a piece, on this player's own machine: a drag with the fire button held marks each tile
 	// the aim crosses alike; walking out of reach of the piece, or its fall, ends the edit unmade.
 	if (ABuildingActor* Editing = EditingPiece.Get()) {
@@ -2572,16 +2583,38 @@ void ASenniteCharacter::LandBlow() {
 }
 
 void ASenniteCharacter::WearChosenSkin() {
-	const UGameInstance* Game = GetGameInstance();
-	const USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
-	if (Server == nullptr || !Server->IsOn() || HeroMesh.IsNull()) {
+	// a server with no one to show it to draws no skins
+	if (GetNetMode() == NM_DedicatedServer || HeroMesh.IsNull()) {
 		return;
 	}
+	FString SkinId;
+	const APlayerController* Mine = Cast<APlayerController>(GetController());
+	if (Mine != nullptr && Mine->IsLocalController()) {
+		const UGameInstance* Game = GetGameInstance();
+		const USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+		if (Server == nullptr || !Server->IsOn()) {
+			return;
+		}
+		if (Server->bMaterialsKnown && !Server->Wearing.IsEmpty() && Server->Owns(Server->Wearing)) {
+			SkinId = Server->Wearing;
+		}
+	}
+	else if (const ASennitePlayerState* Theirs = GetPlayerState<ASennitePlayerState>()) {
+		SkinId = Theirs->WornSkin;
+	}
+	else {
+		return; // whose hero it is is not known here yet
+	}
+	if (bDressed && SkinId == DressedFor && (SkinId.IsEmpty() ? WornMesh == HeroMesh : true)) {
+		return; // dressed for it already: in it, or it does not fit this hero
+	}
 	FSoftObjectPath Want = HeroMesh;
-	if (Server->bMaterialsKnown && !Server->Wearing.IsEmpty() && Server->Owns(Server->Wearing)) {
+	if (!SkinId.IsEmpty()) {
 		const ASenniteBaseEditor* Shared = GetDefault<ASenniteBaseEditor>();
-		if (const FSenniteSkinMesh* Skin = Shared->Skins.FindByPredicate([Server](const FSenniteSkinMesh& S) { return S.Id == Server->Wearing; })) {
+		if (const FSenniteSkinMesh* Skin = Shared->Skins.FindByPredicate([&SkinId](const FSenniteSkinMesh& S) { return S.Id == SkinId; })) {
 			if (Skin->Mesh == WornMesh) {
+				bDressed = true;
+				DressedFor = SkinId;
 				return; // on already
 			}
 			const USkeletalMesh* SkinMesh = Cast<USkeletalMesh>(Skin->Mesh.TryLoad());
@@ -2591,6 +2624,8 @@ void ASenniteCharacter::WearChosenSkin() {
 			}
 		}
 	}
+	bDressed = true;
+	DressedFor = SkinId;
 	if (Want == WornMesh) {
 		return;
 	}
@@ -2601,6 +2636,43 @@ void ASenniteCharacter::WearChosenSkin() {
 		UE_LOG(LogSenniteCharacter, Error, TEXT("Skin mesh '%s' did not load ([/Script/Sennite.SenniteBaseEditor] in DefaultGame.ini)"), *Want.ToString());
 	}
 	WornMesh = Want;
+}
+
+void ASenniteCharacter::TakeCarriedInHand() {
+	if (bCarriedTaken || !IsLocallyControlled()) {
+		return;
+	}
+	const UGameInstance* Game = GetGameInstance();
+	const USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+	const ASennitePlayerState* State = GetPlayerState<ASennitePlayerState>();
+	if (Server == nullptr || !Server->IsOn() || Server->Carrying.IsEmpty() || State == nullptr) {
+		return;
+	}
+	int32 Type = INDEX_NONE;
+	for (int32 Each = 1; Each < WeaponClasses.Num(); ++Each) {
+		const AWeaponActor* Gun = WeaponClasses[Each] != nullptr ? GetDefault<AWeaponActor>(WeaponClasses[Each]) : nullptr;
+		if (Gun != nullptr && Gun->ShopId == Server->Carrying) {
+			Type = Each;
+			break;
+		}
+	}
+	// the server arms the player with it once their wallet is shown to own it (ASennitePlayerState::ArmOwned)
+	if (Type == INDEX_NONE || !State->EquippedWeapons.Contains(Type)) {
+		return;
+	}
+	const double Now = FPlatformTime::Seconds();
+	if (CarriedFirstSeen == 0.0) {
+		CarriedFirstSeen = Now;
+	}
+	// in hand, or the hero was busy for long enough that the player has gone on without it: it is left to them
+	if (State->CurrentWeapon == Type || Now - CarriedFirstSeen > 10.0) {
+		bCarriedTaken = true;
+		return;
+	}
+	if (Now - CarriedAskedAt >= 1.0) {
+		CarriedAskedAt = Now;
+		ServerHoldGun(Type);
+	}
 }
 
 FVector ASenniteCharacter::OwnWeaponTip() const {

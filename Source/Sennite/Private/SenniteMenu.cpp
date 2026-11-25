@@ -7,6 +7,7 @@
 #include "CanvasItem.h"
 #include "Components/AudioComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
@@ -342,21 +343,39 @@ void ASenniteMenuController::PlayerTick(float DeltaTime)
 void ASenniteMenuController::UpdateStage(float DeltaTime)
 {
 	TArray<FName> Want;
+	TArray<FString> WantHeld;
+	// A hero stands in the skin its player wears and holds the gun or blade its player carries, wherever the menu shows
+	// it: the owner, 2026-11-25, "When you leave that part of the menu, they should be represented that way in the game
+	// and in the menu until you change skins back". This player's own choices are read here, as their wallet proves
+	// it owns them; another player's, in a lobby, as that lobby's server was shown their wallet owns them.
+	const USennitePublisher* Mine = Shop(this);
+	const FString MySkin = Mine != nullptr && Mine->IsOn() && Mine->Owns(Mine->Wearing) ? Mine->Wearing : FString();
+	const FString MyGun = Mine != nullptr && Mine->IsOn() && Mine->OwnsWeapon(Mine->Carrying) && ShopGun(Mine->Carrying) != nullptr ? Mine->Carrying : FString();
+	auto Dressed = [](FName HeroId, const FString& Skin) -> FName {
+		const FSenniteHero* Of = Skin.IsEmpty() ? nullptr : SkinHero(Skin);
+		return Of != nullptr && Of->Id == HeroId ? FName(*(FString(SkinOnStage) + Skin)) : HeroId;
+	};
 	if (Page == ESenniteMenuPage::Lobby) {
+		const APlayerState* Me = PlayerState;
 		for (const ASennitePlayerState* Player : LobbyPlayers()) {
-			Want.Add(USenniteHeroes::FindOrDefault(Player->HeroId).Id);
+			const bool bMe = Player == Me;
+			Want.Add(Dressed(USenniteHeroes::FindOrDefault(Player->HeroId).Id, bMe ? MySkin : Player->WornSkin));
+			WantHeld.Add(bMe ? MyGun : ShopGun(Player->CarriedGun) != nullptr ? Player->CarriedGun : FString());
 		}
 	}
 	else if (Page == ESenniteMenuPage::Heroes && USenniteHeroes::All().IsValidIndex(Browse)) {
-		Want.Add(USenniteHeroes::All()[Browse].Id);
+		Want.Add(Dressed(USenniteHeroes::All()[Browse].Id, MySkin));
+		WantHeld.Add(MyGun);
 	}
 	else if (const USennitePublisher* Server = Shop(this); Page == ESenniteMenuPage::Skins && Server != nullptr && Server->ShopSkins.IsValidIndex(BrowseSkin)
 		&& SkinHero(Server->ShopSkins[BrowseSkin].Id) != nullptr) {
 		// the skin the store shows, on the hero it is a skin of
 		Want.Add(FName(*(FString(SkinOnStage) + Server->ShopSkins[BrowseSkin].Id)));
+		WantHeld.Add(MyGun);
 	}
 	else {
-		Want.Add(USenniteProfile::Get().PlayingHero(this));
+		Want.Add(Dressed(USenniteProfile::Get().PlayingHero(this), MySkin));
+		WantHeld.Add(MyGun);
 	}
 	// the store's weapons: the gun shown turns on the stage, in the hero's place
 	FString WantGun;
@@ -364,9 +383,10 @@ void ASenniteMenuController::UpdateStage(float DeltaTime)
 		&& ShopGun(Seller->ShopWeapons[BrowseWeapon].Id) != nullptr) {
 		WantGun = Seller->ShopWeapons[BrowseWeapon].Id;
 		Want.Reset();
+		WantHeld.Reset();
 	}
-	if (Want != FigureHeroes) {
-		StandHeroes(Want);
+	if (Want != FigureHeroes || WantHeld != FigureGuns) {
+		StandHeroes(Want, WantHeld);
 	}
 	if (WantGun != StageGunId) {
 		StandGun(WantGun);
@@ -434,7 +454,7 @@ void ASenniteMenuController::UpdateStage(float DeltaTime)
 	StageCamera->SetActorLocationAndRotation(Now, FRotator(bSelect ? 0.0 : -2.0, 0.0, 0.0));
 }
 
-void ASenniteMenuController::StandHeroes(const TArray<FName>& Heroes)
+void ASenniteMenuController::StandHeroes(const TArray<FName>& Heroes, const TArray<FString>& Guns)
 {
 	for (ASkeletalMeshActor* Figure : Figures) {
 		if (Figure != nullptr) {
@@ -443,6 +463,7 @@ void ASenniteMenuController::StandHeroes(const TArray<FName>& Heroes)
 	}
 	Figures.Reset();
 	FigureHeroes = Heroes;
+	FigureGuns = Guns;
 	USenniteGameInstance* Game = GetGameInstance<USenniteGameInstance>();
 	for (int32 Index = 0; Index < Heroes.Num(); ++Index) {
 		// a hero as it ships, or a shop skin: the hero it is a skin of, in the skin's mesh
@@ -471,6 +492,24 @@ void ASenniteMenuController::StandHeroes(const TArray<FName>& Heroes)
 		if (UClass* Anim = Hero.AnimClass.TryLoadClass<UAnimInstance>()) {
 			Body->SetAnimationMode(EAnimationMode::AnimationBlueprint);
 			Body->SetAnimInstanceClass(Anim);
+		}
+		// the gun or blade the player carries, in the hand that holds the hero's own weapon, as it is held in play
+		// (ASenniteCharacter::AttachWeaponToHand), the hero's own weapon hidden
+		const AWeaponActor* Held = Guns.IsValidIndex(Index) ? ShopGun(Guns[Index]) : nullptr;
+		UStaticMesh* HeldModel = Held != nullptr ? Cast<UStaticMesh>(Held->MeshAsset.TryLoad()) : nullptr;
+		if (HeldModel != nullptr && !Hero.WeaponBone.IsNone() && Body->GetBoneIndex(Hero.WeaponBone) != INDEX_NONE) {
+			UStaticMeshComponent* InHand = NewObject<UStaticMeshComponent>(Figure);
+			InHand->SetStaticMesh(HeldModel);
+			InHand->SetMobility(EComponentMobility::Movable);
+			InHand->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			InHand->SetupAttachment(Body, Hero.WeaponBone);
+			InHand->RegisterComponent();
+			const float Size = ASenniteCharacter::GunSizeFor(Body->GetSkeletalMeshAsset());
+			InHand->SetRelativeScale3D(FVector(Size));
+			InHand->SetRelativeLocationAndRotation(Hero.PalmOffset - Hero.GripRotation.RotateVector(Held->GripPoint * Size), Hero.GripRotation);
+			for (const FName& Bone : Hero.BuiltInWeaponBones) {
+				Body->HideBoneByName(Bone, PBO_None);
+			}
 		}
 		if (Game != nullptr) {
 			Game->KeepHero(Hero.Id);
@@ -678,12 +717,16 @@ void ASenniteMenuController::Act(FName Action)
 		// for again, each time
 		if (USennitePublisher* Seller = GetGameInstance() != nullptr ? GetGameInstance()->GetSubsystem<USennitePublisher>() : nullptr) {
 			Seller->RefreshShop();
+			Seller->ProveIfOlder(20.0);
 		}
 		Page = ESenniteMenuPage::Heroes;
 		Browse = IndexOf(Profile.PlayingHero(this));
 		Note.Reset();
 	}
 	else if (Name == TEXT("tab:skins")) {
+		if (USennitePublisher* Seller = GetGameInstance() != nullptr ? GetGameInstance()->GetSubsystem<USennitePublisher>() : nullptr) {
+			Seller->ProveIfOlder(20.0);
+		}
 		Page = ESenniteMenuPage::Skins;
 		// on the skin worn, if one is
 		const USennitePublisher* Server = Shop(this);
@@ -693,6 +736,7 @@ void ASenniteMenuController::Act(FName Action)
 	else if (Name == TEXT("tab:weapons")) {
 		if (USennitePublisher* Seller = GetGameInstance() != nullptr ? GetGameInstance()->GetSubsystem<USennitePublisher>() : nullptr) {
 			Seller->RefreshShop();
+			Seller->ProveIfOlder(20.0);
 		}
 		Page = ESenniteMenuPage::Weapons;
 		BrowseWeapon = 0;
@@ -714,6 +758,13 @@ void ASenniteMenuController::Act(FName Action)
 			Note.Reset();
 		}
 	}
+	else if ((Name == TEXT("carry") || Name == TEXT("putaway")) && Page == ESenniteMenuPage::Weapons) {
+		const UGameInstance* Game = GetGameInstance();
+		USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
+		if (Server != nullptr && Server->IsOn() && Server->ShopWeapons.IsValidIndex(BrowseWeapon) && Server->OwnsWeapon(Server->ShopWeapons[BrowseWeapon].Id)) {
+			Server->Carry(Name == TEXT("carry") ? Server->ShopWeapons[BrowseWeapon].Id : FString());
+		}
+	}
 	else if (Name == TEXT("buygun")) {
 		const UGameInstance* Game = GetGameInstance();
 		USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
@@ -725,6 +776,7 @@ void ASenniteMenuController::Act(FName Action)
 	else if (Name == TEXT("tab:materials")) {
 		if (USennitePublisher* Seller = GetGameInstance() != nullptr ? GetGameInstance()->GetSubsystem<USennitePublisher>() : nullptr) {
 			Seller->RefreshShop();
+			Seller->ProveIfOlder(20.0);
 		}
 		Page = ESenniteMenuPage::Materials;
 		bMaterialsSaid = false;
@@ -1698,8 +1750,11 @@ void ASenniteMenuHUD::DrawWeapons(ASenniteMenuController* Menu)
 	// bought once, it is the wallet's; until then, the next thing toward having it
 	bool bHint = false;
 	if (bOwned) {
-		Button(TEXT("bought"), TEXT("BOUGHT"), Left, BY, BW, 66.0f, false);
-		Text(TEXT("hint"), TEXT("CRATES GIVE IT TO YOU IN EVERY GAME, WHILE YOUR WALLET HOLDS IT."), (Left + 2.0f) * S, (BY + 80.0f) * S, 12, White, 0.0f, false);
+		// carried, it is what the hero holds on the stage and has in hand when a game starts
+		const bool bCarried = Server->Carrying == Gun.Id;
+		Button(bCarried ? TEXT("putaway") : TEXT("carry"), bCarried ? TEXT("PUT AWAY") : TEXT("CARRY"), Left, BY, BW, 66.0f, true, 19, !bCarried);
+		Text(TEXT("hint"), bCarried ? FString(TEXT("YOUR HERO HOLDS IT, AND HAS IT IN HAND WHEN A GAME STARTS.")) : FString(TEXT("YOURS IN EVERY GAME. CARRIED, YOUR HERO HOLDS IT.")),
+			(Left + 2.0f) * S, (BY + 80.0f) * S, 12, White, 0.0f, false);
 	}
 	else {
 		FForSale Thing;

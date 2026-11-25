@@ -206,7 +206,7 @@ namespace
 					*Answered = -1;
 					return;
 				}
-				Still->CheckHeroPass(Pass, [SpeaksFor, Answered](bool bOk, const TArray<FString>& Heroes, const FString&, const FString&) {
+				Still->CheckHeroPass(Pass, [SpeaksFor, Answered](bool bOk, const TArray<FString>& Heroes, const TArray<FString>&, const FString&, const FString&) {
 					*SpeaksFor = Heroes;
 					*Answered = bOk ? 1 : -1;
 				});
@@ -222,7 +222,7 @@ namespace
 			Test->TestEqual(TEXT("The publisher's server gave a pass and answered for it"), *PassState, 1);
 			Test->TestTrue(TEXT("The pass speaks for the gun, by the shop's id"), PassSpeaksFor->Contains(Gun));
 			{
-				// what a game server makes of that list (ASenniteCharacter::BoughtGunsAmong, as ASennitePlayerState::ServerClaimGuns
+				// what a game server makes of that list (ASenniteCharacter::BoughtGunsAmong, as ASennitePlayerState::ServerClaimOwned
 				// sets GunsOwned from it): this gun is the player's from a crate, and no other bought gun is
 				const int32 Theirs = ASenniteCharacter::BoughtGunsAmong(*PassSpeaksFor);
 				Test->TestTrue(TEXT("From that list a game server makes the bought gun the player's from a crate, and no other bought gun"),
