@@ -1,32 +1,139 @@
 # Sennite: Factions
 
-A battle royale where a faction's base is funded by its members' own DSM escrow vaults.
+A battle royale for Android phones, built in Unreal Engine 5.8. Factions build a base together out of their members' own materials, and every material, skin, hero and weapon a player has is theirs, in their own wallet. It is a demo, built to show what DSM does for a game.
 
-**It works on Android.** The game is played by touch on real Android phones: the phone build has been run on a Galaxy A16, arena and all (see [On a phone](#on-a-phone)). It also plays on a Mac with a keyboard and mouse.
+**It works on Android.** The game is played by touch on real phones (a Galaxy A16, arena and all; see [On a phone](#on-a-phone)). It also plays on a Mac with keyboard and mouse.
 
-Unreal Engine 5.8, built on macOS. The publisher's server, which runs the factions, the shop and the matches on DSM, is in `Server/` (see `Server/README.md`).
+**It is tested.** 19 automated checks start the game, press the real keys or tap the real buttons, and check what happens, including two copies of the game playing each other over the network. See [Checks](#checks).
 
-## Build
+## What DSM is
 
-```bash
-"/Users/Shared/Epic Games/UE_5.8/Engine/Build/BatchFiles/Mac/Build.sh" SenniteEditor Mac Development -project="$PWD/Sennite.uproject"
+DSM (the Deterministic State Machine) is a state and identity layer. Each person's wallet keeps its own hash chain of what it owns and has done. Every change is signed (post-quantum SPHINCS+) and checked by the parties themselves.
+
+- **Not a blockchain.** There is no global ledger, no consensus, no validators and no mining. Storage nodes hold bytes and decide nothing. Two parties agree on a change between them; nobody else votes on it.
+- **Not a game backend either.** A conventional backend keeps the inventory in its own database, and the player has to trust it. Here the game's server keeps no record of what a player owns. It asks the player's wallet to prove it.
+
+What that buys the game:
+
+| | Conventional backend | With DSM |
+|---|---|---|
+| Who owns an item | A row in the publisher's database | An object in the player's wallet |
+| Trading between players | Through the publisher, if allowed | Wallet to wallet, peer to peer |
+| A faction's materials | Server-side counters | Finite objects the members committed; nobody can mint more |
+| A match prize | Paid by the server after the fact | Locked in vaults before the match, collected by the winners' own wallets |
+| What the publisher runs | Database, inventory service, payments | One small server and one DSM account |
+
+Two currencies appear in the game:
+
+- **ERA** is DSM's own token. The beta network's faucet hands it out; it pays for writes and creation fees.
+- **D-bucks** (`DBUCKS`) is the game's currency, issued by the publisher's account (100,000,000 in all). Players get it by swapping ERA through the publisher's vault. The vault opens at 10 ERA to 10,000 D-bucks with a 1% fee, so the rate moves with each trade: on 2026-11-26, 2 ERA got 1,652 D-bucks.
+
+## How the game is split
+
+Matches run on ordinary Unreal networking. DSM handles ownership, the economy and faction governance. **No DSM code is linked into the game**: the game only makes HTTP calls (HTTPS to the hosted server) to the publisher's server, and the player's DSM wallet app approves anything that spends or signs.
+
+```
+[Player's phone]  --Unreal replication-->  [Listen server or match server]  (match state: movement, building, combat)
+[Player's phone]  --HTTPS------------------>  [Publisher's server]          (store, factions, base editor, match tickets)
+[DSM wallet app]  --signs, over the relay-->  [Publisher's dsm-app-host]    (purchases, trades, votes, base changes, prizes)
+[Publisher's server] --ingress, loopback-->  [Publisher's dsm-app-host] --> DSM storage nodes
 ```
 
-Add `-NoHotReloadFromIDE` when an Unreal editor is already open, or the build lands as a hot-reload copy the next launch does not load.
+| Unreal handles | DSM handles |
+|---|---|
+| Movement, combat, building pieces in a match | Who owns each hero, skin, weapon and material |
+| Lobbies (a player's game is a listen server) | D-bucks, the ERA swap, the shop's sales |
+| Faction matches (the publisher's match server decides the winner) | Faction membership: invitations, votes to remove, leaving |
+| The arena, sky, sounds, HUD | Base changes: committing, withdrawing and replacing materials |
+| | Match prizes, locked before the match |
 
-## Run
+**What the game calls.** Everything goes to the publisher's server (`Source/Sennite/Private/SennitePublisher.cpp`):
 
-```bash
-Tools/fetch_heroes.sh
-```
+| Call | What for |
+|---|---|
+| `POST /players`, `GET /players/me` | A player token for this game, and the wallet's connect code |
+| `POST /players/me/materials` | Ask the wallet to prove what it holds |
+| `GET /shop`, `GET /shop/swap`, `POST /shop/...` | The store and the ERA/D-bucks swap; each sale is approved in the wallet |
+| `GET /world`, `GET /parcels/<id>/base`, `POST /factions` | Parcels, bases, founding and running a faction |
+| `POST /players/me/hero-pass`, `GET /hero-passes/<id>` | A pass that lets a game server give a player the hero they bought |
+| `POST /matches/<id>/tickets` | A ticket into a faction match |
+| `GET /requests/<id>` | How a request the wallet must approve stands |
 
-copies the Fab packs the game uses but this repository does not hold (the heroes: Paragon Dekker, Wraith, Crunch, Drongo, Howitzer, Rampage and Sevarog, and the Sci-Fi Trooper; and the "Stylized Laser Beam VFX" pack the lasers are drawn with) into `Content/`. Then build, and start the game:
+The match server also calls `GET /matches/<id>/bases`, `POST /matches/<id>/entries`, `/outcome`, `/mined` and `/factions/<id>/destroyed`, signed with the match secret. The server's side, its DSM account and every route are in [`Server/README.md`](Server/README.md).
 
-```bash
-"/Users/Shared/Epic Games/UE_5.8/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor" "$PWD/Sennite.uproject" -game -windowed -ResX=1280 -ResY=720
-```
+## Where it runs
 
-A map or an address on the command line goes straight there. With `-PublisherUrl=http://<host>:8790` the game uses a publisher's server: the store, the base editor and faction matches need one, and without one the game plays with none of them. Other options: `-Sky=DAY`, `DUSK` or `NIGHT` forces a match's sky; `-ProfileSlot=<name>` keeps the settings and the chosen hero under another name; `-PublisherPlayerFile=<file>` is where the player's token with the server is kept (`Saved/Publisher/player.json`).
+The publisher's side runs on OVH, not on anyone's computer, so any player reaches it over the internet: [`deploy/README.md`](deploy/README.md).
+
+| What | Address |
+|---|---|
+| The publisher's server | `https://sennite.148.113.137.67.sslip.io` |
+| The publisher's DSM account (wallet relay) | `https://148.113.137.67:8445` |
+| Faction match servers | `148.113.137.67:7788` to `7797` (UDP) |
+
+Redeploy: `Tools/deploy_ovh.sh` (the server and account), `Tools/build_linux_match_server.sh` (the Linux match server), and `Tools/ovh_match.sh <match id>` (start a match).
+
+## Prerequisites
+
+| For | You need |
+|---|---|
+| Everything | Unreal Engine 5.8 (Epic Games Launcher), macOS with Xcode |
+| The heroes, lasers and props | The Fab packs listed under [Quick start](#quick-start), added to your Fab library |
+| Android | The engine's Android target platform (Launcher, UE 5.8, Options, Target Platforms, Android); the Android SDK with adb; NDK r27c (27.2.12479018); Java (Android Studio's); `ANDROID_HOME`, `NDKROOT` and `JAVA_HOME` default to Android Studio's |
+| A publisher's server of your own | Node 20+, and `dsm-app-host` built from the DSM commit the storage set runs (the beta set: DSM `main`) |
+| The Linux match server | A Linux machine with Unreal Engine 5.8.4 built from source (Unreal builds dedicated servers only from source) |
+
+## Quick start
+
+1. Fetch the Fab packs the game uses but this repository does not hold: the heroes (Paragon Dekker, Wraith, Crunch, Drongo, Howitzer, Rampage and Sevarog, and the Sci-Fi Trooper) and the "Stylized Laser Beam VFX" pack.
+
+   ```bash
+   Tools/fetch_heroes.sh
+   ```
+
+2. Build. Add `-NoHotReloadFromIDE` if an Unreal editor is open, or the build lands as a hot-reload copy the next launch does not load.
+
+   ```bash
+   "/Users/Shared/Epic Games/UE_5.8/Engine/Build/BatchFiles/Mac/Build.sh" SenniteEditor Mac Development -project="$PWD/Sennite.uproject"
+   ```
+
+3. Run. Without a publisher's server the game plays, but the store, the base editor and faction matches are off.
+
+   ```bash
+   "/Users/Shared/Epic Games/UE_5.8/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor" "$PWD/Sennite.uproject" -game -windowed -ResX=1280 -ResY=720 -PublisherUrl=https://sennite.148.113.137.67.sslip.io
+   ```
+
+A map or an address on the command line goes straight there.
+
+| Option | What it does |
+|---|---|
+| `-PublisherUrl=<url>` | The publisher's server. The store, the base editor and faction matches need one. |
+| `-Sky=DAY`, `DUSK` or `NIGHT` | Forces a match's sky |
+| `-ProfileSlot=<name>` | Keeps settings and the chosen hero under another name |
+| `-PublisherPlayerFile=<file>` | Where the player's token with the server is kept (default `Saved/Publisher/player.json`) |
+| `-MatchSecretFile=<file>` | Match servers only: the secret the publisher's server wrote |
+
+## Security notes for a demo
+
+- **The publisher's account is a hot wallet.** Its recovery phrase is on the server's disk. Keep only test balances on it.
+- **The player's token is plain text** in `Saved/Publisher/player.json`. It names a player at the publisher's server and spends nothing: every purchase, trade and vote is approved in the DSM wallet, which holds the keys. A production game would keep the token in the platform's secure storage (Android Keystore).
+- **Transport.** The hosted server is HTTPS (Let's Encrypt). `Tools/phone_publisher.sh` serves plain `http://` on a LAN, which is fine for a demo on your own Wi-Fi and nothing more. The wallet relay uses its own self-signed certificate, which the connect code pins.
+- **Match servers** take only players with a ticket from the publisher's server; the publisher's server takes match results only with the match secret.
+
+## How long wallet actions take
+
+Each of these waits for the player to approve in the DSM wallet, then for the wallet to carry it out on the beta network. Measured on 2026-11-26, from a phone over Wi-Fi to the OVH publisher:
+
+| Action | Time |
+|---|---|
+| Connect the wallet and prove what it holds | about 2 s after approving |
+| Price for 2 ERA in D-bucks | 78 s |
+| Swap 2 ERA for D-bucks | 85 s |
+| Buy a skin (BUY to "is the wallet's") | 68 s |
+
+So none of them runs in the middle of a match. A match uses what the wallet proved before it started; its prize is locked before and collected after.
+
+**If the publisher's server goes down mid-session**, a match in progress goes on (it runs on Unreal networking). The store, the base editor and new matches say "the publisher's server cannot be reached" and wait; the message clears when it answers again. Nothing is lost: what a wallet owns is in the wallet, and a sale the wallet approved is carried out when the server is back (its shop sweeps every 10 s).
 
 ## The menus
 
@@ -43,11 +150,48 @@ Dekker and Wraith are free. Crunch, Drongo, Howitzer, Rampage, Sevarog and the t
 
 In play, MENU (Escape, Android's back button, or the MENU button top left on a touch screen) opens the in-game menu over the game, which goes on behind it: RESUME, SETTINGS, STORE and BASE EDITOR (the base editor's shop and planning view, where there is one: on the test range with a publisher's server, never in an arena), MAIN MENU and QUIT GAME, each of the last two asked twice. A host who goes back to the main menu ends the game for everyone in it.
 
-The base editor (B, or BASE on a touch screen) is a view from above of the faction's parcel. W A S D move the cursor; Q and E choose a prefab (a watchtower, a lookout, a workshop, a wall; `Server/world/catalogue.json`), R turns it and F places it; N founds a faction on a free parcel, Tab goes to the next parcel and J takes up an invitation. On a structure, C commits materials from the wallet (1 picks the resource, Z the amount), T takes them back, V replaces, X dismantles and G rebuilds. O shows the connect code and M asks the wallet to prove what it holds. P is the faction's people (I invites, K votes to remove a member, U takes the vote back, L leaves); H is the shop and I the inventory, where skins are worn and taken off. The wallet signs each of these and the publisher's server decides what comes of it.
+The base editor (B, or BASE on a touch screen) is a view from above of the faction's parcel. The wallet signs each change, and the publisher's server decides what comes of it.
+
+| Key | In the base editor |
+|---|---|
+| W A S D | Move the cursor |
+| Q, E | Choose a prefab (watchtower, lookout, workshop, wall: `Server/world/catalogue.json`) |
+| R | Turn it |
+| F | Place it |
+| N | Found a faction on a free parcel |
+| Tab | Next parcel |
+| J | Take up an invitation |
+| C | Commit materials from the wallet to the structure (1 picks the resource, Z the amount) |
+| T | Take them back |
+| V, X, G | Replace, dismantle, rebuild |
+| O | Show the connect code |
+| M | Ask the wallet to prove what it holds |
+| P | The faction's people: I invites, K votes to remove a member, U takes the vote back, L leaves |
+| H, I | The shop; the inventory (wear and take off skins) |
 
 ## Controls
 
-**Keyboard and mouse.** W A S D to move (the up and down arrows too; left and right turn), Left Shift with W to run, Space to jump, the mouse to look. 1 is the hero's own weapon, 2 the rifle, 3 the shotgun, 6 the energy rifle, 7 the sniper, 8 the axe, 9 the katana, 4 bandages, 5 potions. The left mouse button fires (the rifle goes on firing while it is held), swings the axe or the katana, or uses what is in hand; hold the right mouse button to aim; R reloads. E opens a weapon crate the hero is beside. X, C and F preview a wall, a ramp and a floor; the left mouse button builds; the right mouse button changes material; the same key again leaves build mode. G with a piece you may edit in sight edits it: the left mouse button cuts out the tile in sight or puts it back (drag across tiles to do several), the right mouse button puts every tile back and finishes, R takes the whole piece away, and G again finishes.
+**Keyboard and mouse.**
+
+| Key | Does |
+|---|---|
+| W A S D (or the arrow keys: up and down move, left and right turn) | Move |
+| Left Shift with W | Run |
+| Space | Jump |
+| Mouse | Look |
+| 1 | The hero's own weapon |
+| 2, 3, 6, 7 | Rifle, shotgun, energy rifle, sniper |
+| 8, 9 | Axe, katana |
+| 4, 5 | Bandages, potions |
+| Left mouse button | Fire (the rifle keeps firing while held), swing, or use what is in hand |
+| Right mouse button (hold) | Aim |
+| R | Reload |
+| E | Open a weapon crate the hero is beside |
+| T | Take the mining droid in hand (fire then sends it) |
+| X, C, F | Preview a wall, a ramp, a floor; the left button builds, the right changes material, the same key again leaves build mode |
+| G | Edit a piece you may edit: the left button cuts out or puts back a tile (drag for several), the right puts every tile back and finishes, R takes the piece away, G again finishes |
+| B | Base editor |
+| Escape | Menu |
 
 **Touch** (`Source/Sennite/Public/SenniteTouch.h`), shown on a touch screen. A stick under the left thumb walks, and pushed all the way ahead it runs; a drag anywhere else looks, and a finger held on FIRE can drag to look while firing. FIRE (BUILD in build mode, USE with a healing item, ATTACK with the hero's own weapon, SWING with the axe or the katana, TILE while editing), JUMP, RELOAD (REMOVE while editing; dimmed, and heard refused, with no gun in hand), AIM (a tap aims and the next lets go; MAT in build mode, RESET while editing; not there for a melee hero with no gun, nor with the axe or the katana) and OPEN beside a closed crate; WALL, RAMP, FLOOR, EDIT (with a piece to edit in sight; DONE while editing) and BASE along the top right; MENU top left. What the hero holds is on one button, the wheel, at the bottom in the middle, which names what is in hand: a tap takes the next thing the player has (the hero's own weapon, each gun, the axe and the katana, bandages, potions, round again); a finger held on it, or slid off it, opens the wheel: what the player has on an arc round it (nothing they have not got), what is in hand edged in gold; slide to one and let go, and it is in hand and the wheel shuts (let go in the middle, or on the button, and nothing changes). Each button presses the key the keyboard would. In the base editor a grid of the editor's keys runs down the right side, and a tap on the map moves the cursor there.
 
@@ -55,13 +199,17 @@ The base editor (B, or BASE on a touch screen) is a view from above of the facti
 
 Android only; there is no iOS build. The phone build is one APK holding the menu, the arena and the test range.
 
+For phones anywhere, built for the hosted publisher:
+
 ```bash
-Tools/package_android.sh
+SENNITE_PUBLISHER_URL=https://sennite.148.113.137.67.sslip.io Tools/package_android.sh
 ```
 
-builds, cooks and packages it into `Saved/Phone`, with the publisher's server written into the APK (`SENNITE_PUBLISHER_URL`, by default this computer's Wi-Fi address on port 8790; `none` for no server), so a phone the game is newly installed on reaches it too, (log in `Saved/Phone/package.log`) and prints the `adb install -r` line that puts it on the phone. `Tools/package_android.sh -iterate` cooks only what changed. It needs adb, the Android NDK r27c and Java (`ANDROID_HOME`, `NDKROOT` and `JAVA_HOME` default to Android Studio's), and the engine's Android target platform (Epic Games Launcher, UE 5.8, Options, Target Platforms, Android). The app is `com.irrefutablelabs.sennitefactions`: arm64, Vulkan, landscape.
+This builds, cooks and packages the APK into `Saved/Phone` (log in `Saved/Phone/package.log`) and prints the `adb install -r` line that puts it on a phone. The publisher's server is written into the APK, so a phone the game is newly installed on reaches it too. Without `SENNITE_PUBLISHER_URL` it is this computer's Wi-Fi address on port 8790; `none` builds an APK with no server. `-iterate` cooks only what changed. The app is `com.irrefutablelabs.sennitefactions`: arm64, Vulkan, landscape.
 
-To play with the store, the base editor and faction bases on phones on this computer's Wi-Fi:
+A game that once had `Tools/phone_game.sh` run on it keeps that command line on the phone, and it wins over the APK's: `Tools/phone_game.sh off` takes it away.
+
+For a publisher of your own on this computer's Wi-Fi (development only):
 
 ```bash
 DSM_APP_HOST_BIN=<dsm-app-host> DSM_ENV_CONFIG=<the storage set's env config> Tools/phone_publisher.sh
@@ -75,9 +223,24 @@ Tools/phone_game.sh
 
 points the game on the phone at that server (it writes the game's command line on the phone over adb and restarts the game); `Tools/phone_game.sh off` takes it off again. `Tools/phone_give.sh STEEL 300` has the publisher give building materials (WOOD, STONE or STEEL) to every connected wallet that has accepted them.
 
-## Check
+## Checks
 
 `Tools/check_all.sh` runs the 19 in-game checks that need no accounts, one after the other, and passes only if all of them pass. Each starts the game without a window, presses the real keys or taps the real buttons, and leaves its log and screenshots under `Saved/`.
+
+| Check | What it proves |
+|---|---|
+| `check_first_playable` | The hero walks, runs, jumps and turns the camera |
+| `check_weapons` | Crates, every gun and blade, bought weapons only when owned |
+| `check_building`, `check_editing` | Walls, ramps and floors; editing, damage, and what holds a piece up |
+| `check_hud`, `check_sounds` | The HUD and every named sound follow the game |
+| `check_storm`, `check_healing` | The storm (off in play) and bandages and potions |
+| `check_touch`, `check_menu`, `check_game_menu` | Playing by touch on a phone-shaped screen; the menus |
+| `check_two_players`, `check_combat`, `check_lobby` | Two copies of the game over the network: building, shooting to a kill, a lobby to the arena |
+| `check_hero_hands`, `check_skins` | Every hero holds a gun right; every skin keeps the whole body |
+| `check_arena`, `check_match`, `check_sky` | The seeded arena, how a match ends, the sky |
+| `check_mining` (run on its own, not by `check_all.sh`) | The mining droid |
+
+The two-player checks start real separate game processes, a server and clients, as Unreal's Gauntlet framework would; they are shell scripts here.
 
 ```bash
 Tools/check_first_playable.sh
@@ -113,7 +276,7 @@ checks that the HUD follows the game: health, shield, materials, players left an
 Tools/check_storm.sh
 ```
 
-checks the storm, which the game does not have for now (see Storm below): the safe circle holds, shrinks by the clock and holds again; the hero takes no damage inside it, loses health every second outside it while the HUD warns her, and stops losing it once back inside. For this run only the storm is on, beginning with one player and running a stage a second. Screenshots in `Saved/Storm/`.
+checks the storm, which the game does not have for now (see Storm under [State](#state)): the safe circle holds, shrinks by the clock and holds again; the hero takes no damage inside it, loses health every second outside it while the HUD warns her, and stops losing it once back inside. For this run only the storm is on, beginning with one player and running a stage a second. Screenshots in `Saved/Storm/`.
 
 ```bash
 Tools/check_healing.sh
