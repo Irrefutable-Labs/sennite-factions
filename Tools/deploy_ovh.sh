@@ -39,7 +39,7 @@ fi
 
 echo "==> firewall and HTTPS (once)"
 "${SSH[@]}" 'sudo ufw status | grep -q "^8445/tcp" || sudo ufw allow 8445/tcp >/dev/null'
-"${SSH[@]}" "grep -q '^sennite\.' /opt/https/Caddyfile || { printf '\nsennite.%s.sslip.io {\n    reverse_proxy 127.0.0.1:8790\n}\n' $HOST | sudo tee -a /opt/https/Caddyfile >/dev/null && cd /opt/https && sudo docker compose -p https exec -w /etc/caddy https caddy reload; }"
+"${SSH[@]}" "grep -q '^sennite\.' /opt/https/Caddyfile || { printf '\nsennite.%s.sslip.io {\n    reverse_proxy 127.0.0.1:8790\n}\n' $HOST | sudo tee -a /opt/https/Caddyfile >/dev/null && cd /opt/https && sudo timeout 60 docker compose -p https exec -T -w /etc/caddy https caddy reload; }"
 
 echo "==> starting"
 "${SSH[@]}" 'cd /opt/sennite && sudo docker compose -p sennite up -d'
