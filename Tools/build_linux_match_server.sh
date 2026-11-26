@@ -36,7 +36,8 @@ echo "==> building the editor (to cook) and the server, cooking the arena, stagi
   test -x $HOME/out/LinuxServer/Sennite/Binaries/Linux/SenniteServer'
 
 echo "==> shipping sennite-match:$REV to $HOST"
-"${B[@]}" 'tar -C $HOME/out -cz LinuxServer' | ssh -o BatchMode=yes -i "$KEY" "ubuntu@$HOST" \
-  'rm -rf /tmp/sennite-match && mkdir -p /tmp/sennite-match && tar -xz -C /tmp/sennite-match'
-git show HEAD:deploy/match/Dockerfile | ssh -o BatchMode=yes -i "$KEY" "ubuntu@$HOST" "cat > /tmp/sennite-match/Dockerfile && cd /tmp/sennite-match && sudo docker build -q -t sennite-match:$REV -t sennite-match:latest . && rm -rf /tmp/sennite-match"
+H=(ssh -o BatchMode=yes -i "$KEY" "ubuntu@$HOST")
+D=$("${H[@]}" 'mktemp -d -p "$HOME" sennite-match.XXXXXX')
+"${B[@]}" 'tar -C $HOME/out -cz LinuxServer' | "${H[@]}" "tar -xz --no-same-owner -C $D"
+git show HEAD:deploy/match/Dockerfile | "${H[@]}" "cat > $D/Dockerfile && sudo docker build -q -f $D/Dockerfile -t sennite-match:$REV -t sennite-match:latest $D; rc=\$?; rm -rf $D; exit \$rc"
 echo "built sennite-match:$REV on $HOST; start a match with Tools/ovh_match.sh"

@@ -24,13 +24,15 @@ REV=$(git rev-parse --short=9 "${1:-HEAD}^{commit}")
 SSH=(ssh -o BatchMode=yes -i "$KEY" "ubuntu@$HOST")
 
 echo "==> sending $REV to $HOST"
-git archive --format=tar "$REV" Server deploy | "${SSH[@]}" 'rm -rf /tmp/sennite-src && mkdir -p /tmp/sennite-src && tar -x -C /tmp/sennite-src'
+SRC=$("${SSH[@]}" 'mktemp -d -p "$HOME" sennite-src.XXXXXX')
+trap '"${SSH[@]}" "rm -rf $SRC" 2>/dev/null' EXIT
+git archive --format=tar "$REV" Server deploy | "${SSH[@]}" "tar -x --no-same-owner -C $SRC"
 
 echo "==> building sennite-publisher:$REV"
-"${SSH[@]}" "cd /tmp/sennite-src && sudo docker build -q -f deploy/publisher/Dockerfile -t sennite-publisher:$REV Server"
+"${SSH[@]}" "cd $SRC && sudo docker build -q -f deploy/publisher/Dockerfile -t sennite-publisher:$REV Server"
 
 echo "==> /opt/sennite"
-"${SSH[@]}" "sudo install -d -m 755 /opt/sennite /opt/sennite/network && sudo install -d -m 700 -o 10001 -g 10001 /opt/sennite/account /opt/sennite/ingress /opt/sennite/server && sudo install -m 644 /tmp/sennite-src/deploy/compose.yml /opt/sennite/compose.yml"
+"${SSH[@]}" "sudo install -d -m 755 /opt/sennite /opt/sennite/network && sudo install -d -m 700 -o 10001 -g 10001 /opt/sennite/account /opt/sennite/ingress /opt/sennite/server && sudo install -m 644 $SRC/deploy/compose.yml /opt/sennite/compose.yml"
 if [[ -n "${DSM_ENV_CONFIG:-}" ]]; then
   "${SSH[@]}" 'sudo tee /opt/sennite/network/dsm_env_config.toml >/dev/null' < "$DSM_ENV_CONFIG"
 fi

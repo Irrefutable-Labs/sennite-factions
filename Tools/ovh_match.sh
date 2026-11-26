@@ -7,7 +7,9 @@
 #   Tools/ovh_match.sh --stop <match id>
 #
 #   SENNITE_HOST (default 148.113.137.67), SSH_KEY (default ~/.ssh/dsm-deploy)
-# Ports 7788-7797/udp are open on the host for match servers.
+# Ports 7788-7797/udp are open on the host for match servers. The container shares the host's network because the
+# publisher's server listens on loopback only; every other loopback service there (the DSM accounts' ingress, MySQL)
+# needs a secret this container is not given. It gets the match secret alone, read-only, as the design asks.
 set -euo pipefail
 HOST="${SENNITE_HOST:-148.113.137.67}"
 KEY="${SSH_KEY:-$HOME/.ssh/dsm-deploy}"
