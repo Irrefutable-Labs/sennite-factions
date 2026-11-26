@@ -58,7 +58,7 @@ if ! "${SSH[@]}" 'sudo test -e /opt/sennite/server/funded'; then
         await new Promise((r) => setTimeout(r, 6000));
       }
       process.exit(1);
-    '"'"' && sudo -u "#10001" touch /opt/sennite/server/funded && sudo docker compose -p sennite restart publisher'
+    '"'"' && sudo install -o 10001 -g 10001 -m 600 /dev/null /opt/sennite/server/funded && sudo docker compose -p sennite restart publisher'
 fi
 
 echo "==> check"
