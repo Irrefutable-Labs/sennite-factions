@@ -70,9 +70,11 @@ class Account {
     this.given.push(object.id);
   }
 
-  /** The wallet's answer to the one payment asked for. */
+  /** The wallet's answer to the one payment asked for (the latest asked, when a sale was asked again). */
   answer(outcome: Result["outcome"], paid: boolean): void {
-    const [key, was] = [...this.results.entries()][0]!;
+    const payment = this.asks.filter((a) => (a.what as { kind: string }).kind === "send").at(-1)!;
+    const key = this.key(payment.ref);
+    const was = this.results.get(key)!;
     this.results.set(key, { ...was, answered: outcome !== "awaiting_approval", outcome, fact: paid ? "received" : "none", ...(paid ? { received: new Uint8Array([9, 9]) } : {}) });
   }
 }
@@ -98,6 +100,8 @@ describe("a sale", () => {
     // while the player approves, the hero is issued and the wallet takes it up; nothing is given before the payment
     expect(account.issued.map((o) => o.symbol)).toEqual(["HR000001"]);
     expect(asked(account, "accept")).toHaveLength(1);
+    // the wallet answers in turn: the taking up is asked before the payment, so it is not held behind the player
+    expect(account.asks.map((a) => (a.what as { kind: string }).kind)).toEqual(["accept", "send"]);
     expect(account.given).toEqual([]);
     expect(store.data.shop.prepared).toEqual({ OBJ1: { kind: "hero", itemId: "rampage", serial: 1, symbol: "HR000001" } });
     expect(store.data.shop.heroes).toEqual({});
@@ -223,7 +227,6 @@ describe("a sale", () => {
     await soon(20);
     account.answer("declined", false);
     await first;
-    account.results.clear();
     const second = shop.buyWeapon(connection, "sniper");
     await soon(20);
     account.answer("carried_out", true);

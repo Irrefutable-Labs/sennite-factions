@@ -99,6 +99,8 @@ export class Shop {
   readonly #reserved = new Set<string>();
   /** "wallet:object" of each prepared item a wallet has taken up: its give needs no second asking. */
   readonly #takenUp = new Set<string>();
+  /** "wallet:object" of each prepared item a wallet was asked to take up and has not answered yet: the give waits on that asking, not a new one. */
+  readonly #takingUp = new Map<string, RequestRef>();
 
   /**
    * `timing`: how long a sale's own request to the server goes on waiting for the wallet before it answers the
@@ -448,14 +450,20 @@ export class Shop {
     this.#asking.set(buyer, (this.#asking.get(buyer) ?? 0) + 1);
     let ref: RequestRef;
     let key: string;
+    let staged: ObjectInfo | undefined;
     try {
+      // The item first, so that the wallet takes it up before it puts the payment before the player: once the payment
+      // lands only the give is left (the owner, 2026-11-25: "Why does the store take so long? It needs to be faster.").
+      staged = await this.stage(connection, kind, item.id, item.name);
       ref = await this.app.request(connection, ask.send(this.symbol, item.price, `${kind}: ${item.name}`));
       key = `${ref.connection}:${ref.seq}`;
       this.store.data.shop.asked[key] = { connection: ref.connection, seq: String(ref.seq), kind, itemId: item.id, buyer, at: Date.now() };
       this.store.save();
-      // While the player approves, the item is issued and the wallet takes it up: once the payment lands only the give
-      // is left (the owner, 2026-11-25: "Why does the store take so long? It needs to be faster.").
-      this.#preparing.set(key, this.prepare(connection, key, kind, item.id, item.name));
+      if (staged !== undefined) this.#preparing.set(key, this.prepared(connection, key, staged));
+    } catch (e) {
+      // no payment was asked: the item staged for it is left for the next sale of it
+      if (staged !== undefined) this.#reserved.delete(staged.id);
+      throw e;
     } finally {
       const left = (this.#asking.get(buyer) ?? 1) - 1;
       if (left > 0) this.#asking.set(buyer, left);
@@ -543,11 +551,13 @@ export class Shop {
   }
 
   /**
-   * While the player approves the payment asked under `key`: an item of what it buys, issued (or one prepared before
-   * and not sold), taken up by the wallet. Nothing is given here: the give waits for the payment. Undefined when it
-   * could not be made ready; the sale then issues and hands the item over once paid, as it did before.
+   * Before the payment is asked: an item of what it buys, issued (or one prepared before and not sold) and held for
+   * this sale, and the wallet asked to take it up. The wallet answers what it is asked in turn, so asked first the
+   * taking up is answered at once, while the player still has the payment before them; asked after the payment, it
+   * would wait for the player and the payment to be sent. Nothing is given here: the give waits for the payment.
+   * Undefined when no item could be made ready; the sale then issues and hands the item over once paid.
    */
-  private async prepare(connection: Connection, key: string, kind: "skin" | "hero" | "weapon", itemId: string, name: string): Promise<ObjectInfo | undefined> {
+  private async stage(connection: Connection, kind: "skin" | "hero" | "weapon", itemId: string, name: string): Promise<ObjectInfo | undefined> {
     const record = this.store.data.shop;
     const buyer = hex(connection.opponent.signingKey);
     let reserved: string | undefined;
@@ -569,18 +579,35 @@ export class Shop {
         record.prepared[info.id] = { kind, itemId, serial, symbol };
         this.store.save();
       }
-      if (!this.#takenUp.has(`${buyer}:${info.id}`)) {
-        const taken = await this.app.wait(await this.app.request(connection, ask.accept(info)), { until: "answered", timeoutMs: ACCEPT_WAIT_MS });
-        if (taken.outcome === "carried_out") this.#takenUp.add(`${buyer}:${info.id}`);
-      }
-      // a sale that ended while this was under way leaves the item for the next sale of it
-      if (!Object.hasOwn(record.asked, key)) this.#reserved.delete(info.id);
+      const held = `${buyer}:${info.id}`;
+      if (!this.#takenUp.has(held) && !this.#takingUp.has(held)) this.#takingUp.set(held, await this.app.request(connection, ask.accept(info)));
       return info;
     } catch (e) {
       console.error(`[publisher] preparing a ${kind} (${itemId}) ahead of its payment: ${e instanceof Error ? e.message : String(e)}`);
-      if (reserved !== undefined && !Object.hasOwn(record.asked, key)) this.#reserved.delete(reserved);
+      if (reserved !== undefined) this.#reserved.delete(reserved);
       return undefined;
     }
+  }
+
+  /**
+   * While the player approves the payment asked under `key`: the wallet's answer to taking up the item staged for it.
+   * An answer later than this wait is still the one the give waits on (deliver), and the item stays this sale's.
+   */
+  private async prepared(connection: Connection, key: string, info: ObjectInfo): Promise<ObjectInfo> {
+    const held = `${hex(connection.opponent.signingKey)}:${info.id}`;
+    const asking = this.#takingUp.get(held);
+    if (asking !== undefined) {
+      try {
+        const taken = await this.app.wait(asking, { until: "answered", timeoutMs: ACCEPT_WAIT_MS });
+        this.#takingUp.delete(held);
+        if (taken.outcome === "carried_out") this.#takenUp.add(held);
+      } catch {
+        // not answered yet: the give waits on this same asking
+      }
+    }
+    // a sale that ended while this was under way leaves the item for the next sale of it
+    if (!Object.hasOwn(this.store.data.shop.asked, key)) this.#reserved.delete(info.id);
+    return info;
   }
 
   /** An asking that ended unpaid: what was being prepared for it is left for the next sale of the same item. */
@@ -736,7 +763,12 @@ export class Shop {
   /** Hand a wallet an object the shop issued: the wallet takes the object up, then the account gives it. */
   private async deliver(connection: Connection, object: ObjectInfo): Promise<void> {
     const taken = `${hex(connection.opponent.signingKey)}:${object.id}`;
-    if (!this.#takenUp.has(taken)) await this.app.wait(await this.app.request(connection, ask.accept(object)), { until: "answered" });
+    if (!this.#takenUp.has(taken)) {
+      // the asking made while the player approved, if it is still open; else a new one
+      const asking = this.#takingUp.get(taken) ?? (await this.app.request(connection, ask.accept(object)));
+      await this.app.wait(asking, { until: "answered" });
+      this.#takingUp.delete(taken);
+    }
     await this.app.give(connection, object, "1");
     this.#takenUp.delete(taken);
   }
