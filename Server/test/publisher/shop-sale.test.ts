@@ -237,6 +237,18 @@ describe("a sale", () => {
     expect(store.data.shop.weapons).toEqual({ OBJ1: { weaponId: "sniper", serial: 1, symbol: "WP000001" } });
   });
 
+  it("asks no payment for an item the account cannot make", async () => {
+    const { account, store, shop } = stand(2_000);
+    account.issue = async () => {
+      throw new Error("token.create: insufficient ERA for the 1000 ERA creation fee (have 0)");
+    };
+    const sold = await shop.buyWeapon(connection, "sniper");
+    expect(sold).toEqual({ ok: false, why: "the shop cannot make the weapon right now: try again in a little while" });
+    expect(asked(account, "send")).toEqual([]);
+    expect(store.data.shop.asked).toEqual({});
+    expect(store.data.shop.prepared).toEqual({});
+  });
+
   it("says in plain words that the wallet holds too little", () => {
     const failed = { outcome: "failed", reason: "wallet.send: local state update failed: Invalid operation: advance: balance underflow on debit (insufficient funds)", detail: "" };
     expect(plainly(failed, "the 1200 D-bucks the hero costs")).toBe("your wallet does not hold the 1200 D-bucks the hero costs");

@@ -455,6 +455,9 @@ export class Shop {
       // The item first, so that the wallet takes it up before it puts the payment before the player: once the payment
       // lands only the give is left (the owner, 2026-11-25: "Why does the store take so long? It needs to be faster.").
       staged = await this.stage(connection, kind, item.id, item.name);
+      // An item the account cannot make is not paid for: the player is told now, not after paying (on 2026-11-26 the
+      // account had no ERA left for the creation fee, and the payment was asked all the same).
+      if (staged === undefined) return { ok: false, why: `the shop cannot make the ${kind} right now: try again in a little while` };
       ref = await this.app.request(connection, ask.send(this.symbol, item.price, `${kind}: ${item.name}`));
       key = `${ref.connection}:${ref.seq}`;
       this.store.data.shop.asked[key] = { connection: ref.connection, seq: String(ref.seq), kind, itemId: item.id, buyer, at: Date.now() };
@@ -555,7 +558,7 @@ export class Shop {
    * this sale, and the wallet asked to take it up. The wallet answers what it is asked in turn, so asked first the
    * taking up is answered at once, while the player still has the payment before them; asked after the payment, it
    * would wait for the player and the payment to be sent. Nothing is given here: the give waits for the payment.
-   * Undefined when no item could be made ready; the sale then issues and hands the item over once paid.
+   * Undefined when no item could be made ready: the sale is then not asked for.
    */
   private async stage(connection: Connection, kind: "skin" | "hero" | "weapon", itemId: string, name: string): Promise<ObjectInfo | undefined> {
     const record = this.store.data.shop;
