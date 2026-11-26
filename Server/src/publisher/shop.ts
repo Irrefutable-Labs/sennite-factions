@@ -836,9 +836,12 @@ export class Shop {
   }
 }
 
-/** `probe` until it gives something, for up to four minutes. */
+/**
+ * `probe` until it gives something, for up to fifteen minutes. A wallet works out a price by reading every ERA vault on
+ * the storage set: on the beta fleet on 2026-11-26 that took the wallet 4 to 7 minutes after the player approved.
+ */
 async function until<T>(probe: () => Promise<T | undefined>): Promise<T | undefined> {
-  const deadline = Date.now() + 240_000;
+  const deadline = Date.now() + 15 * 60_000;
   for (;;) {
     const got = await probe();
     if (got !== undefined || Date.now() > deadline) return got;
