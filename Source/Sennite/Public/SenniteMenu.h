@@ -202,7 +202,8 @@ private:
 
 	/** Set up the stage: the heroes to stand on it (one turning, or the lobby's row) and the camera framing them. */
 	void UpdateStage(float DeltaTime);
-	void StandHeroes(const TArray<FName>& Heroes);
+	/** Stand these heroes on the stage, each with the gun or blade of the store (its shop id, or none) in its hand. */
+	void StandHeroes(const TArray<FName>& Heroes, const TArray<FString>& Guns);
 
 	UPROPERTY()
 	TObjectPtr<ACameraActor> StageCamera;
@@ -222,6 +223,8 @@ private:
 	void StandGun(const FString& WeaponId);
 
 	TArray<FName> FigureHeroes;
+	/** The gun or blade each hero on the stage holds, by its shop id: empty for the hero's own weapon. */
+	TArray<FString> FigureGuns;
 
 	/** The song playing, and what plays it. */
 	UPROPERTY()

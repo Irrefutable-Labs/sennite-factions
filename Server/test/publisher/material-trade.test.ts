@@ -61,6 +61,12 @@ class Account {
     if (found === undefined) throw new Error(`no such object ${ref}`);
     return found;
   }
+  /** An item a sale issues (staged before its payment is asked): kept with the account's other objects. */
+  async issue(options: { symbol: string; name: string }): Promise<ObjectInfo> {
+    const info = { id: `${options.symbol}-OBJECT`, symbol: options.symbol, name: options.name, decimals: 0 } as unknown as ObjectInfo;
+    this.objects.push(info);
+    return info;
+  }
   async give(_c: Connection, object: ObjectInfo, amount: string): Promise<void> {
     if (this.refuseGives > 0) {
       this.refuseGives -= 1;

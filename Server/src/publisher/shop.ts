@@ -4,8 +4,9 @@
 // supply. Players get them from the publisher's SoFi vault, which sells them
 // for ERA at a price its reserves set and a fee the publisher chooses. The
 // shop sells skins for D-bucks: the wallet sends the price, the publisher's
-// account accepts it, and only then issues the skin, an object of which one
-// exists, and gives it to the wallet. From there the skin is the player's:
+// account accepts it, and only then gives the skin, an object of which one
+// exists, to the wallet. The skin is issued, and taken up by the wallet, while
+// the player approves the payment: once it lands only the give is left. From there the skin is the player's:
 // they can send it to anyone, and the game has no say. A hero is sold the
 // same way: an object of which one exists, the wallet's to keep or send.
 //
@@ -82,6 +83,8 @@ const FORGOTTEN_AFTER_MS = 30 * 24 * 60 * 60_000;
 
 /** How long the shop waits for a wallet to take up an object it is about to be given, at one look. */
 const ACCEPT_WAIT_MS = 30_000;
+/** How many times a give is tried again while the wallet is still finishing what it sent (a try each poll, 700 ms). */
+const GIVE_TRIES = 90;
 
 /** The first letters of the symbol an item sold is issued under, by its kind. */
 const PREFIX = { skin: "SK", hero: "HR", weapon: "WP" } as const;
@@ -92,6 +95,14 @@ export class Shop {
   #sweeping = false;
   /** How many sales to each wallet are at the point of asking it, between taking a place and recording what was asked. */
   readonly #asking = new Map<string, number>();
+  /** "connection:seq" of a payment asked -> the item being issued and taken up for it while the player approves. */
+  readonly #preparing = new Map<string, Promise<ObjectInfo | undefined>>();
+  /** The prepared items an open sale has in hand: no other sale takes them. */
+  readonly #reserved = new Set<string>();
+  /** "wallet:object" of each prepared item a wallet has taken up: its give needs no second asking. */
+  readonly #takenUp = new Set<string>();
+  /** "wallet:object" of each prepared item a wallet was asked to take up and has not answered yet: the give waits on that asking, not a new one. */
+  readonly #takingUp = new Map<string, RequestRef>();
 
   /**
    * `timing`: how long a sale's own request to the server goes on waiting for the wallet before it answers the
@@ -441,11 +452,23 @@ export class Shop {
     this.#asking.set(buyer, (this.#asking.get(buyer) ?? 0) + 1);
     let ref: RequestRef;
     let key: string;
+    let staged: ObjectInfo | undefined;
     try {
+      // The item first, so that the wallet takes it up before it puts the payment before the player: once the payment
+      // lands only the give is left (the owner, 2026-11-25: "Why does the store take so long? It needs to be faster.").
+      staged = await this.stage(connection, kind, item.id, item.name);
+      // An item the account cannot make is not paid for: the player is told now, not after paying (on 2026-11-26 the
+      // account had no ERA left for the creation fee, and the payment was asked all the same).
+      if (staged === undefined) return { ok: false, why: `the shop cannot make the ${kind} right now: try again in a little while` };
       ref = await this.app.request(connection, ask.send(this.symbol, item.price, `${kind}: ${item.name}`));
       key = `${ref.connection}:${ref.seq}`;
       this.store.data.shop.asked[key] = { connection: ref.connection, seq: String(ref.seq), kind, itemId: item.id, buyer, at: Date.now() };
       this.store.save();
+      if (staged !== undefined) this.#preparing.set(key, this.prepared(connection, key, staged));
+    } catch (e) {
+      // no payment was asked: the item staged for it is left for the next sale of it
+      if (staged !== undefined) this.#reserved.delete(staged.id);
+      throw e;
     } finally {
       const left = (this.#asking.get(buyer) ?? 1) - 1;
       if (left > 0) this.#asking.set(buyer, left);
@@ -463,6 +486,7 @@ export class Shop {
       if (result.outcome === "declined" || result.outcome === "failed") {
         delete this.store.data.shop.asked[key];
         this.store.save();
+        this.unprepare(key);
         return { ok: false, why: plainly(result, `the ${item.price} D-bucks the ${kind} costs`) };
       }
       if (result.answered && result.outcome === "carried_out") say("paid: the shop is taking the payment in", false);
@@ -482,6 +506,9 @@ export class Shop {
    */
   private async paid(connection: Connection, key: string, payment: string): Promise<{ ok: true; object: string; serial: number } | undefined> {
     const record = this.store.data.shop;
+    // the item issued for this asking while the player approved, if it is ready or nearly so
+    const preparing = this.#preparing.get(key);
+    const ready = preparing !== undefined ? await preparing : undefined;
     const asked = record.asked[key];
     if (asked === undefined || Object.hasOwn(record.paid, payment)) {
       delete record.asked[key];
@@ -490,15 +517,111 @@ export class Shop {
     }
     // the item goes to the wallet that was asked and paid: never to another, whatever connection is in hand
     if (hex(connection.opponent.signingKey) !== asked.buyer) throw new Error("the connection is not the wallet that was asked to pay");
-    // The asking is closed, the serial taken, the payment marked used and the sale recorded as pending, before anything is awaited.
+    // The asking is closed, the item taken, the payment marked used and the sale recorded as pending, before anything is
+    // awaited. The item is the one prepared for this asking; else one prepared for the same item that no open sale holds
+    // (its payment was declined, or the server started anew); else a new one is issued when the sale is finished.
     delete record.asked[key];
-    const serial = (record.serial += 1);
-    const symbol = `${PREFIX[asked.kind]}${String(serial).padStart(6, "0")}`;
-    record.paid[payment] = "";
-    record.pending[payment] = { kind: asked.kind, itemId: asked.itemId, serial, symbol, buyer: asked.buyer, object: "" };
+    this.#preparing.delete(key);
+    const held = (id: string): boolean => {
+      const p = record.prepared[id];
+      return p !== undefined && p.kind === asked.kind && p.itemId === asked.itemId;
+    };
+    const object =
+      ready !== undefined && held(ready.id) ? ready.id : Object.keys(record.prepared).find((id) => held(id) && !this.#reserved.has(id));
+    let serial: number;
+    let symbol: string;
+    if (object !== undefined) {
+      ({ serial, symbol } = record.prepared[object]!);
+      delete record.prepared[object];
+      this.#reserved.delete(object);
+      this.record(asked.kind, object, asked.itemId, serial, symbol);
+      record.paid[payment] = object;
+    } else {
+      serial = record.serial += 1;
+      symbol = `${PREFIX[asked.kind]}${String(serial).padStart(6, "0")}`;
+      record.paid[payment] = "";
+    }
+    record.pending[payment] = { kind: asked.kind, itemId: asked.itemId, serial, symbol, buyer: asked.buyer, object: object ?? "" };
     this.store.save();
-    const object = await this.finish(connection, payment);
-    return { ok: true, object, serial };
+    const given = await this.finish(connection, payment);
+    return { ok: true, object: given, serial };
+  }
+
+  /** Write down which item of the shop an issued object is: from then on a wallet holding it is shown to own that item. */
+  private record(kind: "skin" | "hero" | "weapon", object: string, itemId: string, serial: number, symbol: string): void {
+    const record = this.store.data.shop;
+    if (kind === "skin") record.skins[object] = { skinId: itemId, serial, symbol };
+    else if (kind === "hero") record.heroes[object] = { heroId: itemId, serial, symbol };
+    else record.weapons[object] = { weaponId: itemId, serial, symbol };
+  }
+
+  /**
+   * Before the payment is asked: an item of what it buys, issued (or one prepared before and not sold) and held for
+   * this sale, and the wallet asked to take it up. The wallet answers what it is asked in turn, so asked first the
+   * taking up is answered at once, while the player still has the payment before them; asked after the payment, it
+   * would wait for the player and the payment to be sent. Nothing is given here: the give waits for the payment.
+   * Undefined when no item could be made ready: the sale is then not asked for.
+   */
+  private async stage(connection: Connection, kind: "skin" | "hero" | "weapon", itemId: string, name: string): Promise<ObjectInfo | undefined> {
+    const record = this.store.data.shop;
+    const buyer = hex(connection.opponent.signingKey);
+    let reserved: string | undefined;
+    try {
+      // The serial is taken and the item recorded as prepared before anything is awaited, as a sale's is.
+      let info: ObjectInfo;
+      const spare = Object.entries(record.prepared).find(([id, p]) => p.kind === kind && p.itemId === itemId && !this.#reserved.has(id));
+      if (spare !== undefined) {
+        reserved = spare[0];
+        this.#reserved.add(reserved);
+        info = await this.app.object(reserved);
+      } else {
+        const serial = (record.serial += 1);
+        const symbol = `${PREFIX[kind]}${String(serial).padStart(6, "0")}`;
+        this.store.save();
+        info = await this.app.issue({ symbol, name: `${name} #${serial}`, supply: "1", description: `Sennite: Factions ${kind} ${itemId}` });
+        reserved = info.id;
+        this.#reserved.add(reserved);
+        record.prepared[info.id] = { kind, itemId, serial, symbol };
+        this.store.save();
+      }
+      const held = `${buyer}:${info.id}`;
+      if (!this.#takenUp.has(held) && !this.#takingUp.has(held)) this.#takingUp.set(held, await this.app.request(connection, ask.accept(info)));
+      return info;
+    } catch (e) {
+      console.error(`[publisher] preparing a ${kind} (${itemId}) ahead of its payment: ${e instanceof Error ? e.message : String(e)}`);
+      if (reserved !== undefined) this.#reserved.delete(reserved);
+      return undefined;
+    }
+  }
+
+  /**
+   * While the player approves the payment asked under `key`: the wallet's answer to taking up the item staged for it.
+   * An answer later than this wait is still the one the give waits on (deliver), and the item stays this sale's.
+   */
+  private async prepared(connection: Connection, key: string, info: ObjectInfo): Promise<ObjectInfo> {
+    const held = `${hex(connection.opponent.signingKey)}:${info.id}`;
+    const asking = this.#takingUp.get(held);
+    if (asking !== undefined) {
+      try {
+        const taken = await this.app.wait(asking, { until: "answered", timeoutMs: ACCEPT_WAIT_MS });
+        this.#takingUp.delete(held);
+        if (taken.outcome === "carried_out") this.#takenUp.add(held);
+      } catch {
+        // not answered yet: the give waits on this same asking
+      }
+    }
+    // a sale that ended while this was under way leaves the item for the next sale of it
+    if (!Object.hasOwn(this.store.data.shop.asked, key)) this.#reserved.delete(info.id);
+    return info;
+  }
+
+  /** An asking that ended unpaid: what was being prepared for it is left for the next sale of the same item. */
+  private unprepare(key: string): void {
+    const preparing = this.#preparing.get(key);
+    this.#preparing.delete(key);
+    void preparing?.then((info) => {
+      if (info !== undefined) this.#reserved.delete(info.id);
+    });
   }
 
   /** Issue a pending sale's item if it is not issued yet, record it, give it to the buyer, and close the sale. */
@@ -520,9 +643,7 @@ export class Shop {
         const issued = (await this.app.owned()).find((o) => o.object.symbol === sale.symbol && o.amount > 0n && !sold(o.object.id))?.object;
         info = issued ?? (await this.app.issue({ symbol: sale.symbol, name: `${item.name} #${sale.serial}`, supply: "1", description: `Sennite: Factions ${sale.kind} ${item.id}` }));
         sale.object = info.id;
-        if (sale.kind === "skin") record.skins[info.id] = { skinId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
-        else if (sale.kind === "hero") record.heroes[info.id] = { heroId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
-        else record.weapons[info.id] = { weaponId: sale.itemId, serial: sale.serial, symbol: sale.symbol };
+        this.record(sale.kind, info.id, sale.itemId, sale.serial, sale.symbol);
         record.paid[payment] = info.id;
         this.store.save();
       } else {
@@ -564,6 +685,7 @@ export class Shop {
           const ended = (): void => {
             delete record.asked[key];
             this.store.save();
+            this.unprepare(key);
           };
           // A payment that landed is carried out whatever else the wallet said of it: that is looked at first.
           if (result.fact === "received" && result.received !== undefined) {
@@ -645,8 +767,26 @@ export class Shop {
 
   /** Hand a wallet an object the shop issued: the wallet takes the object up, then the account gives it. */
   private async deliver(connection: Connection, object: ObjectInfo): Promise<void> {
-    await this.app.wait(await this.app.request(connection, ask.accept(object)), { until: "answered" });
-    await this.app.give(connection, object, "1");
+    const taken = `${hex(connection.opponent.signingKey)}:${object.id}`;
+    if (!this.#takenUp.has(taken)) {
+      // the asking made while the player approved, if it is still open; else a new one
+      const asking = this.#takingUp.get(taken) ?? (await this.app.request(connection, ask.accept(object)));
+      await this.app.wait(asking, { until: "answered" });
+      this.#takingUp.delete(taken);
+    }
+    // The account gives to a wallet only once that wallet has finished sending what it last sent the account: right
+    // after its payment lands, it may not have. The give is tried again each second for a while, not left to the next
+    // sweep (on a Galaxy A16, 2026-11-26, that left a paid item 19 s longer and told the player it could not be done).
+    for (let tries = 0; ; tries += 1) {
+      try {
+        await this.app.give(connection, object, "1");
+        break;
+      } catch (e) {
+        if (tries >= GIVE_TRIES || !/not send-ready/i.test(e instanceof Error ? e.message : String(e))) throw e;
+        await new Promise((resolve) => setTimeout(resolve, this.timing.pollMs));
+      }
+    }
+    this.#takenUp.delete(taken);
   }
 
   /** The skins among what a wallet proved it owns: `proven` is object id (Base32 Crockford) to amount. */
@@ -696,9 +836,12 @@ export class Shop {
   }
 }
 
-/** `probe` until it gives something, for up to four minutes. */
+/**
+ * `probe` until it gives something, for up to fifteen minutes. A wallet works out a price by reading every ERA vault on
+ * the storage set: on the beta fleet on 2026-11-26 that took the wallet 4 to 7 minutes after the player approved.
+ */
 async function until<T>(probe: () => Promise<T | undefined>): Promise<T | undefined> {
-  const deadline = Date.now() + 240_000;
+  const deadline = Date.now() + 15 * 60_000;
   for (;;) {
     const got = await probe();
     if (got !== undefined || Date.now() > deadline) return got;

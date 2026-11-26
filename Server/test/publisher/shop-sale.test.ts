@@ -2,6 +2,7 @@
  * A sale, with a stand-in for the publisher's account: what the shop does with the wallet's answer to "send
  * me the price", whenever that answer comes. The payment itself is DSM's: test/real-dsm/shop.test.ts runs
  * it on DSM. Here the account's answers are set by the test, as a player approving early, late or not at all.
+ * While the player approves, the item is issued and taken up by the wallet; only the give waits for the payment.
  */
 import { describe, expect, it } from "vitest";
 import type { AppAccount, Connection, ObjectInfo, RequestRef, Result } from "dsm-app-client";
@@ -69,9 +70,11 @@ class Account {
     this.given.push(object.id);
   }
 
-  /** The wallet's answer to the one payment asked for. */
+  /** The wallet's answer to the one payment asked for (the latest asked, when a sale was asked again). */
   answer(outcome: Result["outcome"], paid: boolean): void {
-    const [key, was] = [...this.results.entries()][0]!;
+    const payment = this.asks.filter((a) => (a.what as { kind: string }).kind === "send").at(-1)!;
+    const key = this.key(payment.ref);
+    const was = this.results.get(key)!;
     this.results.set(key, { ...was, answered: outcome !== "awaiting_approval", outcome, fact: paid ? "received" : "none", ...(paid ? { received: new Uint8Array([9, 9]) } : {}) });
   }
 }
@@ -83,6 +86,8 @@ const stand = (waitMs: number) => {
   return { account, store, shop };
 };
 const soon = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** What the shop asked the wallet of one kind: "send" (the price) or "accept" (taking an item up). */
+const asked = (account: Account, kind: "send" | "accept") => account.asks.filter((a) => (a.what as { kind: string }).kind === kind);
 
 describe("a sale", () => {
   it("waits in the wallet for the player, and is carried out when the player approves", async () => {
@@ -92,12 +97,23 @@ describe("a sale", () => {
     await soon(30);
     account.answer("awaiting_approval", false);
     await soon(30);
-    expect(account.issued).toHaveLength(0);
+    // while the player approves, the hero is issued and the wallet takes it up; nothing is given before the payment
+    expect(account.issued.map((o) => o.symbol)).toEqual(["HR000001"]);
+    expect(asked(account, "accept")).toHaveLength(1);
+    // the wallet answers in turn: the taking up is asked before the payment, so it is not held behind the player
+    expect(account.asks.map((a) => (a.what as { kind: string }).kind)).toEqual(["accept", "send"]);
+    expect(account.given).toEqual([]);
+    expect(store.data.shop.prepared).toEqual({ OBJ1: { kind: "hero", itemId: "rampage", serial: 1, symbol: "HR000001" } });
+    expect(store.data.shop.heroes).toEqual({});
     account.answer("carried_out", true);
     const sold = await selling;
     expect(sold).toMatchObject({ ok: true, hero: { heroId: "rampage", serial: 1 } });
     expect(account.issued.map((o) => o.symbol)).toEqual(["HR000001"]);
     expect(account.given).toEqual(["OBJ1"]);
+    // once paid, only the give: the wallet is not asked to take the hero up a second time
+    expect(asked(account, "accept")).toHaveLength(1);
+    expect(store.data.shop.heroes).toEqual({ OBJ1: { heroId: "rampage", serial: 1, symbol: "HR000001" } });
+    expect(store.data.shop.prepared).toEqual({});
     expect(store.data.shop.asked).toEqual({});
     expect(store.data.shop.pending).toEqual({});
     // the player is told it waits in their wallet, and after approving that the shop has it in hand
@@ -110,10 +126,13 @@ describe("a sale", () => {
     const sold = await shop.buyHero(connection, "rampage");
     expect(sold.ok).toBe(false);
     expect(Object.keys(store.data.shop.asked)).toHaveLength(1);
-    expect(account.issued).toHaveLength(0);
+    // the hero is ready in the wallet's hands, and not given
+    expect(account.issued).toHaveLength(1);
+    expect(account.given).toEqual([]);
 
     await shop.sweep();
-    expect(account.issued).toHaveLength(0);
+    expect(account.issued).toHaveLength(1);
+    expect(account.given).toEqual([]);
 
     account.answer("carried_out", true);
     await shop.sweep();
@@ -140,10 +159,7 @@ describe("a sale", () => {
 
   it("does not issue an item twice when the shop stopped between issuing it and writing that down", async () => {
     const { account, store, shop } = stand(40);
-    await shop.buyHero(connection, "rampage");
-    account.answer("carried_out", true);
     // as a server that stopped there: the sale is pending with its symbol, the object is issued, and the record does not say so
-    store.data.shop.asked = {};
     store.data.shop.serial = 1;
     store.data.shop.paid["0909"] = "";
     store.data.shop.pending["0909"] = { kind: "hero", itemId: "rampage", serial: 1, symbol: "HR000001", buyer: "070707", object: "" };
@@ -160,7 +176,7 @@ describe("a sale", () => {
     expect(Object.keys(store.data.shop.asked)).toHaveLength(3);
     const fourth = await shop.buyHero(connection, "rampage");
     expect(fourth).toMatchObject({ ok: false });
-    expect(account.asks).toHaveLength(3);
+    expect(asked(account, "send")).toHaveLength(3);
   });
 
   it("keeps what it asked when the account cannot be asked about its connection", async () => {
@@ -199,7 +215,58 @@ describe("a sale", () => {
     expect(sold).toEqual({ ok: false, why: "you declined it in your wallet" });
     expect(store.data.shop.asked).toEqual({});
     await shop.sweep();
-    expect(account.issued).toHaveLength(0);
+    // the gun issued while the player looked stays the account's, given to no one, and sold to nobody
+    expect(account.given).toEqual([]);
+    expect(store.data.shop.weapons).toEqual({});
+    expect(Object.values(store.data.shop.prepared)).toEqual([{ kind: "weapon", itemId: "sniper", serial: 1, symbol: "WP000001" }]);
+  });
+
+  it("sells an item prepared for a payment that was declined to the next buyer of it, and issues no other", async () => {
+    const { account, store, shop } = stand(2_000);
+    const first = shop.buyWeapon(connection, "sniper");
+    await soon(20);
+    account.answer("declined", false);
+    await first;
+    const second = shop.buyWeapon(connection, "sniper");
+    await soon(20);
+    account.answer("carried_out", true);
+    expect(await second).toMatchObject({ ok: true, weapon: { weaponId: "sniper", serial: 1 } });
+    expect(account.issued.map((o) => o.symbol)).toEqual(["WP000001"]);
+    expect(account.given).toEqual(["OBJ1"]);
+    expect(store.data.shop.prepared).toEqual({});
+    expect(store.data.shop.weapons).toEqual({ OBJ1: { weaponId: "sniper", serial: 1, symbol: "WP000001" } });
+  });
+
+  it("gives the item once the wallet has finished sending its payment, without failing the sale", async () => {
+    const { account, store, shop } = stand(2_000);
+    const give = account.give.bind(account);
+    let refused = 0;
+    account.give = async (c, object) => {
+      if (refused < 3) {
+        refused += 1;
+        throw new Error("wallet.send: relationship is not send-ready: Waiting for the peer to finalize a transfer you received");
+      }
+      return give(c, object);
+    };
+    const selling = shop.buySkin(connection, "magma");
+    await soon(20);
+    account.answer("carried_out", true);
+    expect(await selling).toMatchObject({ ok: true, skin: { skinId: "magma" } });
+    expect(refused).toBe(3);
+    expect(account.given).toEqual(["OBJ1"]);
+    expect(store.data.shop.pending).toEqual({});
+  });
+
+  it("asks no payment for an item the account cannot make", async () => {
+    const { account, store, shop } = stand(2_000);
+    account.issue = async () => {
+      throw new Error("token.create: insufficient ERA for the 1000 ERA creation fee (have 0)");
+    };
+    const sold = await shop.buyWeapon(connection, "sniper");
+    expect(sold).toEqual({ ok: false, why: "the shop cannot make the weapon right now: try again in a little while" });
+    expect(asked(account, "send")).toEqual([]);
+    expect(store.data.shop.asked).toEqual({});
+    expect(store.data.shop.prepared).toEqual({});
   });
 
   it("says in plain words that the wallet holds too little", () => {

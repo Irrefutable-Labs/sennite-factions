@@ -174,7 +174,7 @@ export interface AskedSale {
 
 /** The shop's own record (spec 10.5). Who owns what is never here: a wallet proves that. */
 export interface ShopRecord {
-  /** How many skins and heroes the shop has sold. */
+  /** How many skins, heroes and guns the shop has issued: each item's serial. */
   serial: number;
   /** object id (Base32 Crockford) -> the skin it is */
   skins: Record<string, SoldSkin>;
@@ -194,6 +194,20 @@ export interface ShopRecord {
   owed: Record<string, OwedTrade>;
   /** landed transfer -> "" : every transfer a material trade has been begun on. A transfer begins one trade, once. */
   traded: Record<string, string>;
+  /**
+   * object id (Base32 Crockford) -> an item issued ahead of its sale: while a player approves a payment, the item
+   * it buys is issued and taken up by their wallet, so that once the payment lands only the give is left. An item
+   * whose payment was declined stays here, held by the account, for the next sale of the same item.
+   */
+  prepared: Record<string, PreparedItem>;
+}
+
+/** An item the shop issued ahead of a sale, and has not sold yet. */
+export interface PreparedItem {
+  kind: "skin" | "hero" | "weapon";
+  itemId: string;
+  serial: number;
+  symbol: string;
 }
 
 /** One member's share of a match's prize (spec 10.6): an escrow vault the publisher's account locks. */
@@ -258,7 +272,7 @@ export interface StoreData {
   matches: Record<string, MatchRecord>;
 }
 
-const empty = (): StoreData => ({ asked: {}, factions: {}, players: {}, shop: { serial: 0, skins: {}, heroes: {}, weapons: {}, paid: {}, pending: {}, asked: {}, trades: {}, owed: {}, traded: {} }, matches: {} });
+const empty = (): StoreData => ({ asked: {}, factions: {}, players: {}, shop: { serial: 0, skins: {}, heroes: {}, weapons: {}, paid: {}, pending: {}, asked: {}, trades: {}, owed: {}, traded: {}, prepared: {} }, matches: {} });
 
 export class Store {
   readonly data: StoreData;

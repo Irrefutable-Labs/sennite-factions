@@ -137,16 +137,37 @@ public:
 	void ArmOwned();
 
 	/**
-	 * Once in, a player whose wallet owns guns bought in the store shows a pass made out to this server.
-	 * Taken once for each player; the server asks the publisher's server what the pass speaks for, as it
-	 * does for a hero, and the player's own game is never taken at its word.
+	 * The skin this player wears (its shop id), as their wallet was shown to this server to own it: what everyone sees
+	 * the hero in (ASenniteCharacter::WearChosenSkin). Empty for the hero as it ships.
+	 */
+	UPROPERTY(Replicated)
+	FString WornSkin;
+
+	/** The gun or blade bought in the store that this player carries (its shop id), as their wallet was shown to own it: what a lobby's stage shows the hero holding. */
+	UPROPERTY(Replicated)
+	FString CarriedGun;
+
+	/**
+	 * Once in, and again whenever it changes, a player shows this server what their wallet owns of the store, with a
+	 * pass made out to it: the guns and blades bought (the player has them at once), and the skin they wear and the
+	 * gun they carry, for everyone to see. The server asks the publisher's server what the pass speaks for, as it does
+	 * for a hero, and the player's own game is never taken at its word. With no pass, only what is taken off is taken.
 	 */
 	UFUNCTION(Server, Reliable)
-	void ServerClaimGuns(const FString& Pass);
+	void ServerClaimOwned(const FString& Pass, const FString& Skin, const FString& Gun);
 
-	/** Whether the claim of guns was taken (on the server), or asked for (on the player's game). */
-	bool bGunClaimTaken = false;
-	bool bGunClaimAsked = false;
+	/** On the server: a claim being checked, and the one asked meanwhile, checked after it. */
+	bool bOwnedChecking = false;
+	bool bOwnedNext = false;
+	FString NextPass;
+	FString NextSkin;
+	FString NextGun;
+
+	/** On the player's own game: what was last shown to the server (skin, gun and guns owned), and when it may be shown again. */
+	FString OwnedShown;
+	double OwnedShowAfter = 0.0;
+	/** On the player's own game: when the hero bought in the shop was claimed, which a claim of what is owned waits for (one pass is out at a time). */
+	double StartingClaimAskedAt = 0.0;
 
 	/** Whether the starting claim was taken (on the server), or asked for (on the player's game). */
 	bool bStartingClaimTaken = false;
