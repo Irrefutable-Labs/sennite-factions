@@ -212,9 +212,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Camera")
 	float AimEyesAhead = 18.0f;
 
-	/** Aiming a gun: how far over the top of the gun the view is (cm), looking down its sights. */
+	/** Aiming a gun: how far over the top line of the gun the view is, and how far behind its back end (cm), looking down its sights. */
 	UPROPERTY(EditDefaultsOnly, Category = "Camera")
-	float AimOverGun = 6.0f;
+	float AimOverGun = 3.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Camera")
+	float AimBehindGun = 12.0f;
 
 	/** How wide the player's view is, in degrees: following the hero, and aiming. */
 	UPROPERTY(EditDefaultsOnly, Category = "Camera")
@@ -850,6 +853,10 @@ public:
 
 	/** Whether a transform is a place the build grid has. */
 	bool IsOnBuildGrid(const FVector& Location, const FRotator& Rotation) const;
+	/** The highest ground (cm, whole) under where a piece of this kind goes, or the lowest double if there is no land under it. */
+	double GroundUnder(const FString& PieceKind, const FVector& Location, const FRotator& Rotation) const;
+	/** On the server: a piece's height is the ground under it, a level above that, or a whole number of levels from a piece near it. */
+	bool IsBuildHeight(const FString& PieceKind, const FVector& Location, const FRotator& Rotation) const;
 
 	/** Whether a spawned piece overlaps a player or a piece of its kind already standing there. */
 	bool IsBuildingPieceBlocked(const ABuildingActor* Piece) const;

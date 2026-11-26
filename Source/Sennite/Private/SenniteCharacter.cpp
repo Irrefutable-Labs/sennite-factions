@@ -226,33 +226,11 @@ void ASenniteCharacter::BuildPlacement(const FString& PieceKind, FVector& OutLoc
 		// of: on raised or sloping land the grid's level below the hero left most of a ramp in the ground, "a slice,
 		// and it's underground" (the owner, 2026-11-25). Its base is the highest ground under where it goes (a
 		// ramp's: under its foot, which it rises from), so the whole of it stands above the land.
-		const FVector Next = FVector(Own.X, Own.Y, Feet.Z) + Ahead * Cell;
-		const FVector Side = FRotator(0.0, FacingYaw + 90.0, 0.0).Vector();
-		TArray<FVector> Under;
-		if (PieceKind == TEXT("Wall")) {
-			const FVector Base = FVector(Own.X, Own.Y, Feet.Z) + Ahead * (Cell * 0.5);
-			Under = { Base - Side * (Cell * 0.45), Base, Base + Side * (Cell * 0.45) };
-		}
-		else if (PieceKind == TEXT("Ramp")) {
-			const FVector Foot = Next - Ahead * (Cell * 0.45);
-			Under = { Foot - Side * (Cell * 0.45), Foot, Foot + Side * (Cell * 0.45) };
-		}
-		else {
-			Under = { Next, Next + (Ahead + Side) * (Cell * 0.45), Next + (Ahead - Side) * (Cell * 0.45), Next - (Ahead + Side) * (Cell * 0.45), Next - (Ahead - Side) * (Cell * 0.45) };
-		}
-		double Ground = -TNumericLimits<double>::Max();
-		FCollisionObjectQueryParams Land;
-		Land.AddObjectTypesToQuery(ECC_WorldStatic);
-		for (const FVector& At : Under) {
-			FHitResult Hit;
-			if (GetWorld()->LineTraceSingleByObjectType(Hit, At + FVector(0.0, 0.0, Cell), At - FVector(0.0, 0.0, Cell * 2.0), Land,
-				FCollisionQueryParams(SCENE_QUERY_STAT(SennitePieceGround), false, this))) {
-				Ground = FMath::Max(Ground, Hit.ImpactPoint.Z);
-			}
-		}
+		const bool bWall = PieceKind == TEXT("Wall");
+		const FVector Where = FVector(Own.X, Own.Y, Feet.Z) + Ahead * (bWall ? Cell * 0.5 : Cell);
+		const double Ground = GroundUnder(PieceKind, Where, FRotator(0.0, FacingYaw + (bWall ? 90.0 : 0.0), 0.0));
 		if (Ground > -TNumericLimits<double>::Max()) {
-			// to the centimetre, so that the server and the player's own game, asking the same land, agree
-			Level = FMath::RoundToDouble(Ground);
+			Level = Ground;
 		}
 	}
 	// The height is the player's to pick: looking well above the horizon builds one level up; and from a piece,
@@ -665,17 +643,23 @@ void ASenniteCharacter::Tick(float DeltaTime) {
 			// Aiming a gun, the view is down its sights: just over the top of the gun and in line with it, so the gun is
 			// seen across the bottom of the view (the owner, 2026-11-25: "Should be aiming down the sights"). The gun is
 			// where the hero's hands hold it, so this follows any hero's size and hold.
-			float Eyes = BaseEyeHeight;
-			float InLine = 0.0f;
-			if (bEyes && CurrentWeapon != nullptr && CurrentWeapon->WeaponMesh != nullptr && !CurrentWeapon->bMelee) {
-				const FBoxSphereBounds Gun = CurrentWeapon->WeaponMesh->Bounds;
-				Eyes = float(Gun.Origin.Z + Gun.BoxExtent.Z - GetActorLocation().Z) + AimOverGun;
-				InLine = float(GetActorTransform().InverseTransformPosition(Gun.Origin).Y);
+			// The view is put a little behind the gun's back end, just over its top line: the gun runs ahead along the
+			// bottom of the view, as a gun is looked down. The gun's own model says where its back and its top are
+			// (its muzzle is along its +X, its top along +Z).
+			FVector Eyes(0.0, 0.0, BaseEyeHeight);
+			bool bSights = false;
+			if (bEyes && CurrentWeapon != nullptr && CurrentWeapon->WeaponMesh != nullptr && !CurrentWeapon->bMelee && CurrentWeapon->WeaponMesh->GetStaticMesh() != nullptr) {
+				const FBoxSphereBounds Model = CurrentWeapon->WeaponMesh->GetStaticMesh()->GetBounds();
+				const FTransform Held = CurrentWeapon->WeaponMesh->GetComponentTransform();
+				const FVector Back = Held.TransformPosition(FVector(Model.Origin.X - Model.BoxExtent.X, Model.Origin.Y, Model.Origin.Z + Model.BoxExtent.Z));
+				const FVector Along = GetControlRotation().Vector();
+				Eyes = Back - Along * AimBehindGun + FVector(0.0, 0.0, AimOverGun) - GetActorLocation();
+				bSights = true;
 			}
-			const FVector Beside = bEyes ? FVector(AimEyesAhead, InLine, 0.0f) : bFaceAim ? ShoulderView : FVector::ZeroVector;
+			const FVector Beside = bSights ? FVector::ZeroVector : bEyes ? FVector(AimEyesAhead, 0.0f, 0.0f) : bFaceAim ? ShoulderView : FVector::ZeroVector;
 			CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, Beside, DeltaTime, bEyes ? 14.0f : 8.0f);
 			// up to the eyes whichever way the player looks: an offset in the world, not one that tips with the view
-			CameraBoom->TargetOffset = FMath::VInterpTo(CameraBoom->TargetOffset, FVector(0.0f, 0.0f, bEyes ? Eyes : bBuilding ? BuildViewRise : 0.0f), DeltaTime, bEyes ? 14.0f : 6.0f);
+			CameraBoom->TargetOffset = FMath::VInterpTo(CameraBoom->TargetOffset, bEyes ? Eyes : FVector(0.0, 0.0, bBuilding ? BuildViewRise : 0.0f), DeltaTime, bEyes ? 14.0f : 6.0f);
 			CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, bEyes ? 0.0f : bBuilding ? FollowDistance * BuildViewFarther : FollowDistance, DeltaTime, bEyes ? 14.0f : 6.0f);
 			FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, bEyes ? AimFieldOfView : FollowFieldOfView, DeltaTime, 14.0f));
 			// Close enough to be inside the hero, the hero is not drawn for its own player (it still casts its shadow, and
@@ -1610,6 +1594,7 @@ void ASenniteCharacter::ServerBuildStructure_Implementation(TSubclassOf<ABuildin
 		: !State->InBuildMode || State->BuildMode != PieceKind ? TEXT("the player is not building that kind")
 		: !State->MaterialCounts.IsValidIndex(MaterialType) || State->MaterialCounts[MaterialType] < BuildingPieceCost ? TEXT("too little material")
 		: !IsOnBuildGrid(SpawnLocation, SpawnRotation) ? TEXT("off the build grid")
+		: !IsBuildHeight(PieceKind, SpawnLocation, SpawnRotation) ? TEXT("neither on the ground nor level with a piece")
 		: FVector::Dist(SpawnLocation, GetActorLocation()) > MaxBuildReach ? TEXT("out of reach") : nullptr;
 	if (Refused != nullptr) {
 		UE_LOG(LogSenniteCharacter, Display, TEXT("A %s at %s was not built: %s"), *PieceKind, *SpawnLocation.ToCompactString(), Refused);
@@ -1650,6 +1635,62 @@ int32 ASenniteCharacter::BuildingMaterialOf(TSubclassOf<ABuildingActor> Structur
 	return INDEX_NONE;
 }
 
+double ASenniteCharacter::GroundUnder(const FString& PieceKind, const FVector& Location, const FRotator& Rotation) const
+{
+	// the highest ground under where the piece goes: under a wall, along its foot; under a ramp, along the foot it
+	// rises from; under a floor, its middle and corners. The land only: no piece, no player.
+	const double Cell = BuildGridCell;
+	const FVector Across = Rotation.RotateVector(FVector::XAxisVector);
+	const FVector Side = Rotation.RotateVector(FVector::YAxisVector);
+	const FVector At(Location.X, Location.Y, Location.Z);
+	TArray<FVector> Under;
+	if (PieceKind == TEXT("Wall")) {
+		Under = { At - Across * (Cell * 0.45), At, At + Across * (Cell * 0.45) };
+	}
+	else if (PieceKind == TEXT("Ramp")) {
+		const FVector Foot = At - Across * (Cell * 0.45);
+		Under = { Foot - Side * (Cell * 0.45), Foot, Foot + Side * (Cell * 0.45) };
+	}
+	else {
+		Under = { At, At + (Across + Side) * (Cell * 0.45), At + (Across - Side) * (Cell * 0.45), At - (Across + Side) * (Cell * 0.45), At - (Across - Side) * (Cell * 0.45) };
+	}
+	double Ground = -TNumericLimits<double>::Max();
+	FCollisionObjectQueryParams Land;
+	Land.AddObjectTypesToQuery(ECC_WorldStatic);
+	for (const FVector& Each : Under) {
+		FHitResult Hit;
+		if (GetWorld()->LineTraceSingleByObjectType(Hit, Each + FVector(0.0, 0.0, Cell), Each - FVector(0.0, 0.0, Cell * 2.0), Land,
+			FCollisionQueryParams(SCENE_QUERY_STAT(SennitePieceGround), false, this))) {
+			Ground = FMath::Max(Ground, Hit.ImpactPoint.Z);
+		}
+	}
+	// to the centimetre, so that the server and the player's own game, asking the same land, agree
+	return Ground > -TNumericLimits<double>::Max() ? FMath::RoundToDouble(Ground) : Ground;
+}
+
+bool ASenniteCharacter::IsBuildHeight(const FString& PieceKind, const FVector& Location, const FRotator& Rotation) const
+{
+	// The height a player's game asks for is checked here, not taken: the ground under the piece as the server finds
+	// it (or a level above it, looking up), or a whole number of levels from a piece near it (stood on, or built from).
+	const double Cell = BuildGridCell;
+	const double Ground = GroundUnder(PieceKind, Location, Rotation);
+	if (Ground > -TNumericLimits<double>::Max() && (FMath::Abs(Location.Z - Ground) <= 2.0 || FMath::Abs(Location.Z - Ground - Cell) <= 2.0)) {
+		return true;
+	}
+	for (TActorIterator<ABuildingActor> It(GetWorld()); It; ++It) {
+		const ABuildingActor* Piece = *It;
+		if (Piece->IsPreview || Piece->IsActorBeingDestroyed() || FVector::Dist2D(Piece->GetActorLocation(), Location) > Cell * 2.0) {
+			continue;
+		}
+		for (int32 Levels = -1; Levels <= 2; ++Levels) {
+			if (FMath::Abs(Location.Z - Piece->GetActorLocation().Z - Levels * Cell) <= 2.0) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 bool ASenniteCharacter::IsOnBuildGrid(const FVector& Location, const FRotator& Rotation) const {
 	// every piece sits on a multiple of half a grid cell across the land, turned in quarter turns, and upright; its
 	// height is the ground's or the piece's it stands on (BuildPlacement), on no grid
@@ -1685,7 +1726,8 @@ bool ASenniteCharacter::IsBuildingPieceBlocked(const ABuildingActor* Piece) cons
 	for (TActorIterator<ABuildingActor> It(GetWorld()); It; ++It) {
 		const ABuildingActor* Structure = *It;
 		if (Structure != Piece && !Structure->IsPreview && Structure->StructureType.Equals(Piece->StructureType)
-			&& FVector::Dist(Structure->GetActorLocation(), Piece->GetActorLocation()) < 1.0) {
+			&& FVector::Dist2D(Structure->GetActorLocation(), Piece->GetActorLocation()) < 1.0
+			&& FMath::Abs(Structure->GetActorLocation().Z - Piece->GetActorLocation().Z) < BuildGridCell * 0.5) {
 			return true;
 		}
 	}
