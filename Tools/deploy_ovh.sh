@@ -21,6 +21,7 @@ HOST="${SENNITE_HOST:-148.113.137.67}"
 KEY="${SSH_KEY:-$HOME/.ssh/dsm-deploy}"
 TAG="${DSM_APP_HOST_TAG:-512759a5d}"
 REV=$(git rev-parse --short=9 "${1:-HEAD}^{commit}")
+[[ "$HOST" =~ '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' && "$TAG" =~ '^[A-Za-z0-9._-]+$' ]] || { echo "SENNITE_HOST must be an IPv4 address and DSM_APP_HOST_TAG an image tag" >&2; exit 2; }
 SSH=(ssh -o BatchMode=yes -i "$KEY" "ubuntu@$HOST")
 
 echo "==> sending $REV to $HOST"
