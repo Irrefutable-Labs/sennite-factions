@@ -1,0 +1,59 @@
+# Sennite: Factions, the publisher's side, on the games host (dsm-games-1, 148.113.137.67): the publisher's own
+# DSM account (dsm-app-host) and the publisher's server (Server/). The shared Caddy in /opt/https serves the
+# server at https://sennite.148.113.137.67.sslip.io; wallets reach the account's relay at https://148.113.137.67:8445.
+# The ingress (127.0.0.1:8787) and the server's own port (127.0.0.1:8790) stay on the host.
+# Use from /opt/sennite: sudo docker compose -p sennite up -d
+services:
+  account:
+    image: dsm-app-host:${DSM_APP_HOST_TAG:?}
+    restart: unless-stopped
+    network_mode: host
+    user: '10001:10001'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    tmpfs: ['/tmp:size=64m,mode=1777']
+    volumes:
+      - ./account:/opt/sennite/account
+      - ./ingress:/opt/sennite/ingress
+      - ./network:/network:ro
+    command:
+      - --data-dir
+      - /opt/sennite/account
+      - --ingress-secret-dir
+      - /opt/sennite/ingress
+      - --env-config
+      - /network/dsm_env_config.toml
+      - --game-bind
+      - 127.0.0.1:8787
+      - --relay-bind
+      - 0.0.0.0:8445
+      - --relay-endpoint
+      - https://${PUBLIC_IP:?}:8445
+      - --relay-name
+      - ${PUBLIC_IP:?}
+    logging: {driver: json-file, options: {max-size: 10m, max-file: '3'}}
+
+  publisher:
+    image: sennite-publisher:${SENNITE_REV:?}
+    restart: unless-stopped
+    network_mode: host
+    user: '10001:10001'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    depends_on:
+      account: {condition: service_started}
+    environment:
+      DSM_APP_HOST: http://127.0.0.1:8787
+      DSM_APP_HOST_SECRET_FILE: /opt/sennite/ingress/ingress-token
+      DSM_ENV_CONFIG: /network/dsm_env_config.toml
+      SENNITE_DATA_DIR: /opt/sennite/server
+      SENNITE_BIND: 127.0.0.1:8790
+    volumes:
+      - ./ingress:/opt/sennite/ingress:ro
+      - ./server:/opt/sennite/server
+      - ./network:/network:ro
+    logging: {driver: json-file, options: {max-size: 10m, max-file: '3'}}
