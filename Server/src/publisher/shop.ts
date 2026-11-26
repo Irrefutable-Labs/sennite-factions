@@ -83,6 +83,8 @@ const FORGOTTEN_AFTER_MS = 30 * 24 * 60 * 60_000;
 
 /** How long the shop waits for a wallet to take up an object it is about to be given, at one look. */
 const ACCEPT_WAIT_MS = 30_000;
+/** How many times a give is tried again while the wallet is still finishing what it sent (a try each poll, 700 ms). */
+const GIVE_TRIES = 90;
 
 /** The first letters of the symbol an item sold is issued under, by its kind. */
 const PREFIX = { skin: "SK", hero: "HR", weapon: "WP" } as const;
@@ -772,7 +774,18 @@ export class Shop {
       await this.app.wait(asking, { until: "answered" });
       this.#takingUp.delete(taken);
     }
-    await this.app.give(connection, object, "1");
+    // The account gives to a wallet only once that wallet has finished sending what it last sent the account: right
+    // after its payment lands, it may not have. The give is tried again each second for a while, not left to the next
+    // sweep (on a Galaxy A16, 2026-11-26, that left a paid item 19 s longer and told the player it could not be done).
+    for (let tries = 0; ; tries += 1) {
+      try {
+        await this.app.give(connection, object, "1");
+        break;
+      } catch (e) {
+        if (tries >= GIVE_TRIES || !/not send-ready/i.test(e instanceof Error ? e.message : String(e))) throw e;
+        await new Promise((resolve) => setTimeout(resolve, this.timing.pollMs));
+      }
+    }
     this.#takenUp.delete(taken);
   }
 

@@ -237,6 +237,26 @@ describe("a sale", () => {
     expect(store.data.shop.weapons).toEqual({ OBJ1: { weaponId: "sniper", serial: 1, symbol: "WP000001" } });
   });
 
+  it("gives the item once the wallet has finished sending its payment, without failing the sale", async () => {
+    const { account, store, shop } = stand(2_000);
+    const give = account.give.bind(account);
+    let refused = 0;
+    account.give = async (c, object) => {
+      if (refused < 3) {
+        refused += 1;
+        throw new Error("wallet.send: relationship is not send-ready: Waiting for the peer to finalize a transfer you received");
+      }
+      return give(c, object);
+    };
+    const selling = shop.buySkin(connection, "magma");
+    await soon(20);
+    account.answer("carried_out", true);
+    expect(await selling).toMatchObject({ ok: true, skin: { skinId: "magma" } });
+    expect(refused).toBe(3);
+    expect(account.given).toEqual(["OBJ1"]);
+    expect(store.data.shop.pending).toEqual({});
+  });
+
   it("asks no payment for an item the account cannot make", async () => {
     const { account, store, shop } = stand(2_000);
     account.issue = async () => {
