@@ -39,16 +39,23 @@ namespace GameCheck
 		static bool LaneIsClear(const ASenniteArena* Arena, int32 ConnectorIndex, int32 Lane, const FVector& Crossing)
 		{
 			const double Now = Arena->MatchSeconds();
-			for (const FArenaCraft& Craft : Arena->GetPlan().Craft) {
+			const TArray<FArenaCraft>& All = Arena->GetPlan().Craft;
+			for (int32 Index = 0; Index < All.Num(); ++Index) {
+				const FArenaCraft& Craft = All[Index];
 				if (Craft.Connector != ConnectorIndex || Craft.Lane != Lane) {
 					continue;
 				}
+				// as large as the vehicle the craft is: across its lane, and along it
+				const FVector Box = Arena->CraftBox(Index);
 				const double Where = FVector::DotProduct(Crossing - Craft.LaneStart, Craft.LaneDirection);
-				// From a standing start 320 short of the lane's middle, a sprint is in the craft's path from
-				// about 0.45 s to about 1.0 s after setting off. A little is added at each end and each side.
-				for (double Ahead = 0.4; Ahead <= 1.06; Ahead += 0.03) {
+				// From a standing start 320 short of the lane's middle, a sprint is in the path of a craft
+				// 210 wide from about 0.45 s to about 1.0 s after setting off. A wider one is met sooner,
+				// while the sprint is still gathering speed, and left later. A little is added at each end
+				// and each side.
+				const double Wider = FMath::Max(0.0, Box.X * 0.5 - 105.0);
+				for (double Ahead = FMath::Max(0.0, 0.4 - Wider / 300.0); Ahead <= 1.06 + Wider / 500.0; Ahead += 0.03) {
 					const double Along = FVector::DotProduct(ASenniteArena::CraftLocation(Craft, Now + Ahead) - Craft.LaneStart, Craft.LaneDirection);
-					if (FMath::Abs(Along - Where) < Craft.Size.Y * 0.5 + 42.0 + 60.0) {
+					if (FMath::Abs(Along - Where) < Box.Y * 0.5 + 42.0 + 60.0) {
 						return false;
 					}
 				}

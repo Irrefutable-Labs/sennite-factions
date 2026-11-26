@@ -13,7 +13,7 @@
 //   Floating  a gorge with pieces hanging over it to jump between, some with cover to shoot from
 //   TreeTop   a forest with a boardwalk above it, between huts on tall trunks
 //   Canyon    a floor to walk through between two rims that can be held from above
-//   Traffic   a road that hovering craft cross without stopping
+//   Traffic   a road that vehicles cross without stopping; one that reaches a hero kills it
 //   Tunnel    a passage through a mass of rock
 //   Bridges   a river with arched bridges over it
 //
@@ -132,9 +132,16 @@ struct FArenaBox
 	EArenaTint Tint = EArenaTint::Rock;
 };
 
-/** One hovering craft: it flies its lane end to end, again and again. */
+/**
+ * One craft of the traffic road: it runs its lane end to end, again and again. It is drawn as a
+ * vehicle (ASenniteArena::CraftModels) at the vehicle's own size, and what reaches a hero is that
+ * vehicle's box (ASenniteArena::CraftBox). Size is the box of a craft with no vehicle to be.
+ */
 struct FArenaCraft
 {
+	/** How far above its connector's level, which the road is laid at, a craft's middle is. */
+	static constexpr float Height = 115.0f;
+
 	FVector LaneStart = FVector::ZeroVector;
 	FVector LaneDirection = FVector::ForwardVector;
 	float LaneLength = 0.0f;
@@ -373,6 +380,13 @@ public:
 	/** Where a craft is at a moment of the match's clock. */
 	static FVector CraftLocation(const FArenaCraft& Craft, double MatchSeconds);
 
+	/**
+	 * How large the craft at this place of the plan is: across its lane, along it, and high. The
+	 * size the settings give its vehicle (CraftSizes) once the arena is built, its plan's box when it
+	 * has no vehicle to be.
+	 */
+	FVector CraftBox(int32 Index) const;
+
 	/** The match's clock, the same on every machine. */
 	double MatchSeconds() const;
 
@@ -414,9 +428,26 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
 	TArray<FSoftObjectPath> SceneryMeshes;
 
-	/** What a craft takes from a player it runs into. Set in DefaultGame.ini. */
+	/**
+	 * The vehicles the traffic road's craft are (Tools/import_vehicles.py), each standing on its
+	 * wheels at its own height 0 with its nose along +X. A craft is the same vehicle on every machine:
+	 * which one is its place in the plan. It is drawn at its own size (a truck is a truck, the owner,
+	 * 2026-11-22), on the road, facing the way its lane runs, and what reaches a hero is as large as
+	 * what is drawn (CraftBox). Empty: a craft is its plan's box, drawn as a block. Set in DefaultGame.ini.
+	 */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
-	float CraftDamage = 20.0f;
+	TArray<FSoftObjectPath> CraftModels;
+
+	/**
+	 * How large each of CraftModels is, in their order: long, wide and high, in cm, as
+	 * Tools/import_vehicles.py writes them out. What reaches a hero is this size, taken from the
+	 * settings and not from the vehicle as it loaded, so it is the same on the match server and on
+	 * every player's machine: a machine a vehicle did not load on draws that craft as a block of this
+	 * size, never as another vehicle and never smaller than what kills. One size for each vehicle, or
+	 * no craft is a vehicle. Set in DefaultGame.ini.
+	 */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Arena")
+	TArray<FVector> CraftSizes;
 
 	/**
 	 * The country round the arena, and its water: mountains and a lake, seen and nothing else. Each
@@ -467,6 +498,15 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> CraftBodies;
 
+	/** Where each craft's body is drawn from where the craft is: a vehicle stands on the road under its craft's middle. */
+	TArray<FVector> CraftDrawnFrom;
+
+	/** How large each craft is (CraftBox), in the plan's order. */
+	TArray<FVector> CraftBoxes;
+
+	/** Where the middle of each craft's box is from where the craft is: a vehicle's is half its height above the road. */
+	TArray<FVector> CraftMiddles;
+
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> LandParts;
 
@@ -479,6 +519,6 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<APlayerStart>> StartActors;
 
-	/** When each player was last run into by a craft, so one pass of a craft is one hit. */
+	/** When each player was last reached by a craft, so one pass of a craft takes a hero once. */
 	TMap<TWeakObjectPtr<AActor>, double> LastCraftHit;
 };

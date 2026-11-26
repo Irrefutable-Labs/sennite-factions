@@ -361,7 +361,7 @@ namespace
 		}
 	}
 
-	// A road across the land that hovering craft cross, lane after lane, without stopping.
+	// A road across the land that vehicles cross, lane after lane, without stopping.
 	void FBuilder::Traffic()
 	{
 		const float Half = Width * 0.5f;
@@ -382,7 +382,7 @@ namespace
 			Slab(X + 150.0f, X + 175.0f, -Half, Half, FloorTop + 3.0f, 3.0f, EArenaTint::Marking);
 			for (int32 Each = 0; Each < Count; ++Each) {
 				FArenaCraft Craft;
-				Craft.LaneStart = Connector.Frame.TransformPosition(FVector(X, -Way * LaneLength * 0.5f, 115.0f));
+				Craft.LaneStart = Connector.Frame.TransformPosition(FVector(X, -Way * LaneLength * 0.5f, FArenaCraft::Height));
 				Craft.LaneDirection = Connector.Frame.TransformVectorNoScale(FVector(0.0f, Way, 0.0f));
 				Craft.LaneLength = LaneLength;
 				Craft.Speed = Speed;
@@ -2152,6 +2152,14 @@ FVector ASenniteArena::CraftLocation(const FArenaCraft& Craft, double MatchSecon
 	return Craft.LaneStart + Craft.LaneDirection * Along;
 }
 
+FVector ASenniteArena::CraftBox(int32 Index) const
+{
+	if (CraftBoxes.IsValidIndex(Index)) {
+		return CraftBoxes[Index];
+	}
+	return Plan.Craft.IsValidIndex(Index) ? Plan.Craft[Index].Size : FVector::ZeroVector;
+}
+
 double ASenniteArena::MatchSeconds() const
 {
 	const UWorld* World = GetWorld();
@@ -2473,15 +2481,70 @@ void ASenniteArena::Build()
 		}
 	}
 
-	// the craft: seen here, moved in Tick, and felt through the server's own sums, not through collision
-	for (const FArenaCraft& Craft : Plan.Craft) {
+	// The craft: seen here, moved in Tick, and felt through the server's own sums, not through collision.
+	// Each is one of the vehicles, by its place in the plan, so it is the same one on every machine:
+	// at its own size, its wheels on the road and its nose (its own +X) the way its lane runs. What
+	// reaches a hero is as large as that vehicle, by the size the settings give it (CraftSizes), which
+	// every machine has alike whatever loaded on it: a vehicle that is not there is drawn as a block
+	// of its size, so what kills is never larger than what is seen, nor another vehicle.
+	const bool bVehicles = CraftModels.Num() > 0 && CraftSizes.Num() == CraftModels.Num();
+	if (CraftModels.Num() != CraftSizes.Num()) {
+		UE_LOG(LogTemp, Error, TEXT("Arena: %d vehicles are named for the craft and %d sizes: no craft is a vehicle"), CraftModels.Num(), CraftSizes.Num());
+	}
+	TArray<UStaticMesh*> Vehicles;
+	for (int32 Which = 0; bVehicles && Which < CraftModels.Num(); ++Which) {
+		UStaticMesh* Vehicle = CraftModels[Which].IsNull() ? nullptr : Cast<UStaticMesh>(CraftModels[Which].TryLoad());
+		if (Vehicle == nullptr) {
+			UE_LOG(LogTemp, Error, TEXT("Arena: the craft's vehicle %s is not there: it is drawn as a block of its size"), *CraftModels[Which].ToString());
+		}
+		else if (!Vehicle->GetBoundingBox().GetSize().Equals(CraftSizes[Which], 2.0)) {
+			UE_LOG(LogTemp, Error, TEXT("Arena: the craft's vehicle %s is %s, and its size in CraftSizes is %s: what reaches a hero is the size in CraftSizes"),
+				*CraftModels[Which].ToString(), *Vehicle->GetBoundingBox().GetSize().ToCompactString(), *CraftSizes[Which].ToCompactString());
+		}
+		Vehicles.Add(Vehicle);
+	}
+	CraftDrawnFrom.Reset();
+	CraftBoxes.Reset();
+	CraftMiddles.Reset();
+	for (int32 Index = 0; Index < Plan.Craft.Num(); ++Index) {
+		const FArenaCraft& Craft = Plan.Craft[Index];
 		UStaticMeshComponent* Body = NewObject<UStaticMeshComponent>(this);
-		Body->SetStaticMesh(Cube);
-		Body->SetMaterial(0, Tints[static_cast<int32>(EArenaTint::Craft)]);
+		FTransform Drawn(Craft.Rotation, FVector::ZeroVector, Craft.Size / 100.0f);
+		FVector Box = Craft.Size;
+		FVector Middle = FVector::ZeroVector;
+		UStaticMesh* Vehicle = nullptr;
+		if (bVehicles) {
+			const int32 Which = Index % CraftModels.Num();
+			// long, wide and high; a craft's box is across its lane, along it, and high
+			const FVector Sized = CraftSizes[Which];
+			const FVector Up = Craft.Rotation.GetUpVector();
+			const FQuat Facing = FRotationMatrix::MakeFromXZ(Craft.LaneDirection, Up).ToQuat();
+			Box = FVector(Sized.Y, Sized.X, Sized.Z);
+			Middle = Up * (Sized.Z * 0.5f - FArenaCraft::Height);
+			Vehicle = Vehicles[Which];
+			if (Vehicle != nullptr) {
+				const FBox Shape = Vehicle->GetBoundingBox();
+				Drawn = FTransform(Facing, Facing.RotateVector(FVector(-Shape.GetCenter().X, -Shape.GetCenter().Y, -Shape.Min.Z)) - Up * FArenaCraft::Height);
+			}
+			else {
+				Drawn = FTransform(Facing, Middle, Sized / 100.0f);
+			}
+		}
+		if (Vehicle != nullptr) {
+			Body->SetStaticMesh(Vehicle);
+		}
+		else {
+			Body->SetStaticMesh(Cube);
+			Body->SetMaterial(0, Tints[static_cast<int32>(EArenaTint::Craft)]);
+		}
 		Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Body->SetupAttachment(RootComponent);
 		Body->RegisterComponent();
-		Body->SetWorldTransform(FTransform(Craft.Rotation, CraftLocation(Craft, MatchSeconds()), Craft.Size / 100.0f));
+		CraftBoxes.Add(Box);
+		CraftMiddles.Add(Middle);
+		CraftDrawnFrom.Add(Drawn.GetLocation());
+		Drawn.AddToTranslation(CraftLocation(Craft, MatchSeconds()));
+		Body->SetWorldTransform(Drawn);
 		CraftBodies.Add(Body);
 	}
 
@@ -2509,25 +2572,27 @@ void ASenniteArena::Tick(float DeltaTime)
 	}
 	const double Now = MatchSeconds();
 	for (int32 Index = 0; Index < Plan.Craft.Num() && Index < CraftBodies.Num(); ++Index) {
-		CraftBodies[Index]->SetWorldLocation(CraftLocation(Plan.Craft[Index], Now));
+		CraftBodies[Index]->SetWorldLocation(CraftLocation(Plan.Craft[Index], Now) + (CraftDrawnFrom.IsValidIndex(Index) ? CraftDrawnFrom[Index] : FVector::ZeroVector));
 	}
 	if (!HasAuthority()) {
 		return;
 	}
-	// A craft that reaches a player takes health from them and throws them down its lane. One pass, one hit.
+	// A craft that reaches a hero kills it (the owner, 2026-11-22): whatever health and shield it has.
 	for (TActorIterator<ASenniteCharacter> It(GetWorld()); It; ++It) {
 		ASenniteCharacter* Hero = *It;
 		const double* Last = LastCraftHit.Find(Hero);
 		if (Last != nullptr && Now - *Last < 0.6) {
 			continue;
 		}
-		for (const FArenaCraft& Craft : Plan.Craft) {
-			const FVector Offset = Craft.Rotation.UnrotateVector(Hero->GetActorLocation() - CraftLocation(Craft, Now));
-			const FVector Reach = Craft.Size * 0.5f + FVector(42.0f, 42.0f, 96.0f);
+		for (int32 Index = 0; Index < Plan.Craft.Num(); ++Index) {
+			const FArenaCraft& Craft = Plan.Craft[Index];
+			const FVector Box = CraftBox(Index);
+			const FVector Centre = CraftLocation(Craft, Now) + (CraftMiddles.IsValidIndex(Index) ? CraftMiddles[Index] : FVector::ZeroVector);
+			const FVector Offset = Craft.Rotation.UnrotateVector(Hero->GetActorLocation() - Centre);
+			const FVector Reach = Box * 0.5f + FVector(42.0f, 42.0f, 96.0f);
 			if (FMath::Abs(Offset.X) <= Reach.X && FMath::Abs(Offset.Y) <= Reach.Y && FMath::Abs(Offset.Z) <= Reach.Z) {
 				LastCraftHit.Add(Hero, Now);
-				Hero->LaunchCharacter(Craft.LaneDirection * (Craft.Speed * 0.6f) + FVector(0.0f, 0.0f, 380.0f), true, true);
-				Hero->TakeHit(CraftDamage, nullptr);
+				Hero->TakeHit(Hero->Health + Hero->Shield, nullptr);
 				break;
 			}
 		}
