@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Made by Tools/make_app_icon.sh: the Sennite logo's background, behind the adaptive icon's moon. -->
+<resources>
+    <color name="sennite_icon_background">#03041D</color>
+</resources>
