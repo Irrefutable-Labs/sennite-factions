@@ -200,7 +200,7 @@ public:
 
 	/** With a gun in hand, how far the player's camera moves from straight behind the hero: to the right and up, to look over its shoulder. */
 	UPROPERTY(EditDefaultsOnly, Category = "Camera")
-	FVector ShoulderView = FVector(0.0f, 60.0f, 35.0f);
+	FVector ShoulderView = FVector(0.0f, 110.0f, 70.0f);
 
 	/**
 	 * Aiming, the player looks through the hero's own eyes: the camera comes in from behind the hero to its eye height and
@@ -211,6 +211,10 @@ public:
 	 */
 	UPROPERTY(EditDefaultsOnly, Category = "Camera")
 	float AimEyesAhead = 18.0f;
+
+	/** Aiming a gun: how far over the top of the gun the view is (cm), looking down its sights. */
+	UPROPERTY(EditDefaultsOnly, Category = "Camera")
+	float AimOverGun = 6.0f;
 
 	/** How wide the player's view is, in degrees: following the hero, and aiming. */
 	UPROPERTY(EditDefaultsOnly, Category = "Camera")
@@ -229,6 +233,13 @@ public:
 	float GunSize() const;
 	/** The same for a hero's mesh anywhere, as the menu's stage holds a gun in a hero's hands. */
 	static float GunSizeFor(const USkeletalMesh* Body);
+
+	/** While building: how far above the hero the view rises (cm), and how much farther back it stands, as a share of FollowDistance. */
+	UPROPERTY(EditDefaultsOnly, Category = "Camera")
+	float BuildViewRise = 130.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Camera")
+	float BuildViewFarther = 1.35f;
 
 	/** The arm, shoulder to wrist in cm, the guns' models are the right size for; and how small and how large a gun is made for a hero. */
 	UPROPERTY(EditDefaultsOnly, Category = "Hero")

@@ -23,6 +23,7 @@
 #include "SenniteBaseEditor.h"
 #include "Animation/AnimMontage.h"
 #include "EngineUtils.h"
+#include "Engine/OverlapResult.h"
 #include "BuildingActor.h"
 #include "HealingActor.h"
 #include "AmmunitionActor.h"
@@ -214,6 +215,45 @@ void ASenniteCharacter::BuildPlacement(const FString& PieceKind, FVector& OutLoc
 		const double Rising = FVector::DotProduct(Ahead, On->GetActorForwardVector());
 		Own = FVector2D(On->GetActorLocation().X, On->GetActorLocation().Y);
 		Level = Rising > 0.5 ? Foot + Cell : Rising < -0.5 ? Foot : Foot + (Feet.Z - Foot > Cell * 0.5 ? Cell : 0.0);
+	}
+	else if (On != nullptr) {
+		// on a floor, its top; on top of a wall, the wall's top: the level of the piece stood on, wherever it was built
+		Own = FVector2D(Snap(On->GetActorLocation().X), Snap(On->GetActorLocation().Y));
+		Level = On->GetActorLocation().Z + (On->StructureType == TEXT("Wall") ? Cell : 0.0);
+	}
+	else {
+		// On the land, a piece stands on the ground it is built on, not on a level of a grid the land knows nothing
+		// of: on raised or sloping land the grid's level below the hero left most of a ramp in the ground, "a slice,
+		// and it's underground" (the owner, 2026-11-25). Its base is the highest ground under where it goes (a
+		// ramp's: under its foot, which it rises from), so the whole of it stands above the land.
+		const FVector Next = FVector(Own.X, Own.Y, Feet.Z) + Ahead * Cell;
+		const FVector Side = FRotator(0.0, FacingYaw + 90.0, 0.0).Vector();
+		TArray<FVector> Under;
+		if (PieceKind == TEXT("Wall")) {
+			const FVector Base = FVector(Own.X, Own.Y, Feet.Z) + Ahead * (Cell * 0.5);
+			Under = { Base - Side * (Cell * 0.45), Base, Base + Side * (Cell * 0.45) };
+		}
+		else if (PieceKind == TEXT("Ramp")) {
+			const FVector Foot = Next - Ahead * (Cell * 0.45);
+			Under = { Foot - Side * (Cell * 0.45), Foot, Foot + Side * (Cell * 0.45) };
+		}
+		else {
+			Under = { Next, Next + (Ahead + Side) * (Cell * 0.45), Next + (Ahead - Side) * (Cell * 0.45), Next - (Ahead + Side) * (Cell * 0.45), Next - (Ahead - Side) * (Cell * 0.45) };
+		}
+		double Ground = -TNumericLimits<double>::Max();
+		FCollisionObjectQueryParams Land;
+		Land.AddObjectTypesToQuery(ECC_WorldStatic);
+		for (const FVector& At : Under) {
+			FHitResult Hit;
+			if (GetWorld()->LineTraceSingleByObjectType(Hit, At + FVector(0.0, 0.0, Cell), At - FVector(0.0, 0.0, Cell * 2.0), Land,
+				FCollisionQueryParams(SCENE_QUERY_STAT(SennitePieceGround), false, this))) {
+				Ground = FMath::Max(Ground, Hit.ImpactPoint.Z);
+			}
+		}
+		if (Ground > -TNumericLimits<double>::Max()) {
+			// to the centimetre, so that the server and the player's own game, asking the same land, agree
+			Level = FMath::RoundToDouble(Ground);
+		}
 	}
 	// The height is the player's to pick: looking well above the horizon builds one level up; and from a piece,
 	// looking well down builds one level down. ("You should be able to pick your build height if it's coming
@@ -618,11 +658,25 @@ void ASenniteCharacter::Tick(float DeltaTime) {
 		// view closes in and opens out with it, however the aiming ended.
 		if (IsLocallyControlled() && CameraBoom != nullptr && FollowCamera != nullptr) {
 			const bool bEyes = AimedIn;
-			const FVector Beside = bEyes ? FVector(AimEyesAhead, 0.0f, 0.0f) : bFaceAim ? ShoulderView : FVector::ZeroVector;
+			// Building, the view stands higher and a little farther back: a piece put up right in front of the hero is
+			// seen over, not stared into. The owner, 2026-11-25, of building a ramp: "Blocks the view".
+			const ASennitePlayerState* Building = GetPlayerState<ASennitePlayerState>();
+			const bool bBuilding = !bEyes && Building != nullptr && Building->InBuildMode;
+			// Aiming a gun, the view is down its sights: just over the top of the gun and in line with it, so the gun is
+			// seen across the bottom of the view (the owner, 2026-11-25: "Should be aiming down the sights"). The gun is
+			// where the hero's hands hold it, so this follows any hero's size and hold.
+			float Eyes = BaseEyeHeight;
+			float InLine = 0.0f;
+			if (bEyes && CurrentWeapon != nullptr && CurrentWeapon->WeaponMesh != nullptr && !CurrentWeapon->bMelee) {
+				const FBoxSphereBounds Gun = CurrentWeapon->WeaponMesh->Bounds;
+				Eyes = float(Gun.Origin.Z + Gun.BoxExtent.Z - GetActorLocation().Z) + AimOverGun;
+				InLine = float(GetActorTransform().InverseTransformPosition(Gun.Origin).Y);
+			}
+			const FVector Beside = bEyes ? FVector(AimEyesAhead, InLine, 0.0f) : bFaceAim ? ShoulderView : FVector::ZeroVector;
 			CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, Beside, DeltaTime, bEyes ? 14.0f : 8.0f);
 			// up to the eyes whichever way the player looks: an offset in the world, not one that tips with the view
-			CameraBoom->TargetOffset = FMath::VInterpTo(CameraBoom->TargetOffset, FVector(0.0f, 0.0f, bEyes ? BaseEyeHeight : 0.0f), DeltaTime, 14.0f);
-			CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, bEyes ? 0.0f : FollowDistance, DeltaTime, 14.0f);
+			CameraBoom->TargetOffset = FMath::VInterpTo(CameraBoom->TargetOffset, FVector(0.0f, 0.0f, bEyes ? Eyes : bBuilding ? BuildViewRise : 0.0f), DeltaTime, bEyes ? 14.0f : 6.0f);
+			CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, bEyes ? 0.0f : bBuilding ? FollowDistance * BuildViewFarther : FollowDistance, DeltaTime, bEyes ? 14.0f : 6.0f);
 			FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, bEyes ? AimFieldOfView : FollowFieldOfView, DeltaTime, 14.0f));
 			// Close enough to be inside the hero, the hero is not drawn for its own player (it still casts its shadow, and
 			// everyone else sees it), and its bones are kept up to date unseen: a shot leaves the gun where the gun is.
@@ -999,6 +1053,13 @@ void ASenniteCharacter::ShootGun() {
 	// with the mining droid in hand the fire button sends it, and fires nothing
 	if (const ASennitePlayerState* Holding = GetPlayerState<ASennitePlayerState>(); Holding != nullptr && Holding->bDroidInHand) {
 		SendDroid();
+		return;
+	}
+	// Building, the button's press builds the piece at once. The BuildStructure axis reads the button once a frame,
+	// so a tap on a phone's BUILD that is down and up between two frames built nothing (2026-11-25, Galaxy A16: three
+	// taps, no ramp). Held, the axis goes on building as before; the same piece is never asked for twice (BuildStructure).
+	if (const ASennitePlayerState* Building = GetPlayerState<ASennitePlayerState>(); Building != nullptr && Building->InBuildMode) {
+		BuildStructure(1.0f);
 		return;
 	}
 	ServerFireWeapon();
@@ -1544,15 +1605,23 @@ void ASenniteCharacter::ServerBuildStructure_Implementation(TSubclassOf<ABuildin
 	FString PieceKind;
 	const int32 MaterialType = BuildingMaterialOf(StructureClass, PieceKind);
 	ASennitePlayerState* State = GetController() ? Cast<ASennitePlayerState>(GetController()->PlayerState) : nullptr;
-	if (MaterialType != INDEX_NONE && State != nullptr
-		&& State->InBuildMode && State->BuildMode == PieceKind
-		&& State->MaterialCounts.IsValidIndex(MaterialType)
-		&& State->MaterialCounts[MaterialType] >= BuildingPieceCost
-		&& IsOnBuildGrid(SpawnLocation, SpawnRotation)
-		&& FVector::Dist(SpawnLocation, GetActorLocation()) <= MaxBuildReach) {
+	// why a piece asked for is not built, said in the log: a piece refused is otherwise only a piece that never appears
+	const TCHAR* Refused = MaterialType == INDEX_NONE || State == nullptr ? TEXT("no piece of this game's")
+		: !State->InBuildMode || State->BuildMode != PieceKind ? TEXT("the player is not building that kind")
+		: !State->MaterialCounts.IsValidIndex(MaterialType) || State->MaterialCounts[MaterialType] < BuildingPieceCost ? TEXT("too little material")
+		: !IsOnBuildGrid(SpawnLocation, SpawnRotation) ? TEXT("off the build grid")
+		: FVector::Dist(SpawnLocation, GetActorLocation()) > MaxBuildReach ? TEXT("out of reach") : nullptr;
+	if (Refused != nullptr) {
+		UE_LOG(LogSenniteCharacter, Display, TEXT("A %s at %s was not built: %s"), *PieceKind, *SpawnLocation.ToCompactString(), Refused);
+	}
+	else {
 		ABuildingActor* Piece = GetWorld()->SpawnActor<ABuildingActor>(StructureClass, SpawnLocation, SpawnRotation);
 		if (Piece != nullptr) {
-			if (IsBuildingPieceBlocked(Piece) || !ABuildingActor::HeldUp(GetWorld()).Contains(Piece)) {
+			const bool bBlocked = IsBuildingPieceBlocked(Piece);
+			if (bBlocked || !ABuildingActor::HeldUp(GetWorld()).Contains(Piece)) {
+				UE_LOG(LogSenniteCharacter, Display, TEXT("A %s at %s was not built: %s (the hero's feet at %s)"), *PieceKind, *SpawnLocation.ToCompactString(),
+					bBlocked ? TEXT("a player, or a piece of its kind, is where it would go") : TEXT("nothing holds it up"),
+					*(GetActorLocation() - FVector(0.0, 0.0, GetCapsuleComponent()->GetScaledCapsuleHalfHeight())).ToCompactString());
 				Piece->Destroy();
 			}
 			else {
@@ -1582,21 +1651,34 @@ int32 ASenniteCharacter::BuildingMaterialOf(TSubclassOf<ABuildingActor> Structur
 }
 
 bool ASenniteCharacter::IsOnBuildGrid(const FVector& Location, const FRotator& Rotation) const {
-	// every piece sits on a multiple of half a grid cell, turned in quarter turns, and upright
+	// every piece sits on a multiple of half a grid cell across the land, turned in quarter turns, and upright; its
+	// height is the ground's or the piece's it stands on (BuildPlacement), on no grid
 	const auto IsMultipleOf = [](double Value, double Step) {
 		return FMath::Abs(Value - FMath::RoundHalfFromZero(Value / Step) * Step) <= 0.5;
 	};
 	const double HalfCell = BuildGridCell * 0.5;
-	return IsMultipleOf(Location.X, HalfCell) && IsMultipleOf(Location.Y, HalfCell) && IsMultipleOf(Location.Z, HalfCell)
+	return IsMultipleOf(Location.X, HalfCell) && IsMultipleOf(Location.Y, HalfCell)
 		&& IsMultipleOf(Rotation.Yaw, 90.0) && FMath::Abs(Rotation.Pitch) <= 0.5 && FMath::Abs(Rotation.Roll) <= 0.5;
 }
 
 bool ASenniteCharacter::IsBuildingPieceBlocked(const ABuildingActor* Piece) const {
-	// a piece may not be built into a player: players' trigger capsules overlap it
-	TArray<AActor*> OverlappingActors;
-	Piece->GetOverlappingActors(OverlappingActors, ASenniteCharacter::StaticClass());
-	if (OverlappingActors.Num() > 0) {
-		return true;
+	// A piece may not be built into a player: into the capsule a player's body moves as, asked of the world against
+	// the piece's own tiles. Not whatever else of a hero overlaps it (a hero's mesh, a long weapon held out ahead):
+	// those refused a ramp whose foot was half a metre from the hero, with nothing said (2026-11-25, on a phone:
+	// "Ramp's not working right").
+	for (TActorIterator<ASenniteCharacter> It(GetWorld()); It; ++It) {
+		const UCapsuleComponent* Body = It->GetCapsuleComponent();
+		if (Body == nullptr || It->IsActorBeingDestroyed()) {
+			continue;
+		}
+		TArray<FOverlapResult> Found;
+		FCollisionObjectQueryParams Pieces;
+		Pieces.AddObjectTypesToQuery(ECC_WorldDynamic);
+		GetWorld()->OverlapMultiByObjectType(Found, Body->GetComponentLocation(), Body->GetComponentQuat(), Pieces, Body->GetCollisionShape(),
+			FCollisionQueryParams(SCENE_QUERY_STAT(SennitePieceInPlayer), false));
+		if (Found.ContainsByPredicate([Piece](const FOverlapResult& Each) { return Each.GetActor() == Piece; })) {
+			return true;
+		}
 	}
 	// nor where a piece of its kind already stands. Built pieces are solid to each other, which is not an
 	// overlap, so the pieces themselves are asked.
@@ -2491,9 +2573,11 @@ void ASenniteCharacter::SeeThroughOwnEyes(bool bEyes)
 		}
 		Body->VisibilityBasedAnimTickOption = bEyes ? EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones : SeenAnimTick;
 	}
-	// the gun in the hand is its own actor, and may be put in the hand or changed while aiming: on this machine, the player's own
-	if (CurrentWeapon != nullptr && CurrentWeapon->WeaponMesh != nullptr && CurrentWeapon->WeaponMesh->IsVisible() == bThroughOwnEyes) {
-		CurrentWeapon->WeaponMesh->SetVisibility(!bThroughOwnEyes);
+	// The gun in the hand stays seen through the hero's own eyes: aiming down its sights, the player sees the top of
+	// it across the bottom of the view (the owner, 2026-11-25: "You should be able to see part of them across the top
+	// of them in the first-person view as well. Should be aiming down the sights."). Only the body is not drawn.
+	if (CurrentWeapon != nullptr && CurrentWeapon->WeaponMesh != nullptr && !CurrentWeapon->WeaponMesh->IsVisible()) {
+		CurrentWeapon->WeaponMesh->SetVisibility(true);
 	}
 }
 
@@ -2646,6 +2730,11 @@ void ASenniteCharacter::TakeCarriedInHand() {
 	const USennitePublisher* Server = Game != nullptr ? Game->GetSubsystem<USennitePublisher>() : nullptr;
 	const ASennitePlayerState* State = GetPlayerState<ASennitePlayerState>();
 	if (Server == nullptr || !Server->IsOn() || Server->Carrying.IsEmpty() || State == nullptr) {
+		return;
+	}
+	// a player who went to building first chose what is in their hands: they are not taken out of it
+	if (State->InBuildMode || EditingPiece.IsValid()) {
+		bCarriedTaken = true;
 		return;
 	}
 	int32 Type = INDEX_NONE;

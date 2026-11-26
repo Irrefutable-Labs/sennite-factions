@@ -113,20 +113,12 @@ for s in SETS:
     eal.save_loaded_asset(mi)
     log("panel " + s)
 
-# ---------------------------------------------------------------------------- the preview: a see-through blue piece
+# ---------------------------------------------------------------------------- the preview: an outline of the piece
+# made as Tools/make_piece_preview.py makes it (the same graph): each tile's edges bright, its face all but clear
 fresh(DEST + "/M_PiecePreview")
 preview = tools.create_asset("M_PiecePreview", DEST, unreal.Material, unreal.MaterialFactoryNew())
-preview.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
-preview.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
-colour = mel.create_material_expression(preview, unreal.MaterialExpressionConstant3Vector, -400, 0)
-colour.set_editor_property("constant", unreal.LinearColor(0.10, 0.45, 1.0, 1.0))
-opacity = mel.create_material_expression(preview, unreal.MaterialExpressionConstant, -400, 200)
-opacity.set_editor_property("r", 0.35)
-if not (mel.connect_material_property(colour, "", P.MP_EMISSIVE_COLOR) and mel.connect_material_property(opacity, "", P.MP_OPACITY)):
-    raise RuntimeError("preview material did not wire up")
-# the see-through tiles of a piece being edited are instances too
-preview.set_editor_property("used_with_instanced_static_meshes", True)
-mel.recompile_material(preview)
+exec(compile(open(os.path.join(ROOT, "Tools", "make_piece_preview.py")).read().split('if __name__ == "__main__":')[0], "make_piece_preview.py", "exec"))
+make_preview(preview)
 eal.save_loaded_asset(preview)
 for made in (panel, preview):
     if not made.get_editor_property("used_with_instanced_static_meshes"):
