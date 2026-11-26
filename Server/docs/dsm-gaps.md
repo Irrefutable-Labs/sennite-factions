@@ -159,7 +159,8 @@ verdict cell into their wallet. The run `test/real-dsm/prizes.test.ts` shows the
   count of free requests (4,096 here) is the only bound; past it each write waits for the player.
 - A cell lives on the storage set the wallet and the account are on. An application cannot name a
   set per faction (5.1 commits S per faction; 3 intends each faction's members to run their own
-  seats one day). For the demonstration the publisher runs the five seats, so it is one set.
+  seats one day). For the demonstration every faction's cells are on the one storage set the publisher's account is on (the beta set's five
+  nodes, or a developer's own five from `make nodes-up`).
 - The 48-hour hold on a leaver is a game rule (owner, 2026-11-12): the game does not ask a leaver's
   wallet to take back before the notice has run, and the publisher's key returns the vaults when it
   has. The leaver's own `withdraw` outcome exists throughout.
