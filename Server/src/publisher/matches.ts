@@ -19,12 +19,12 @@
 // The server records which vaults it locked. What each holds, and what the
 // cell's verdict is, is read from DSM each time it is wanted.
 
-import { encodeB32, IngressError, pb, type AppAccount } from "dsm-app-client";
+import { ask, encodeB32, IngressError, pb, type AppAccount } from "dsm-app-client";
 import { hex, unhex } from "../faction/canonical.js";
 import type { Member } from "../faction/state.js";
 import { decideVault, lockedVaults, lockVault, ownVaults, releaseVault, settling, verdict, type Party } from "../dsm/routes.js";
 import { Refused } from "./refused.js";
-import type { MatchRecord, PrizeShare, Store } from "./store.js";
+import type { MatchRecord, MinedShare, PrizeShare, Store } from "./store.js";
 import type { MatchWorld } from "./world.js";
 
 /** The outcome that pays every share back to the publisher: the match had no winner. */
@@ -32,6 +32,8 @@ export const VOID = "void";
 
 /** How long a decision is given to become the cell's verdict for good. */
 const FINAL_MS = 240_000;
+/** How long the server waits for a wallet to take up a material it is about to be given, at one look. */
+const ACCEPT_WAIT_MS = 30_000;
 /** How long a match's read is served again to the games asking what their wallets have won. */
 const WAITING_FRESH_MS = 5_000;
 
@@ -307,10 +309,107 @@ export class Matches {
   async tick(): Promise<number> {
     let left = 0;
     for (const [matchId, record] of Object.entries(this.options.store.data.matches)) {
+      // what a member mined and was not connected to be given: given once its wallet is connected
+      if ((record.mined ?? []).some((share) => !share.given && !share.giving)) await this.giveMined(matchId);
       if (record.outcome === "" || record.shares.every((s) => s.released || s.factionId === record.outcome)) continue;
       left += await this.reclaim(matchId);
     }
     return left;
+  }
+
+  /** What a match's arena holds to mine: for each material, the whole units its deposits hold between them. */
+  get mining(): Record<string, number> {
+    return { ...(this.options.world.mining ?? {}) };
+  }
+
+  /**
+   * What the players of a decided match mined, as its match server counted it: recorded once, and given
+   * to each player's wallet. `reported` is a list of { signingKey, resource, units }.
+   *
+   * Only a member the match's prize was shared among is paid, only for a material the match's arena held,
+   * and all of them together no more of a material than the arena held: what is mined comes out of the
+   * deposits, so more than they held was not mined. A report that says otherwise is refused whole. The
+   * first report recorded stands; one sent again changes nothing.
+   */
+  async mined(matchId: string, reported: unknown): Promise<MinedShare[]> {
+    const { store } = this.options;
+    const record = this.record(matchId);
+    if (record.outcome === "") throw new Refused(`match ${matchId} is not over`);
+    if (record.mined === undefined) {
+      if (!Array.isArray(reported) || reported.length > 4096) throw new Refused("what was mined is a list");
+      const members = new Set(record.shares.map((s) => s.signingKey));
+      const held = this.mining;
+      const taken = new Map<string, number>();
+      const shares = new Map<string, MinedShare>();
+      for (const each of reported as { signingKey?: unknown; resource?: unknown; units?: unknown }[]) {
+        const { signingKey, resource, units } = each ?? {};
+        if (typeof signingKey !== "string" || !members.has(signingKey)) throw new Refused("what was mined names a wallet that is no member of the match's factions");
+        if (typeof resource !== "string" || !Object.hasOwn(held, resource)) throw new Refused("what was mined names a material the match's arena did not hold");
+        if (typeof units !== "number" || !Number.isSafeInteger(units) || units <= 0) throw new Refused("what was mined is a whole number of units above zero");
+        const key = `${signingKey}:${resource}`;
+        if (shares.has(key)) throw new Refused("what was mined names one member's material twice");
+        taken.set(resource, (taken.get(resource) ?? 0) + units);
+        shares.set(key, { signingKey, resource, units, given: false });
+      }
+      for (const [resource, units] of taken) {
+        if (units > (held[resource] ?? 0)) throw new Refused(`${units} ${resource} were not mined: the match's arena held ${held[resource]}`);
+      }
+      record.mined = [...shares.values()];
+      store.save();
+    }
+    await this.giveMined(matchId);
+    return record.mined.map((share) => ({ ...share }));
+  }
+
+  /**
+   * Give each member's wallet what it mined in a match and has not been given, where that wallet is
+   * connected now. That the publisher is giving a share is written down before it gives; a give the
+   * account refused is known not to be sent, and is tried again at the next look. How many are still owed.
+   */
+  private async giveMined(matchId: string): Promise<number> {
+    const { app, store } = this.options;
+    const record = this.record(matchId);
+    const owed = (record.mined ?? []).filter((share) => !share.given && !share.giving);
+    if (owed.length === 0) return 0;
+    const connections = (await app.connections()).filter((c) => c.connected);
+    let left = 0;
+    for (const share of owed) {
+      // A wallet can have more than one connection the account still counts as connected (one from before
+      // its game was installed anew), and answers only on the one its game uses now: each in turn, newest first.
+      const theirs = connections.filter((c) => hex(c.opponent.signingKey) === share.signingKey).reverse();
+      for (const connection of theirs) {
+        try {
+          const object = await app.object(share.resource);
+          await app.wait(await app.request(connection, ask.accept(object)), { until: "answered", timeoutMs: ACCEPT_WAIT_MS });
+          share.giving = true;
+          store.save();
+          try {
+            await app.give(connection, object, String(share.units), `mined in match ${matchId}`);
+          } catch (e) {
+            delete share.giving;
+            store.save();
+            throw e;
+          }
+          share.given = true;
+          delete share.giving;
+          store.save();
+          break;
+        } catch (e) {
+          console.error(`[publisher] match ${matchId}: what a member mined was not given yet: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      if (!share.given) left += 1;
+    }
+    return left;
+  }
+
+  /** The mined shares cut off while the publisher was giving them: each is the publisher's to settle. */
+  minedCutOff(): { matchId: string; share: MinedShare }[] {
+    const found: { matchId: string; share: MinedShare }[] = [];
+    for (const [matchId, record] of Object.entries(this.options.store.data.matches)) {
+      for (const share of record.mined ?? []) if (share.giving && !share.given) found.push({ matchId, share: { ...share } });
+    }
+    return found;
   }
 
   /** A match and its prize, each share as DSM holds it now. */

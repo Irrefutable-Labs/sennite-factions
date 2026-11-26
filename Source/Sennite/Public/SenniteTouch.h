@@ -87,6 +87,8 @@ private:
 		FKey Key;
 		int32 Weapon;
 		int32 Healing;
+		/** The mining droid: in hand in a weapon's place, where the fire button sends it (SenniteMining.h). */
+		bool bDroid = false;
 	};
 
 	static const TArray<FButton>& Buttons();

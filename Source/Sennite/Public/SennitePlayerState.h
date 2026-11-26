@@ -7,6 +7,7 @@
 #include "SennitePlayerState.generated.h"
 
 class ASenniteCharacter;
+class ASenniteMiningDroid;
 
 /**
  * 
@@ -66,6 +67,33 @@ public:
 	/** In a match: the wallet's DSM identity, as people read it. */
 	UPROPERTY(Replicated)
 	FString Wallet;
+
+	/** In a match, on the server: the wallet's signing key (lowercase hex), as the publisher's server names a member by. */
+	FString SigningKey;
+
+	/**
+	 * What this player's mining droid has taken of each material this game (SenniteMining.h), in the order
+	 * of MaterialCounts. It is kept through a fall: what was mined stays mined.
+	 */
+	UPROPERTY(Replicated)
+	TArray<int32> Mined;
+
+	/** This player's mining droid, while it is out. */
+	UPROPERTY(Replicated)
+	TObjectPtr<ASenniteMiningDroid> Droid;
+
+	/** This player's mining droid was shot down: it is gone until the next game. */
+	UPROPERTY(Replicated)
+	bool bDroidDown = false;
+
+	/**
+	 * The mining droid is what this player has in hand, in a weapon's place (owner, 2026-11-22: "you should
+	 * select the droid from that menu, and then the fire button becomes your send the droid button ... You
+	 * just have it in place of a weapon"). While it is, the fire button fires nothing and sends the droid.
+	 * Taking a weapon or a healing item in hand puts it away.
+	 */
+	UPROPERTY(Replicated)
+	bool bDroidInHand = false;
 
 	/** Which hero this player is (USenniteHeroes): what they logged in with (Hero=), or chose in the lobby since. */
 	UPROPERTY(Replicated)

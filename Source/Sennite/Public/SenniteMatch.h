@@ -25,6 +25,7 @@
 #include "SenniteMatch.generated.h"
 
 class ASenniteCharacter;
+class ASennitePlayerState;
 class ASennitePlayerController;
 
 /** One faction of a match. */
@@ -189,8 +190,22 @@ public:
 	virtual void Tick(float DeltaTime) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
+	/**
+	 * A player's droid took Units of a material (SenniteMining.h), on the match server: counted for the
+	 * player's wallet, by its signing key, through whatever becomes of the player's game before the end.
+	 */
+	void Mined(const ASennitePlayerState* By, int32 Material, int32 Units);
+
 private:
 	FSenniteMatchFaction* Find(const FString& FactionId);
+
+	/** What each wallet's droid has mined of each material, by the wallet's signing key. On the match server. */
+	TMap<FString, FIntVector> MinedBy;
+	/** The publisher's server has what was mined, or there was nothing to tell it. */
+	bool bMinedTold = false;
+	/** Tell the publisher's server what was mined, once the outcome is recorded; then the match server closes. */
+	void TellMined(int32 Tries);
+	void Close();
 	double ServerSeconds() const;
 	/** Put a player's hero on their faction's base. */
 	void Spawn(ASennitePlayerController* Player);

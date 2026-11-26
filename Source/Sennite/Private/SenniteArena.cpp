@@ -1,6 +1,8 @@
 #include "SenniteArena.h"
 #include "SenniteCharacter.h"
 #include "SenniteCrate.h"
+#include "SenniteMatch.h"
+#include "SenniteMining.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -2561,6 +2563,11 @@ void ASenniteArena::Build()
 		}
 	}
 	bBuilt = true;
+	// An arena no match is played on (a game on this machine, a lobby) holds what DefaultGame.ini says to mine;
+	// a match's arena holds what the publisher says, and the match stands its deposits (ASenniteMatch::BasesPlaced).
+	if (HasAuthority() && ASenniteMatch::Find(GetWorld()) == nullptr) {
+		ASenniteDeposit::Stock(GetWorld(), GetDefault<ASenniteDeposit>()->Holds);
+	}
 	UE_LOG(LogTemp, Display, TEXT("Arena built: seed %d, %d bases, connectors: %s; %d blocks, %d craft, hash %u"), Plan.Seed, Plan.Bases.Num(), *Plan.KindsText(), Plan.Boxes.Num(), Plan.Craft.Num(), Plan.Hash);
 }
 

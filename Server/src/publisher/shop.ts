@@ -15,8 +15,8 @@
 import { ask, type AppAccount, type Connection, type Grant, type ObjectInfo, type RequestRef } from "dsm-app-client";
 import { hex } from "../faction/canonical.js";
 import { Refused } from "./refused.js";
-import type { Store } from "./store.js";
-import type { HeroForSale, ShopWorld, SkinForSale, WeaponForSale } from "./world.js";
+import type { AskedTrade, MaterialTrade, Store } from "./store.js";
+import type { HeroForSale, MaterialPack, ShopWorld, SkinForSale, WeaponForSale } from "./world.js";
 
 const VAULT_LABEL = "sennite d-bucks";
 
@@ -79,6 +79,9 @@ const COUNTED_FOR_MS = 60 * 60_000;
 const MAX_OPEN_IN_ALL_PER_WALLET = 12;
 /** An asking nobody answered in this long is forgotten: thirty days. One approved after that buys nothing. */
 const FORGOTTEN_AFTER_MS = 30 * 24 * 60 * 60_000;
+
+/** How long the shop waits for a wallet to take up an object it is about to be given, at one look. */
+const ACCEPT_WAIT_MS = 30_000;
 
 /** The first letters of the symbol an item sold is issued under, by its kind. */
 const PREFIX = { skin: "SK", hero: "HR", weapon: "WP" } as const;
@@ -154,6 +157,188 @@ export class Shop {
     const found = this.world.weapons.find((w) => w.id === weaponId.toLowerCase());
     if (found === undefined) throw new Refused(`the shop has no gun ${weaponId}`);
     return found;
+  }
+
+  /**
+   * The materials the shop trades, a pack of each: what it holds, what it costs, and what selling it back
+   * pays. `named` gives a resource's name as the publisher's account issued it.
+   */
+  packs(named: (symbol: string) => string = (symbol) => symbol): MaterialPack[] {
+    const materials = this.world.materials;
+    if (materials === undefined) return [];
+    return Object.entries(materials.price).map(([symbol, price]) => ({
+      symbol,
+      name: named(symbol),
+      units: materials.pack,
+      price: Number(price),
+      buyBack: Math.floor((Number(price) * materials.buyBackPercent) / 100),
+    }));
+  }
+
+  /** A pack of the material `symbol`, as the shop trades it now. A game may send the symbol in another case. */
+  pack(symbol: string): MaterialPack {
+    const found = this.packs().find((p) => p.symbol === symbol.toUpperCase());
+    if (found === undefined) throw new Refused(`the shop trades no ${symbol}`);
+    return found;
+  }
+
+  /**
+   * Sell a wallet a pack of a material: the wallet sends the pack's price in D-bucks, and once the
+   * publisher's account has accepted that transfer, and only then, the shop gives it the pack.
+   */
+  async buyMaterial(connection: Connection, symbol: string, say?: Say): Promise<{ ok: true; trade: MaterialTrade; given: boolean } | { ok: false; why: string }> {
+    const pack = this.pack(symbol);
+    return this.trade(connection, { way: "bought", resource: pack.symbol, units: pack.units, dbucks: pack.price, wallet: hex(connection.opponent.signingKey) }, say);
+  }
+
+  /**
+   * Buy a pack of a material back from a wallet: the wallet sends the pack, and once the publisher's
+   * account has accepted that transfer, and only then, the shop gives it what a pack sold back pays. The
+   * shop is the only buyer the game has for a material (owner, 2026-11-22).
+   */
+  async sellMaterial(connection: Connection, symbol: string, say?: Say): Promise<{ ok: true; trade: MaterialTrade; given: boolean } | { ok: false; why: string }> {
+    const pack = this.pack(symbol);
+    return this.trade(connection, { way: "sold", resource: pack.symbol, units: pack.units, dbucks: pack.buyBack, wallet: hex(connection.opponent.signingKey) }, say);
+  }
+
+  /** What a material trade asks the wallet to send, and what the shop then owes it. */
+  private halves(trade: MaterialTrade): { sent: { object: string; amount: number }; owed: { object: string; amount: number } } {
+    const [material, dbucks] = [{ object: trade.resource, amount: trade.units }, { object: this.symbol, amount: trade.dbucks }];
+    return trade.way === "bought" ? { sent: dbucks, owed: material } : { sent: material, owed: dbucks };
+  }
+
+  /**
+   * A material trade, as a sale is made: the wallet is asked to send its half, which is in no grant and
+   * waits in the wallet for the player; the trade is recorded with what it was asked at before the shop
+   * waits; and the shop gives its half only once the account reports the wallet's transfer received. A
+   * trade the player approves after the shop stopped waiting is carried out by `sweep`.
+   *
+   * `given` says whether the shop's half is given already. The account can give a wallet something only
+   * once that wallet has finished taking in what it last sent, which it does when it is next open: a
+   * trade whose first half landed and whose second cannot be given yet is owed, and `sweep` gives it.
+   */
+  private async trade(connection: Connection, trade: MaterialTrade, say: Say = () => {}): Promise<{ ok: true; trade: MaterialTrade; given: boolean } | { ok: false; why: string }> {
+    await this.settleTrades(connection);
+    const record = this.store.data.shop;
+    const lately = Date.now() - COUNTED_FOR_MS;
+    const theirs = [...Object.values(record.asked).filter((a) => a.buyer === trade.wallet), ...Object.values(record.trades).filter((t) => t.wallet === trade.wallet)];
+    const open = theirs.filter((a) => (a.at ?? Date.now()) > lately).length;
+    if (open + (this.#asking.get(trade.wallet) ?? 0) >= MAX_OPEN_PER_WALLET || theirs.length >= MAX_OPEN_IN_ALL_PER_WALLET) {
+      return { ok: false, why: "payments already wait in your DSM wallet: approve or decline them there first" };
+    }
+    const { sent } = this.halves(trade);
+    const what = trade.way === "bought" ? `${trade.units} ${trade.resource} for ${trade.dbucks} D-bucks` : `${trade.units} ${trade.resource} sold for ${trade.dbucks} D-bucks`;
+    // what the wallet shows its player under the amount it is asked to send: what it gets for it
+    const memo = trade.way === "bought" ? `${trade.units} ${trade.resource} from the shop` : `${trade.dbucks} D-bucks from the shop`;
+    this.#asking.set(trade.wallet, (this.#asking.get(trade.wallet) ?? 0) + 1);
+    let ref: RequestRef;
+    let key: string;
+    try {
+      ref = await this.app.request(connection, ask.send(sent.object, String(sent.amount), memo));
+      key = `${ref.connection}:${ref.seq}`;
+      record.trades[key] = { ...trade, connection: ref.connection, seq: String(ref.seq), at: Date.now() };
+      this.store.save();
+    } finally {
+      const left = (this.#asking.get(trade.wallet) ?? 1) - 1;
+      if (left > 0) this.#asking.set(trade.wallet, left);
+      else this.#asking.delete(trade.wallet);
+    }
+
+    const deadline = Date.now() + this.timing.waitMs;
+    for (;;) {
+      const result = await this.app.result(ref);
+      if (result.fact === "received" && result.received !== undefined) {
+        say(trade.way === "bought" ? `paid: the shop is giving you the ${trade.resource}` : `the shop has your ${trade.resource}: it is paying you`, false);
+        const done = await this.landed(connection, key, hex(result.received));
+        return done === "none" ? { ok: false, why: "that transfer has already been traded on" } : { ok: true, trade, given: done === "given" };
+      }
+      if (result.outcome === "declined" || result.outcome === "failed") {
+        delete record.trades[key];
+        this.store.save();
+        return { ok: false, why: plainly(result, `the ${sent.amount} ${sent.object === this.symbol ? "D-bucks" : sent.object} to send`) };
+      }
+      if (result.answered && result.outcome === "carried_out") say("sent: the shop is taking it in", false);
+      else say(`approve sending ${what} in your DSM wallet`, true);
+      if (Date.now() > deadline) {
+        return { ok: false, why: `${what} still waits in your DSM wallet: approve it there and it is carried out` };
+      }
+      await new Promise((resolve) => setTimeout(resolve, this.timing.pollMs));
+    }
+  }
+
+  /**
+   * The wallet's half of the trade asked under `key` landed as `transfer`: record what the shop owes and
+   * give it. `none` when that asking is no longer open, or the transfer has begun a trade already; `owed`
+   * when what the shop owes could not be given yet, and is given at a later look.
+   */
+  private async landed(connection: Connection, key: string, transfer: string): Promise<"given" | "owed" | "none"> {
+    const record = this.store.data.shop;
+    const asked: AskedTrade | undefined = record.trades[key];
+    if (asked === undefined || Object.hasOwn(record.traded, transfer)) {
+      delete record.trades[key];
+      this.store.save();
+      return "none";
+    }
+    if (hex(connection.opponent.signingKey) !== asked.wallet) throw new Error("the connection is not the wallet that was asked to trade");
+    // The asking is closed, the transfer marked used and what is owed recorded, before anything is awaited.
+    delete record.trades[key];
+    record.traded[transfer] = "";
+    record.owed[transfer] = { way: asked.way, resource: asked.resource, units: asked.units, dbucks: asked.dbucks, wallet: asked.wallet, connection: asked.connection };
+    this.store.save();
+    try {
+      await this.pay(connection, transfer);
+    } catch (e) {
+      console.error(`[publisher] what a material trade owes is not given yet (${asked.resource} ${asked.way}): ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return Object.hasOwn(record.owed, transfer) ? "owed" : "given";
+  }
+
+  /**
+   * Give a wallet what a material trade owes it, once. That the shop is giving is written down before it
+   * gives; a give the account refused is known not to be sent, and is tried again; a trade found already
+   * marked as being given is left for the publisher (OwedTrade).
+   */
+  private async pay(connection: Connection, transfer: string): Promise<void> {
+    const record = this.store.data.shop;
+    const trade = record.owed[transfer];
+    if (trade === undefined) throw new Error(`no trade is owed for transfer ${transfer}`);
+    if (hex(connection.opponent.signingKey) !== trade.wallet) throw new Error("the connection is not the wallet the trade is owed to");
+    if (trade.giving || this.#finishing.has(transfer)) return;
+    this.#finishing.add(transfer);
+    try {
+      const { owed } = this.halves(trade);
+      const info = await this.app.object(owed.object);
+      // the wallet takes the object up if it does not hold it yet; one that does not answer soon is asked again at the next look
+      await this.app.wait(await this.app.request(connection, ask.accept(info)), { until: "answered", timeoutMs: ACCEPT_WAIT_MS });
+      trade.giving = true;
+      this.store.save();
+      try {
+        await this.app.give(connection, info, String(owed.amount));
+      } catch (e) {
+        delete trade.giving;
+        this.store.save();
+        throw e;
+      }
+      delete record.owed[transfer];
+      this.store.save();
+    } finally {
+      this.#finishing.delete(transfer);
+    }
+  }
+
+  /** Give this wallet what every material trade of its own still owes it. */
+  async settleTrades(connection: Connection): Promise<void> {
+    const wallet = hex(connection.opponent.signingKey);
+    for (const [transfer, trade] of Object.entries(this.store.data.shop.owed)) {
+      if (trade.wallet === wallet) await this.pay(connection, transfer);
+    }
+  }
+
+  /** The material trades cut off while the shop was giving: each is the publisher's to settle. */
+  cutOff(): { transfer: string; trade: MaterialTrade }[] {
+    return Object.entries(this.store.data.shop.owed)
+      .filter(([, trade]) => trade.giving)
+      .map(([transfer, { way, resource, units, dbucks, wallet }]) => ({ transfer, trade: { way, resource, units, dbucks, wallet } }));
   }
 
   /** What the vault would give in D-bucks for `era` now: information from the vault's public state, never a fact. */
@@ -247,7 +432,7 @@ export class Shop {
     // cannot both take the last one.
     const buyer = hex(connection.opponent.signingKey);
     const lately = Date.now() - COUNTED_FOR_MS;
-    const theirs = Object.values(this.store.data.shop.asked).filter((a) => a.buyer === buyer);
+    const theirs = [...Object.values(this.store.data.shop.asked).filter((a) => a.buyer === buyer), ...Object.values(this.store.data.shop.trades).filter((t) => t.wallet === buyer)];
     const open = theirs.filter((a) => (a.at ?? Date.now()) > lately).length;
     // and, however old they are, a wallet has only so many open in all: they do not pile up over the days
     if (open + (this.#asking.get(buyer) ?? 0) >= MAX_OPEN_PER_WALLET || theirs.length >= MAX_OPEN_IN_ALL_PER_WALLET) {
@@ -403,7 +588,47 @@ export class Shop {
           console.error(`[publisher] the shop's look at what it asked (${asked.kind} ${asked.itemId}): ${e instanceof Error ? e.message : String(e)}`);
         }
       }
-      const connections = Object.keys(record.pending).length > 0 ? await this.app.connections() : [];
+      for (const [key, asked] of Object.entries(record.trades)) {
+        try {
+          const result = await this.app.result({ connection: asked.connection, seq: BigInt(asked.seq) });
+          const ended = (): void => {
+            delete record.trades[key];
+            this.store.save();
+          };
+          if (result.fact === "received" && result.received !== undefined) {
+            await this.landed(await this.app.connection(asked.connection), key, hex(result.received));
+            continue;
+          }
+          if (result.outcome === "declined" || result.outcome === "failed") {
+            ended();
+            continue;
+          }
+          if (asked.at === undefined) {
+            asked.at = Date.now();
+            this.store.save();
+          }
+          const connection = await this.app.connection(asked.connection);
+          if (!connection.connected || Date.now() - asked.at > FORGOTTEN_AFTER_MS) ended();
+        } catch (e) {
+          console.error(`[publisher] the shop's look at a material trade it asked (${asked.resource} ${asked.way}): ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      const connections = Object.keys(record.pending).length + Object.keys(record.owed).length > 0 ? await this.app.connections() : [];
+      for (const [transfer, trade] of Object.entries(record.owed)) {
+        if (trade.giving) continue;
+        // over the connection the trade was asked on; a trade recorded without one, over each of the wallet's
+        // connections in turn, the newest first: the wallet answers only on the one its game uses now
+        const theirs = connections.filter((c) => c.connected && hex(c.opponent.signingKey) === trade.wallet);
+        const over = trade.connection !== undefined ? theirs.filter((c) => c.id === trade.connection) : [...theirs].reverse();
+        for (const connection of over) {
+          try {
+            await this.pay(connection, transfer);
+          } catch (e) {
+            console.error(`[publisher] giving what a material trade owes (${trade.resource} ${trade.way}): ${e instanceof Error ? e.message : String(e)}`);
+          }
+          if (!Object.hasOwn(record.owed, transfer) || record.owed[transfer]?.giving) break;
+        }
+      }
       for (const [payment, sale] of Object.entries(record.pending)) {
         const connection = connections.find((c) => c.connected && hex(c.opponent.signingKey) === sale.buyer);
         if (connection === undefined || this.#finishing.has(payment)) continue;

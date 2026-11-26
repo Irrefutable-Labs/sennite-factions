@@ -4,6 +4,7 @@
 #include "Engine/Canvas.h"
 #include "Blueprint/UserWidget.h"
 #include "Engine/Engine.h"
+#include "EngineUtils.h"
 #include "CanvasItem.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
@@ -11,6 +12,7 @@
 #include "SenniteCharacter.h"
 #include "SenniteCrate.h"
 #include "SenniteMatch.h"
+#include "SenniteMining.h"
 #include "SennitePlayerState.h"
 #include "SennitePlayerController.h"
 #include "SenniteTouch.h"
@@ -218,8 +220,17 @@ void ASenniteHUD::DrawStatus()
 	Bar(BarX, H - 50.0f * S, BarW, BarH, Now.Health / 100.0f, FLinearColor(0.08f, 0.5f, 0.08f));
 	Label(TEXT("health"), FString::FromInt(FMath::RoundToInt(Now.Health)), BarX + BarW + 10.0f * S, H - 54.0f * S, 14, White);
 
-	// bottom right: the weapon in hand, the rounds in it, and the rounds carried for it
-	if (Now.bHoldingWeapon) {
+	// bottom right: the weapon in hand, the rounds in it, and the rounds carried for it; or the mining droid, in its place
+	const ASennitePlayerState* InHand = PlayerOwner ? Cast<ASennitePlayerState>(PlayerOwner->PlayerState) : nullptr;
+	const bool bDroidInHand = InHand != nullptr && InHand->bDroidInHand;
+	if (bDroidInHand) {
+		const float DroidX = W - 210.0f * S;
+		HudPlate(Canvas, DroidX - 12.0f * S, H - 110.0f * S, 150.0f * S, 86.0f * S);
+		Label(TEXT("weapon"), TEXT("IN HAND"), DroidX, H - 104.0f * S, 12, Dim);
+		Label(TEXT("droidinhand"), TEXT("MINING"), DroidX, H - 84.0f * S, 20, White);
+		Label(TEXT("droidinhand2"), TEXT("DROID"), DroidX, H - 58.0f * S, 20, White);
+	}
+	if (Now.bHoldingWeapon && !bDroidInHand) {
 		// a gun by its own name (AWeaponActor::DisplayName)
 		const ASenniteCharacter* Armed = Cast<ASenniteCharacter>(GetOwningPawn());
 		const FString Named = Now.WeaponType == 0 ? FString(TEXT("OWN WEAPON"))
@@ -261,6 +272,21 @@ void ASenniteHUD::DrawStatus()
 			Now.Materials[Material] > 0 ? White : Dim);
 	}
 
+	// over the materials: the player's mining droid, and what it has mined this game
+	if (const ASennitePlayerState* Mining = PlayerOwner ? Cast<ASennitePlayerState>(PlayerOwner->PlayerState) : nullptr) {
+		const FString Droid = ASenniteMiningDroid::Status(Mining);
+		int32 MinedAll = 0;
+		for (const int32 Each : Mining->Mined) {
+			MinedAll += Each;
+		}
+		const FString Line = MinedAll > 0 ? FString::Printf(TEXT("%s  +%d"), *Droid, MinedAll) : Droid;
+		const float DroidW = SenniteUi::Measure(Line, 11, S).X + 24.0f * S;
+		// above the materials and what build mode adds over them: under them a phone has the ATTACK button
+		const float DroidY = MatY - 76.0f * S;
+		HudPlate(Canvas, W - 16.0f * S - DroidW, DroidY, DroidW, 26.0f * S);
+		Label(TEXT("droid"), Line, W - 4.0f * S - DroidW, DroidY + 6.0f * S, 11, Mining->bDroidDown ? Dim : White);
+	}
+
 	// top right: players left and this player's kills
 	HudPlate(Canvas, W - 222.0f * S, 16.0f * S, 198.0f * S, 34.0f * S);
 	Label(TEXT("alive"), FString::Printf(TEXT("%d ALIVE"), Now.Alive), W - 210.0f * S, 24.0f * S, 14, White);
@@ -289,6 +315,40 @@ void ASenniteHUD::DrawMatch()
 		if (ASenniteCrate::Nearest(GetWorld(), Hero->GetActorLocation(), Rules->Reach + Rules->Across, true) != nullptr) {
 			HudPlate(Canvas, W * 0.5f - 110.0f * S, H * 0.62f, 220.0f * S, 34.0f * S);
 			Label(TEXT("crate"), TEXT("E   OPEN THE CRATE"), W * 0.5f - 92.0f * S, H * 0.62f + 8.0f * S, 14, White);
+		}
+	}
+	// The deposits that hold something, marked where they stand: a tree or a rock that is one looks as any other.
+	// The one the player aims at says how to send the droid to it.
+	if (const ASenniteCharacter* Miner = Cast<ASenniteCharacter>(GetOwningPawn())) {
+		const ASenniteMiningDroid* Rules = GetDefault<ASenniteMiningDroid>();
+		FVector Eye;
+		FRotator Look;
+		PlayerOwner->GetPlayerViewPoint(Eye, Look);
+		const ASenniteDeposit* Aimed = ASenniteDeposit::Aimed(GetWorld(), Eye, Look.Vector(), Rules->SendRange, Rules->SendOff);
+		for (TActorIterator<ASenniteDeposit> It(GetWorld()); It; ++It) {
+			if (It->Left <= 0 || FVector::Dist(It->GetActorLocation(), Eye) > Rules->SendRange) {
+				continue;
+			}
+			const FVector On = Canvas->Project(It->GetActorLocation() + FVector(0.0, 0.0, It->Height() + 60.0));
+			if (On.Z <= 0.0 || On.X < 0.0 || On.X > W || On.Y < 0.0 || On.Y > H) {
+				continue;
+			}
+			const bool bAimed = *It == Aimed;
+			const FString Says = FString::Printf(TEXT("%s %d"), ASenniteDeposit::NameOf(It->Material), It->Left);
+			const float SaysW = SenniteUi::Measure(Says, bAimed ? 13 : 11, S).X + 20.0f * S;
+			HudPlate(Canvas, On.X - SaysW * 0.5f, On.Y - 26.0f * S, SaysW, (bAimed ? 26.0f : 22.0f) * S);
+			Label(*FString::Printf(TEXT("deposit%d"), It->Material), Says, On.X - SaysW * 0.5f + 10.0f * S, On.Y - 21.0f * S, bAimed ? 13 : 11, White);
+		}
+		const ASennitePlayerState* Mining = Miner->GetPlayerState<ASennitePlayerState>();
+		if (Aimed != nullptr && Mining != nullptr && !Mining->bDroidDown) {
+			// with the droid in hand the fire button sends it; without, how to take it in hand: on the wheel, or its key
+			ASennitePlayerController* Touching = Cast<ASennitePlayerController>(PlayerOwner);
+			const bool bTouch = Touching != nullptr && Touching->GetTouchControls() != nullptr;
+			const FString How = Mining->bDroidInHand ? FString(bTouch ? TEXT("SEND   YOUR MINING DROID GOES TO MINE IT") : TEXT("FIRE   YOUR MINING DROID GOES TO MINE IT"))
+				: FString(bTouch ? TEXT("TAKE YOUR MINING DROID FROM THE WHEEL TO MINE IT") : TEXT("T   TAKE YOUR MINING DROID IN HAND TO MINE IT"));
+			const float HowW = SenniteUi::Measure(How, 14, S).X + 36.0f * S;
+			HudPlate(Canvas, W * 0.5f - HowW * 0.5f, H * 0.56f, HowW, 34.0f * S);
+			Label(TEXT("senddroid"), How, W * 0.5f - HowW * 0.5f + 18.0f * S, H * 0.56f + 8.0f * S, 14, White);
 		}
 	}
 	// just opened a crate: what it gave

@@ -1,6 +1,7 @@
 {
   "currency": { "symbol": "DBUCKS", "name": "D-bucks", "supply": "100000000" },
   "vault": { "era": "10", "dbucks": "10000", "feeBps": 100 },
+  "materials": { "pack": 50, "price": { "WOOD": "50", "STONE": "50", "STEEL": "50" }, "buyBackPercent": 75 },
   "skins": [
     { "id": "magma", "name": "Dekker Magma", "price": "800" },
     { "id": "energized", "name": "Dekker Energized", "price": "800" },

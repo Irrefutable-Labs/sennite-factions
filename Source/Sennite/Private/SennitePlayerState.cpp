@@ -4,6 +4,7 @@
 #include "SenniteCharacter.h"
 #include "SenniteHeroes.h"
 #include "SenniteMenu.h"
+#include "SenniteMining.h"
 #include "SennitePublisher.h"
 #include "WeaponActor.h"
 #include "Engine/GameInstance.h"
@@ -34,6 +35,7 @@ ASennitePlayerState::ASennitePlayerState() {
 	MaterialCounts.Add(0); // wood
 	MaterialCounts.Add(0); // stone
 	MaterialCounts.Add(0); // steel
+	Mined.Init(0, ASenniteDeposit::Kinds);
 	CurrentWeapon = 0;
 	CurrentHealingItem = -1;
 	HealingItemCounts.Add(0);
@@ -71,6 +73,10 @@ void ASennitePlayerState::GetLifetimeReplicatedProps(TArray< FLifetimeProperty >
 	DOREPLIFETIME(ASennitePlayerState, KillCount);
 	DOREPLIFETIME(ASennitePlayerState, FactionId);
 	DOREPLIFETIME(ASennitePlayerState, Wallet);
+	DOREPLIFETIME(ASennitePlayerState, Mined);
+	DOREPLIFETIME(ASennitePlayerState, Droid);
+	DOREPLIFETIME(ASennitePlayerState, bDroidDown);
+	DOREPLIFETIME(ASennitePlayerState, bDroidInHand);
 	DOREPLIFETIME(ASennitePlayerState, HeroId);
 	DOREPLIFETIME_CONDITION(ASennitePlayerState, HeroAudience, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(ASennitePlayerState, GunsOwned, COND_OwnerOnly);
@@ -204,6 +210,8 @@ void ASennitePlayerState::CopyProperties(APlayerState* PlayerState) {
 }
 
 void ASennitePlayerState::StartOver() {
+	// a hero starts with its own weapon in hand, not the droid
+	bDroidInHand = false;
 	InBuildMode = false;
 	BuildMode = FString("None");
 	HoldingWeapon = true;

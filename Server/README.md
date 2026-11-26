@@ -142,11 +142,34 @@ reads its bases, lets players in and decides it with the same secret, which also
   locks only what is not locked yet.
 - `POST /matches/<id>/outcome` with `{"outcome": "<faction id>"}` or `"void"` decides it.
 - `GET /matches/<id>` reads the prize, share by share, as DSM holds it.
+- `GET /matches/<id>/bases` gives what the match is assembled from: each faction's parcel and built
+  structures, and `mining`, the whole units of each material the arena's deposits hold between them
+  (`world/matches.json`).
+- `POST /matches/<id>/mined` with `{"mined": [{"signingKey", "resource", "units"}, ...]}`, once the
+  match is decided, says what each member's mining droid took. The publisher's account gives each
+  member's wallet that much, out of its own holdings: at once to a wallet that is connected, and to
+  the others when they next are. Only a member the prize was shared among is paid, only for a material
+  the arena held, and all of them together no more of it than the arena held; a report that says
+  otherwise is refused whole. The first report recorded stands.
 
 The match server is the game itself: it decides a match by the game's own rules (first to the kills
 to win, the time, a base wiped) and says so here when the match ends.
 
 A player's game reads what its wallet has won and not collected at `GET /players/me/prizes`.
+
+## Materials in the shop
+
+The shop sells wood, stone and steel in packs and buys them back (`world/shop.json`, `materials`: how many
+units a pack holds, a pack's price in D-bucks for each material, and `buyBackPercent`, what a pack sold
+back pays in hundredths of that price; always under 100, so buying and selling in a circle only loses).
+`GET /shop` lists the packs. `POST /shop/materials` with `{"symbol": "WOOD", "way": "buy"}` asks the
+wallet to send the pack's price in D-bucks, and gives it the pack once the publisher's account has that
+transfer; with `"way": "sell"` it asks the wallet to send the pack, and pays it once the account has it.
+Either way the wallet's half is in no grant and waits in the wallet for the player, as every payment
+does; one approved after the game stopped waiting is carried out when it lands. What a trade was asked
+at is kept with it. The shop gives its half once: that it is giving is written down before it gives, and
+a trade found cut off at that point is left for the publisher, not given again (`Shop.cutOff`, and
+`Matches.minedCutOff` for what was mined).
 
 A match is played in an arena assembled for it (spec 10.3), not on the persistent map:
 

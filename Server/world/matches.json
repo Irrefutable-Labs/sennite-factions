@@ -1,3 +1,12 @@
 {
-  "prize": { "WOOD": 60, "STONE": 40, "STEEL": 25 }
+  "prize": {
+    "WOOD": 60,
+    "STONE": 40,
+    "STEEL": 25
+  },
+  "mining": {
+    "WOOD": 120,
+    "STONE": 80,
+    "STEEL": 50
+  }
 }

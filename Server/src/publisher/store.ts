@@ -115,6 +115,47 @@ export interface PendingSale {
 }
 
 /**
+ * A trade of a material with the shop: `bought` is a pack the wallet pays D-bucks for, `sold` is a pack the
+ * wallet sends the shop for D-bucks. What it was asked at is kept with it: a price changed since then does
+ * not change a trade already asked.
+ */
+export interface MaterialTrade {
+  way: "bought" | "sold";
+  /** The material's symbol. */
+  resource: string;
+  /** Whole units of the material. */
+  units: number;
+  /** Whole D-bucks: what the wallet pays for a pack bought, what the shop pays for a pack sold. */
+  dbucks: number;
+  /** The wallet: its signing key (lowercase hex). */
+  wallet: string;
+}
+
+/** A material trade the shop asked a wallet for and has not seen the end of, as an asked sale is kept. */
+export interface AskedTrade extends MaterialTrade {
+  connection: string;
+  seq: string;
+  at?: number;
+}
+
+/**
+ * A material trade whose first half landed (the wallet's D-bucks, or its material) and whose second half
+ * is owed. `giving` is set, and written down, before the shop gives what it owes, and the trade is taken
+ * off once that is given. A trade found here with `giving` set was cut off while the shop was giving: the
+ * account cannot say whether that give was sent, and a material or a D-buck given twice is twice in
+ * circulation, so the shop does not give it again by itself. It stays here for the publisher to settle.
+ */
+export interface OwedTrade extends MaterialTrade {
+  /**
+   * The connection the trade was asked over (Base32 Crockford): what is owed is given over it. A wallet
+   * can have more than one connection to the game that the account still counts as connected (one from
+   * before the game was installed anew), and only the one its game uses now is answered.
+   */
+  connection?: string;
+  giving?: boolean;
+}
+
+/**
  * A payment the shop asked a wallet for and has not seen the end of: it waits
  * in the wallet for the player, who may approve it at any time. Kept until the
  * payment lands (the sale then becomes pending), or it is declined or fails.
@@ -147,6 +188,12 @@ export interface ShopRecord {
   pending: Record<string, PendingSale>;
   /** "connection:seq" of a payment the shop asked a wallet for -> what it is for, until the wallet's answer is seen. */
   asked: Record<string, AskedSale>;
+  /** "connection:seq" of what a material trade asked a wallet to send -> the trade, until the wallet's answer is seen. */
+  trades: Record<string, AskedTrade>;
+  /** landed transfer (lowercase hex of its id) -> the material trade it began, until what the shop owes is given. */
+  owed: Record<string, OwedTrade>;
+  /** landed transfer -> "" : every transfer a material trade has been begun on. A transfer begins one trade, once. */
+  traded: Record<string, string>;
 }
 
 /** One member's share of a match's prize (spec 10.6): an escrow vault the publisher's account locks. */
@@ -165,6 +212,21 @@ export interface PrizeShare {
   released: boolean;
 }
 
+/**
+ * What one member's mining droid took of one material in a match, which the publisher gives that member's
+ * wallet (owner, 2026-11-22). `giving` is set, and written down, before the publisher gives it, and `given`
+ * once it has: one found with `giving` set and not `given` was cut off while it was being given, and is
+ * not given again by the server (the account cannot say whether that give was sent).
+ */
+export interface MinedShare {
+  /** The member: its signing key (lowercase hex), as the match's shares name it. */
+  signingKey: string;
+  resource: string;
+  units: number;
+  giving?: boolean;
+  given: boolean;
+}
+
 /** A match and its prize, as the publisher's server opened it. What each vault holds is read from DSM. */
 export interface MatchRecord {
   /** The factions in the match: each is an outcome of every vault. */
@@ -177,6 +239,8 @@ export interface MatchRecord {
   /** The outcome the cell's final verdict names: a faction, or `void`; empty until the match is decided. */
   outcome: string;
   openedAt: number;
+  /** What the match's players mined, as the match server reported it once the match was over; none until it has. */
+  mined?: MinedShare[];
 }
 
 export interface StoreData {
@@ -194,7 +258,7 @@ export interface StoreData {
   matches: Record<string, MatchRecord>;
 }
 
-const empty = (): StoreData => ({ asked: {}, factions: {}, players: {}, shop: { serial: 0, skins: {}, heroes: {}, weapons: {}, paid: {}, pending: {}, asked: {} }, matches: {} });
+const empty = (): StoreData => ({ asked: {}, factions: {}, players: {}, shop: { serial: 0, skins: {}, heroes: {}, weapons: {}, paid: {}, pending: {}, asked: {}, trades: {}, owed: {}, traded: {} }, matches: {} });
 
 export class Store {
   readonly data: StoreData;

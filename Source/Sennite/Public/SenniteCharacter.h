@@ -582,6 +582,26 @@ protected:
 	UFUNCTION(Client, Reliable)
 	void ClientCrateGave(int32 NewGuns, int32 InStore, bool bRounds, int32 Bandages, int32 Potions);
 
+	/** Take the mining droid in hand, in a weapon's place: the fire button then sends it (SenniteMining.h). */
+	void HoldDroid();
+
+	UFUNCTION(Server, Reliable)
+	void ServerHoldDroid();
+
+	/**
+	 * Send this player's mining droid to the deposit the player aims at: the first time, it is taken out.
+	 * What the fire button does while the droid is in hand. The player's game says where it looks from and
+	 * along what line.
+	 */
+	void SendDroid();
+
+	UFUNCTION(Server, Reliable)
+	void ServerSendDroid(FVector_NetQuantize Eye, FVector_NetQuantizeNormal Toward);
+
+	/** What became of sending the droid, for the HUD to say. */
+	UFUNCTION(Client, Reliable)
+	void ClientDroidSaid(const FString& Said);
+
 
 	/*UFUNCTION(Server, WithValidation)
 	void ServerSetAnimInstance(UThirdPersonAnimInstance* AnimInstance);*/

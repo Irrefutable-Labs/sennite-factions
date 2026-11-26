@@ -97,6 +97,8 @@ const TArray<USenniteTouchControls::FWheelPlace>& USenniteTouchControls::WheelPl
 		{ TEXT("KATANA"), EKeys::Nine, 6, INDEX_NONE },
 		{ TEXT("BANDAGE"), EKeys::Four, INDEX_NONE, 0 },
 		{ TEXT("POTION"), EKeys::Five, INDEX_NONE, 1 },
+		// the mining droid: in hand as a weapon is, and the fire button sends it to the deposit the player aims at
+		{ TEXT("DROID"), EKeys::T, INDEX_NONE, INDEX_NONE, true },
 	};
 	return All;
 }
@@ -235,6 +237,10 @@ bool USenniteTouchControls::Has(const FWheelPlace& Place) const
 	if (State == nullptr) {
 		return false;
 	}
+	if (Place.bDroid) {
+		// a droid shot down is gone until the next game: it is not on the wheel
+		return !State->bDroidDown && Controller->GetPawn() != nullptr;
+	}
 	if (Place.Healing != INDEX_NONE) {
 		return State->HealingItemCounts.IsValidIndex(Place.Healing) && State->HealingItemCounts[Place.Healing] > 0;
 	}
@@ -248,6 +254,10 @@ bool USenniteTouchControls::InHand(const FWheelPlace& Place) const
 	const ASennitePlayerState* State = Controller ? Controller->GetPlayerState<ASennitePlayerState>() : nullptr;
 	if (Hero == nullptr || State == nullptr || State->InBuildMode) {
 		return false;
+	}
+	// with the droid in hand, nothing else is
+	if (Place.bDroid || State->bDroidInHand) {
+		return Place.bDroid && State->bDroidInHand;
 	}
 	if (Place.Healing != INDEX_NONE) {
 		return Hero->CurrentHealingItem != nullptr && Hero->CurrentHealingItem->HealingType == Place.Healing;
@@ -384,6 +394,10 @@ FString USenniteTouchControls::LabelOf(const FButton& Button) const
 	if (Button.Key == EKeys::LeftMouseButton && Hero != nullptr) {
 		if (bBuilding) {
 			return TEXT("BUILD");
+		}
+		if (State != nullptr && State->bDroidInHand) {
+			// the mining droid in hand: the button sends it
+			return TEXT("SEND");
 		}
 		if (Hero->CurrentHealingItem != nullptr) {
 			return TEXT("USE");

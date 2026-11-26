@@ -9,6 +9,7 @@
 #include "SennitePlayerState.h"
 #include "SenniteHUD.h"
 #include "SenniteMatch.h"
+#include "SenniteMining.h"
 #include "SenniteStructure.h"
 #include "StormActor.h"
 #include "SennitePlayerController.h"
@@ -193,6 +194,11 @@ bool AProjectileActor::Land(AActor* OtherActor, float Damage, int32 Kind, ASenni
 		}
 		// the piece stops the bullet whether the shot counts on it or not (ABuildingActor::TakeHit)
 		Piece->TakeHit(Damage, Shooter);
+		return true;
+	}
+	if (ASenniteMiningDroid* Droid = Cast<ASenniteMiningDroid>(OtherActor)) {
+		// a mining droid stops the bullet, and is shot down by those it is not safe from
+		Droid->TakeHit(Damage, Shooter);
 		return true;
 	}
 	if (ASenniteStructure* Structure = Cast<ASenniteStructure>(OtherActor)) {
