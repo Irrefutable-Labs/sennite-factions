@@ -66,4 +66,10 @@ fi
 echo "==> check"
 sleep 5
 "${SSH[@]}" 'cd /opt/sennite && sudo docker compose -p sennite ps && sudo docker compose -p sennite logs --tail 15 publisher'
+for i in $(seq 1 30); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' "https://sennite.$HOST.sslip.io/shop" || true)
+  [[ "$code" == 200 ]] && break
+  sleep 5
+done
+[[ "$code" == 200 ]] || { echo "https://sennite.$HOST.sslip.io/shop answers $code, not 200: see /opt/https (Caddy) and the publisher's logs" >&2; exit 1; }
 echo "publisher: https://sennite.$HOST.sslip.io   wallet relay: https://$HOST:8445"
