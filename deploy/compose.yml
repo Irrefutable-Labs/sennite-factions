@@ -1,7 +1,7 @@
 # Sennite: Factions, the publisher's side, on the games host (dsm-games-1, 148.113.137.67): the publisher's own
 # DSM account (dsm-app-host) and the publisher's server (Server/). The shared Caddy in /opt/https serves the
 # server at https://sennite.148.113.137.67.sslip.io; wallets reach the account's relay at https://148.113.137.67:8445.
-# The ingress (127.0.0.1:8787) and the server's own port (127.0.0.1:8790) stay on the host.
+# The ingress (127.0.0.1:8788) and the server's own port (127.0.0.1:8790) stay on the host.
 # Use from /opt/sennite: sudo docker compose -p sennite up -d
 services:
   account:
@@ -26,7 +26,7 @@ services:
       - --env-config
       - /network/dsm_env_config.toml
       - --game-bind
-      - 127.0.0.1:8787
+      - 127.0.0.1:8788
       - --relay-bind
       - 0.0.0.0:8445
       - --relay-endpoint
@@ -47,7 +47,7 @@ services:
     depends_on:
       account: {condition: service_started}
     environment:
-      DSM_APP_HOST: http://127.0.0.1:8787
+      DSM_APP_HOST: http://127.0.0.1:8788
       DSM_APP_HOST_SECRET_FILE: /opt/sennite/ingress/ingress-token
       DSM_ENV_CONFIG: /network/dsm_env_config.toml
       SENNITE_DATA_DIR: /opt/sennite/server
